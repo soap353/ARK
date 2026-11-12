@@ -15,6 +15,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"ark/internal/ai"
 	"ark/internal/docker"
 	"ark/internal/jobs"
 	"ark/internal/web"
@@ -215,9 +216,11 @@ func runServer(args []string) {
 	}
 
 	// Initialize SQLite-backed Job Queue Manager
+	_ = ai.EnsureSchema(context.Background(), db)
 	jobStore := jobs.NewJobStore(db)
 	_ = jobStore.ResetStaleRunning(context.Background())
 	queueMgr := jobs.NewQueueManager(jobStore, jobs.DefaultQueueConfig())
+	queueMgr.RegisterRunner(jobs.TypeIndex, &ai.IndexJobRunner{DB: db, QdrantURL: "http://127.0.0.1:6333"})
 	queueMgr.Start(context.Background())
 	defer queueMgr.Stop()
 	webServer.SetQueueManager(queueMgr)

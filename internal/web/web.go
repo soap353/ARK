@@ -15,10 +15,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"ark/internal/ai"
 	"ark/internal/apps"
 	"ark/internal/docker"
 	"ark/internal/jobs"
 	"ark/internal/storage"
+	"ark/internal/system"
 )
 
 //go:embed templates/* static/*
@@ -56,6 +58,30 @@ type AppView struct {
 	OpenURL     string
 }
 
+// SystemView holds formatted host telemetry for rendering on /system
+type SystemView struct {
+	CPUPercent  float64
+	RAMPercent  float64
+	RAMUsedGB   string
+	RAMTotalGB  string
+	DiskPercent float64
+	DiskFreeGB  uint64
+	DiskTotalGB uint64
+	Hostname    string
+	OS          string
+	UptimeText  string
+}
+
+// ContainerView represents an Ark container on /system
+type ContainerView struct {
+	AppID      string
+	Name       string
+	Image      string
+	Status     string
+	CPUText    string
+	MemoryText string
+}
+
 // PageData carries standard context for HTML templates
 type PageData struct {
 	Title              string
@@ -70,6 +96,12 @@ type PageData struct {
 	AvailableApps      []AppView
 	AIConnected        bool
 	HasActiveJobs      bool
+	Settings           map[string]string
+	RAGDocs            []ai.RAGDocument
+	SystemMetrics      *SystemView
+	Containers         []ContainerView
+	DockerOnline       bool
+	FlashMsg           string
 }
 
 // Server handles Ark web UI and API routing
@@ -91,6 +123,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		"apps.html",
 		"ask.html",
 		"jobs.html",
+		"system.html",
 		"settings.html",
 	}
 
@@ -147,7 +180,11 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/ask", s.handleAsk)
 	mux.HandleFunc("/jobs", s.handleJobs)
+	mux.HandleFunc("/system", s.handleSystem)
 	mux.HandleFunc("/settings", s.handleSettings)
+	mux.HandleFunc("/settings/general", s.handleSettingsGeneral)
+	mux.HandleFunc("/settings/ai", s.handleSettingsAI)
+	mux.HandleFunc("/settings/downloads", s.handleSettingsDownloads)
 
 	// API endpoints
 	mux.HandleFunc("/api/jobs", s.handleAPIJobs)
@@ -158,6 +195,15 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
 	mux.HandleFunc("/api/apps/stop", s.handleAPIAppStop)
 	mux.HandleFunc("/api/apps/uninstall", s.handleAPIAppUninstall)
+	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
+	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
+	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
+	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
+	mux.HandleFunc("/api/ai/test", s.handleAPIAITest)
+	mux.HandleFunc("/api/ai/chat", s.handleAPIAIChat)
+	mux.HandleFunc("/api/ai/index", s.handleAPIAIIndex)
+	mux.HandleFunc("/api/ai/index-article", s.handleAPIAIIndexArticle)
+	mux.HandleFunc("/api/ai/knowledge/remove", s.handleAPIAIKnowledgeRemove)
 
 	// App reverse proxy
 	if s.proxy != nil {
@@ -239,15 +285,14 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	var aiURL string
-	if s.db != nil {
-		_ = s.db.QueryRow("SELECT value FROM settings WHERE key = 'ai_server_url'").Scan(&aiURL)
-	}
+	settingsMap := s.fetchSettings()
+	ragDocs, _ := ai.ListDocuments(r.Context(), s.db)
 
 	data := PageData{
 		Title:       "Ask AI",
 		ActiveNav:   "ask",
-		AIConnected: aiURL != "",
+		AIConnected: settingsMap["ai_server_url"] != "",
+		RAGDocs:     ragDocs,
 	}
 	s.render(w, "ask.html", data)
 }
@@ -265,6 +310,10 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	freeGB, totalGB, usedGB, pct := s.getStorageStats(r.Context())
+	flash := ""
+	if r.URL.Query().Get("saved") == "1" {
+		flash = "Settings saved."
+	}
 	data := PageData{
 		Title:              "Settings",
 		ActiveNav:          "settings",
@@ -272,6 +321,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		StorageTotalGB:     totalGB,
 		StorageUsedGB:      usedGB,
 		StorageUsedPercent: pct,
+		Settings:           s.fetchSettings(),
+		FlashMsg:           flash,
 	}
 	s.render(w, "settings.html", data)
 }
@@ -544,7 +595,11 @@ func (s *Server) handleAPIAppStop(w http.ResponseWriter, r *http.Request) {
 			_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
 		}
 	}
-	http.Redirect(w, r, "/apps", http.StatusSeeOther)
+	redirect := r.FormValue("redirect")
+	if redirect == "" {
+		redirect = "/apps"
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 func (s *Server) handleAPIAppUninstall(w http.ResponseWriter, r *http.Request) {
@@ -604,6 +659,10 @@ func (s *Server) fetchApps() ([]AppView, []AppView) {
 	var available []AppView
 
 	for _, m := range manifests {
+		openURL := fmt.Sprintf("/a/%s/", m.ID)
+		if m.Proxy == "port" && m.Port > 0 {
+			openURL = fmt.Sprintf("http://localhost:%d/", m.Port)
+		}
 		app := AppView{
 			ID:        m.ID,
 			Name:      m.Name,
@@ -611,7 +670,7 @@ func (s *Server) fetchApps() ([]AppView, []AppView) {
 			Image:     m.Image,
 			Status:    "not_installed",
 			ProxyMode: m.Proxy,
-			OpenURL:   fmt.Sprintf("/a/%s/", m.ID),
+			OpenURL:   openURL,
 		}
 
 		if state, found := installedMap[m.ID]; found {

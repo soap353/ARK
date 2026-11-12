@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -60,8 +61,9 @@ func TestNewServerAndRoutes(t *testing.T) {
 		{"/library", http.StatusOK, "Offline Library"},
 		{"/get-content", http.StatusOK, "Get Content"},
 		{"/apps", http.StatusOK, "Modular App Catalog"},
-		{"/ask", http.StatusOK, "Ask AI"},
+		{"/ask", http.StatusOK, "Ask Local AI"},
 		{"/jobs", http.StatusOK, "Job Queue"},
+		{"/system", http.StatusOK, "Live Host Telemetry"},
 		{"/settings", http.StatusOK, "Settings"},
 		{"/a/kiwix/", http.StatusNotFound, "App Not Active"},
 		{"/static/ark.css", http.StatusOK, "--color-bg: #F4F6F9;"},
@@ -309,5 +311,92 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM jobs WHERE id = ?", jobID).Scan(&count)
 	if count != 0 {
 		t.Errorf("expected job to be deleted, count = %d", count)
+	}
+}
+
+func TestPhase2SettingsAndAIEndpoints(t *testing.T) {
+	aiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"llama3.2:3b"}]}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Boil water for 1 minute [Water Guide]."}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer aiSrv.Close()
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_ark.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);`)
+	if err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	server, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := server.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes failed: %v", err)
+	}
+
+	// 1. Save AI settings
+	form := url.Values{
+		"ai_server_url":  {aiSrv.URL},
+		"ai_chat_model":  {"llama3.2:3b"},
+		"ai_embed_model": {"nomic-embed-text"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/settings/ai", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 from /settings/ai, got %d", w.Code)
+	}
+
+	// 2. Test AI connection endpoint
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/test", strings.NewReader(url.Values{"ai_server_url": {aiSrv.URL}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	var testResp struct {
+		OK     bool     `json:"ok"`
+		Models []string `json:"models"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &testResp)
+	if !testResp.OK || len(testResp.Models) != 1 || testResp.Models[0] != "llama3.2:3b" {
+		t.Fatalf("unexpected /api/ai/test response: %s", w.Body.String())
+	}
+
+	// 3. Index a sample document synchronously (QueueManager nil in unit test)
+	sampleDoc := filepath.Join(tmpDir, "water.txt")
+	if err := os.WriteFile(sampleDoc, []byte("To purify water in emergencies, bring clear water to a rolling boil for 1 minute."), 0644); err != nil {
+		t.Fatalf("write sample doc: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/index", strings.NewReader(url.Values{"path": {sampleDoc}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 from /api/ai/index, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// 4. Ask AI RAG chat endpoint should retrieve chunk citation and return LLM answer
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"question":"How long should I boil water?"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Boil water for 1 minute") || !strings.Contains(w.Body.String(), "water.txt") {
+		t.Fatalf("unexpected /api/ai/chat response (%d): %s", w.Code, w.Body.String())
 	}
 }

@@ -1,0 +1,12 @@
+version: 1
+id: ollama
+name: Ollama AI
+category: ai
+icon: cpu.svg
+image: ollama/ollama:latest
+port: 11434
+proxy: port
+volumes:
+  - "ollama:/root/.ollama:rw"
+healthcheck: /
+lan: read

@@ -1,21 +1,27 @@
 {{ define "content" }}
 <h1 class="page-title">Settings</h1>
 
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
+
 <div class="card">
   <h2>General</h2>
   <form action="/settings/general" method="POST" style="max-width: 600px;">
     <div class="form-group">
       <label for="device_name" class="form-label">Device Name</label>
-      <input type="text" id="device_name" name="device_name" class="form-control" value="Ark">
+      <input type="text" id="device_name" name="device_name" class="form-control" value="{{ index .Settings "device_name" }}">
     </div>
     <div class="form-group">
       <label for="port" class="form-label">Port</label>
-      <input type="number" id="port" name="port" class="form-control" value="8080">
+      <input type="number" id="port" name="port" class="form-control" value="{{ index .Settings "port" }}">
     </div>
     <div class="form-group">
       <label class="form-label">LAN Access</label>
       <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 48px;">
-        <input type="checkbox" id="lan_enabled" name="lan_enabled" checked style="width: 24px; height: 24px;">
+        <input type="checkbox" id="lan_enabled" name="lan_enabled" {{ if ne (index .Settings "lan_enabled") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
         <label for="lan_enabled">Allow read-only browsing from local network (LAN)</label>
       </div>
     </div>
@@ -26,28 +32,35 @@
 <div class="card" id="ai">
   <h2>Central AI Server</h2>
   <p class="secondary-text" style="margin-bottom: 1.5rem;">
-    Point to any local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp).
+    Point to any local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp). <code>http://</code> and <code>/v1</code> are handled automatically.
   </p>
   <form action="/settings/ai" method="POST" style="max-width: 600px;">
     <div class="form-group">
       <label for="ai_server_url" class="form-label">Server Address</label>
-      <input type="text" id="ai_server_url" name="ai_server_url" class="form-control" placeholder="http://127.0.0.1:11434">
+      <div style="display: flex; gap: 0.5rem;">
+        <input type="text" id="ai_server_url" name="ai_server_url" class="form-control" value="{{ index .Settings "ai_server_url" }}" placeholder="http://127.0.0.1:11434">
+        <button type="button" class="btn" onclick="detectAI()" style="white-space: nowrap;">Detect</button>
+      </div>
     </div>
     <div class="form-group">
       <label for="ai_api_key" class="form-label">API Key (optional)</label>
-      <input type="password" id="ai_api_key" name="ai_api_key" class="form-control" placeholder="Bearer key if required">
+      <input type="password" id="ai_api_key" name="ai_api_key" class="form-control" placeholder="{{ if index .Settings "ai_api_key" }}Saved (leave blank to keep existing){{ else }}Bearer key if required{{ end }}">
     </div>
     <div class="form-group">
       <label for="ai_chat_model" class="form-label">Chat Model</label>
-      <input type="text" id="ai_chat_model" name="ai_chat_model" class="form-control" placeholder="llama3.2:3b">
+      <input type="text" id="ai_chat_model" name="ai_chat_model" list="ai-models-list" class="form-control" value="{{ index .Settings "ai_chat_model" }}" placeholder="llama3.2:3b">
     </div>
     <div class="form-group">
       <label for="ai_embed_model" class="form-label">Embedding Model</label>
-      <input type="text" id="ai_embed_model" name="ai_embed_model" class="form-control" placeholder="nomic-embed-text">
+      <input type="text" id="ai_embed_model" name="ai_embed_model" list="ai-models-list" class="form-control" value="{{ index .Settings "ai_embed_model" }}" placeholder="nomic-embed-text">
     </div>
-    <div style="display: flex; gap: 1rem;">
+    <datalist id="ai-models-list"></datalist>
+
+    <div id="ai-test-result" class="secondary-text" style="margin-bottom: 1rem; font-size: 14px;"></div>
+
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
       <button type="submit" class="btn btn-primary">Save AI Settings</button>
-      <button type="button" class="btn">Test Connection</button>
+      <button type="button" class="btn" onclick="testAI()">Test Connection</button>
     </div>
   </form>
 </div>
@@ -57,14 +70,14 @@
   <form action="/settings/downloads" method="POST" style="max-width: 600px;">
     <div class="form-group">
       <label for="max_concurrent_jobs" class="form-label">Max Concurrent Jobs</label>
-      <input type="number" id="max_concurrent_jobs" name="max_concurrent_jobs" class="form-control" value="3">
+      <input type="number" id="max_concurrent_jobs" name="max_concurrent_jobs" class="form-control" value="{{ index .Settings "max_concurrent_jobs" }}">
     </div>
     <div class="form-group">
       <label for="video_quality" class="form-label">Default Video Quality</label>
       <select id="video_quality" name="video_quality" class="form-control">
-        <option value="balanced" selected>Balanced (AV1 CRF 35, 720p, Opus 96k)</option>
-        <option value="aggressive">Aggressive (480p, Opus 48k)</option>
-        <option value="compatible">Compatible (H.264 mp4)</option>
+        <option value="balanced" {{ if eq (index .Settings "video_quality") "balanced" }}selected{{ end }}>Balanced (AV1 CRF 35, 720p, Opus 96k)</option>
+        <option value="aggressive" {{ if eq (index .Settings "video_quality") "aggressive" }}selected{{ end }}>Aggressive (480p, Opus 48k)</option>
+        <option value="compatible" {{ if eq (index .Settings "video_quality") "compatible" }}selected{{ end }}>Compatible (H.264 mp4)</option>
       </select>
     </div>
     <button type="submit" class="btn btn-primary">Save Download Settings</button>
@@ -76,6 +89,63 @@
   <p class="secondary-text" style="margin-bottom: 1.5rem;">
     Export Ark binaries, Docker images, and downloaded content to an external USB drive for offline air-gapped deployment.
   </p>
-  <button class="btn btn-primary">Launch USB Export Wizard</button>
+  <button type="button" class="btn btn-primary" disabled>USB Export Wizard (Phase 3)</button>
 </div>
+
+<script>
+function populateModels(models) {
+  const dl = document.getElementById('ai-models-list');
+  dl.innerHTML = '';
+  (models || []).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    dl.appendChild(opt);
+  });
+}
+
+function detectAI() {
+  const statusEl = document.getElementById('ai-test-result');
+  statusEl.textContent = 'Probing local ports (11434, 1234, 8000, 8081)...';
+  const curUrl = document.getElementById('ai_server_url').value;
+  fetch('/api/ai/detect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'host=' + encodeURIComponent(curUrl)
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.servers || data.servers.length === 0) {
+      statusEl.textContent = 'No local AI server detected. Enter server IP:port manually or install Ollama in Apps.';
+      return;
+    }
+    const first = data.servers[0];
+    document.getElementById('ai_server_url').value = first.url;
+    populateModels(first.models);
+    statusEl.textContent = 'Detected ' + first.name + ' at ' + first.url + ' (' + (first.models ? first.models.length : 0) + ' models loaded). Click Save AI Settings.';
+  })
+  .catch(err => { statusEl.textContent = 'Detect error: ' + err; });
+}
+
+function testAI() {
+  const statusEl = document.getElementById('ai-test-result');
+  statusEl.textContent = 'Testing /v1/models...';
+  const urlVal = document.getElementById('ai_server_url').value;
+  const keyVal = document.getElementById('ai_api_key').value;
+  fetch('/api/ai/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'ai_server_url=' + encodeURIComponent(urlVal) + '&ai_api_key=' + encodeURIComponent(keyVal)
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.ok) {
+      statusEl.textContent = 'Connection failed: ' + (data.error || 'unknown error');
+      return;
+    }
+    populateModels(data.models);
+    statusEl.textContent = 'Connected! Found ' + (data.models ? data.models.length : 0) + ' model(s): ' + (data.models || []).slice(0, 6).join(', ');
+  })
+  .catch(err => { statusEl.textContent = 'Test error: ' + err; });
+}
+</script>
 {{ end }}

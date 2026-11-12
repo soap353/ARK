@@ -1,10 +1,13 @@
 package apps
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +69,9 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 		if _, ok := req.Header["User-Agent"]; !ok {
 			req.Header.Set("User-Agent", "Ark-Proxy")
 		}
+		if appID == "kiwix" {
+			req.Header.Del("Accept-Encoding")
+		}
 	}
 
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
@@ -96,6 +102,9 @@ a { color: #0369A1; text-decoration: none; font-weight: 600; }
 		Director:      director,
 		FlushInterval: 100 * time.Millisecond,
 		ErrorHandler:  errorHandler,
+	}
+	if appID == "kiwix" {
+		proxy.ModifyResponse = injectKiwixAIToolbar
 	}
 
 	pm.routes[appID] = &AppRoute{
@@ -177,4 +186,25 @@ a { color: #0369A1; text-decoration: none; font-weight: 600; }
 	}
 
 	route.Proxy.ServeHTTP(w, r)
+}
+
+func injectKiwixAIToolbar(resp *http.Response) error {
+	if resp.StatusCode != http.StatusOK || resp.ContentLength > 2*1024*1024 {
+		return nil
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(strings.ToLower(ct), "text/html") || resp.Header.Get("Content-Encoding") != "" {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	const toolbar = `<div id="ark-ai-bar" style="position:fixed;bottom:14px;right:14px;z-index:99999;background:#FFFFFF;border:1px solid #CBD5E1;border-radius:8px;padding:6px 10px;box-shadow:0 4px 12px rgba(15,23,42,.12);font-family:system-ui,sans-serif;display:flex;gap:8px;align-items:center;"><a href="/" style="color:#0369A1;font-weight:600;text-decoration:none;font-size:13px;">Ark Home</a><button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';fetch('/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:document.body.innerText})}).then(r=>r.ok?(b.textContent='Added to AI'):(b.textContent='Error')).catch(()=>{b.textContent='Error'});" style="background:#0369A1;color:#FFFFFF;border:none;border-radius:6px;padding:5px 10px;font-size:13px;font-weight:600;cursor:pointer;">+ Add to AI</button></div></body>`
+	replaced := bytes.Replace(body, []byte("</body>"), []byte(toolbar), 1)
+	resp.Body = io.NopCloser(bytes.NewReader(replaced))
+	resp.ContentLength = int64(len(replaced))
+	resp.Header.Set("Content-Length", strconv.Itoa(len(replaced)))
+	return nil
 }

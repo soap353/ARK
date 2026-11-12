@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -168,10 +171,14 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 		}
 	}
 
-	// 2. Ensure image exists locally
+	// 2. Ensure image exists locally (build local ark/* images from images/ if not present)
 	_, _, err = c.cli.ImageInspectWithRaw(ctx, app.Image)
 	if err != nil {
-		if err := c.Pull(ctx, app.Image); err != nil {
+		if strings.HasPrefix(app.Image, "ark/") {
+			if buildErr := buildLocalArkImage(ctx, app.Image); buildErr != nil {
+				return nil, fmt.Errorf("failed to build local image %s: %w", app.Image, buildErr)
+			}
+		} else if err := c.Pull(ctx, app.Image); err != nil {
 			return nil, fmt.Errorf("failed to pull image %s: %w", app.Image, err)
 		}
 	}
@@ -269,6 +276,47 @@ func (c *Client) Stop(ctx context.Context, appID string, timeoutSec int) error {
 	return c.cli.ContainerStop(ctx, existing.ID, container.StopOptions{
 		Timeout: &stopTimeout,
 	})
+}
+
+// Restart restarts the container associated with appID.
+func (c *Client) Restart(ctx context.Context, appID string, timeoutSec int) error {
+	existing, err := c.FindContainerByAppID(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("app container %q not found", appID)
+	}
+
+	stopTimeout := timeoutSec
+	if stopTimeout <= 0 {
+		stopTimeout = 10
+	}
+
+	return c.cli.ContainerRestart(ctx, existing.ID, container.StopOptions{
+		Timeout: &stopTimeout,
+	})
+}
+
+func buildLocalArkImage(ctx context.Context, imageName string) error {
+	short := strings.TrimPrefix(imageName, "ark/")
+	if idx := strings.Index(short, ":"); idx != -1 {
+		short = short[:idx]
+	}
+	candidates := []string{
+		filepath.Join("images", short),
+		filepath.Join("..", "..", "images", short),
+	}
+	for _, dir := range candidates {
+		if fi, err := os.Stat(filepath.Join(dir, "Dockerfile")); err == nil && !fi.IsDir() {
+			cmd := exec.CommandContext(ctx, "docker", "build", "-t", imageName, dir)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("Dockerfile not found for local image %s", imageName)
 }
 
 // Remove stops and removes the container associated with appID.

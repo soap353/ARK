@@ -7,20 +7,120 @@
     <p class="secondary-text" style="max-width: 600px; margin: 0.5rem auto 1.5rem auto;">
       Connect any OpenAI-compatible local AI server (such as Ollama, LM Studio, vLLM, or llama.cpp) to enable offline semantic Q&amp;A across your documents and Kiwix articles.
     </p>
-    <a href="/settings#ai" class="btn btn-primary">Connect AI Server</a>
+    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+      <a href="/settings#ai" class="btn btn-primary">Connect AI Server</a>
+      <a href="/apps" class="btn">Install Ollama / Qdrant</a>
+    </div>
   </div>
 {{ else }}
-  <div class="card" style="display: flex; flex-direction: column; min-height: 500px;">
+  <div class="card" style="display: flex; flex-direction: column; min-height: 440px;">
+    <div class="card-header" style="margin-bottom: 1rem;">
+      <h2>Offline RAG Chat</h2>
+      <span class="badge badge-success">Connected</span>
+    </div>
     <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
-      <div style="background-color: var(--color-surface-hover); padding: 1rem; border-radius: 6px;">
-        <strong>Ark AI:</strong> Hello! Ask me anything about the content stored in your offline library.
+      <div style="background-color: var(--color-bg); border: 1px solid var(--color-border); padding: 1rem; border-radius: 6px;">
+        <strong>Ark AI:</strong> Ready. Ask a question across your indexed documents, ZIM articles, and notes.
       </div>
     </div>
 
-    <form style="display: flex; gap: 0.75rem;">
-      <input type="text" class="form-control" placeholder="Ask a question..." style="flex: 1;" autofocus>
-      <button type="submit" class="btn btn-primary">Send</button>
+    <form id="ask-form" onsubmit="return sendAsk(event)" style="display: flex; gap: 0.75rem;">
+      <input type="text" id="ask-input" name="q" class="form-control" placeholder="Ask a question..." style="flex: 1;" autofocus required>
+      <button type="submit" id="ask-submit" class="btn btn-primary">Send</button>
     </form>
   </div>
 {{ end }}
+
+<div class="card" id="knowledge">
+  <div class="card-header" style="margin-bottom: 1rem;">
+    <h2>Knowledge Index</h2>
+    <span class="secondary-text">{{ len .RAGDocs }} source(s) indexed</span>
+  </div>
+
+  <form action="/api/ai/index" method="POST" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+    <input type="text" name="path" class="form-control" placeholder="File path inside Ark data or workspace (e.g. README.md, guide.html, manual.pdf)" style="flex: 1; min-width: 240px;" required>
+    <button type="submit" class="btn btn-primary">Queue Index Job</button>
+  </form>
+
+  {{ if .RAGDocs }}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Chunks</th>
+          <th>Source</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .RAGDocs }}
+        <tr>
+          <td><strong>{{ .Title }}</strong></td>
+          <td><span class="badge">{{ .SourceType }}</span></td>
+          <td>{{ .IndexedPages }}</td>
+          <td class="secondary-text" style="font-size: 13px;">{{ .SourcePath }}</td>
+          <td>
+            <form action="/api/ai/knowledge/remove" method="POST" style="margin: 0;">
+              <input type="hidden" name="id" value="{{ .ID }}">
+              <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="secondary-text">No documents indexed yet. Open any Kiwix article and click <strong>+ Add to AI</strong>, or enter a document path above.</p>
+  {{ end }}
+</div>
+
+<script>
+async function sendAsk(ev) {
+  ev.preventDefault();
+  const input = document.getElementById('ask-input');
+  const btn = document.getElementById('ask-submit');
+  const box = document.getElementById('chat-messages');
+  const q = input.value.trim();
+  if (!q) return false;
+
+  const userDiv = document.createElement('div');
+  userDiv.style.cssText = 'background:#EFF6FF;border:1px solid #BFDBFE;padding:0.85rem 1rem;border-radius:6px;align-self:flex-end;max-width:85%;';
+  userDiv.innerHTML = '<strong>You:</strong> ';
+  userDiv.appendChild(document.createTextNode(q));
+  box.appendChild(userDiv);
+
+  const botDiv = document.createElement('div');
+  botDiv.style.cssText = 'background:var(--color-bg);border:1px solid var(--color-border);padding:1rem;border-radius:6px;white-space:pre-wrap;';
+  botDiv.innerHTML = '<strong>Ark AI:</strong> <span class="ans">Thinking...</span><div class="cites" style="margin-top:0.5rem;font-size:13px;"></div>';
+  box.appendChild(botDiv);
+  const ansSpan = botDiv.querySelector('.ans');
+  const citesDiv = botDiv.querySelector('.cites');
+
+  input.value = '';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q })
+    });
+    const data = await resp.json();
+    ansSpan.textContent = data.answer || data.error || 'No response';
+    if (data.citations && data.citations.length > 0) {
+      citesDiv.innerHTML = '<strong>Sources:</strong> ' + data.citations.map(c =>
+        '<span class="badge" style="margin-right:4px;">' + c.title.replace(/</g,'&lt;') + '</span>'
+      ).join('');
+    }
+  } catch (e) {
+    ansSpan.textContent = 'Request failed: ' + e;
+  } finally {
+    btn.disabled = false;
+    box.scrollTop = box.scrollHeight;
+  }
+  return false;
+}
+</script>
 {{ end }}
