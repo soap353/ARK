@@ -1,0 +1,45 @@
+{{ define "layout" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ .Title }} — Ark Offline Archive</title>
+  <link rel="stylesheet" href="/static/ark.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <header class="header" role="banner">
+    <a href="/" class="brand" aria-label="Ark Home">
+      <svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/>
+      </svg>
+      Ark
+    </a>
+    <nav class="nav" role="navigation" aria-label="Main Navigation">
+      <a href="/" class="nav-link {{ if eq .ActiveNav "home" }}active{{ end }}">Home</a>
+      <a href="/library" class="nav-link {{ if eq .ActiveNav "library" }}active{{ end }}">Library</a>
+      <a href="/get-content" class="nav-link {{ if eq .ActiveNav "get-content" }}active{{ end }}">Get Content</a>
+      <a href="/apps" class="nav-link {{ if eq .ActiveNav "apps" }}active{{ end }}">Apps</a>
+      <a href="/ask" class="nav-link {{ if eq .ActiveNav "ask" }}active{{ end }}">Ask AI</a>
+      <a href="/jobs" class="nav-link {{ if eq .ActiveNav "jobs" }}active{{ end }}">Jobs</a>
+      <a href="/settings" class="nav-link {{ if eq .ActiveNav "settings" }}active{{ end }}">Settings</a>
+    </nav>
+  </header>
+
+  <main id="main" class="container" role="main">
+    {{ template "content" . }}
+  </main>
+
+  <footer class="footer" role="contentinfo">
+    <div>
+      <span class="secondary-text">Ark Offline Internet Archive &bull; Zero external network dependencies</span>
+    </div>
+    <div style="display: flex; gap: 1rem; align-items: center;">
+      <span class="badge badge-success">&#x25CF; Service Online</span>
+      <span class="secondary-text">Port :8080</span>
+    </div>
+  </footer>
+</body>
+</html>
+{{ end }}

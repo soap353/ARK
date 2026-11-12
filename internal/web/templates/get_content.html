@@ -1,0 +1,105 @@
+{{ define "content" }}
+<h1 class="page-title">Get Content</h1>
+
+<div class="card">
+  <h2>Prepper Starter Pack</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">
+    Recommended offline bundle (approx. 25–30 GB): WikiMed, Wikipedia Mini, iFixit, WikiHow, Regional Map, Small AI Model, and FDA Drug Labels.
+  </p>
+  <form action="/api/jobs" method="POST">
+    <input type="hidden" name="type" value="preset">
+    <input type="hidden" name="target" value="starter_pack">
+    <button type="submit" class="btn btn-primary">Download Starter Pack (30 GB)</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Curated Knowledge Presets</h2>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Preset</th>
+          <th>Tiers / Options</th>
+          <th>Size</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Wikipedia (English)</strong></td>
+          <td class="secondary-text">Mini / Top 100 / Full</td>
+          <td>~12 GB – 110 GB</td>
+          <td>
+            <form action="/api/jobs" method="POST" style="display:inline;">
+              <input type="hidden" name="type" value="preset">
+              <input type="hidden" name="target" value="wikipedia_en_mini">
+              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Mini (12 GB)</button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>WikiMed (Medical Encyclopedia)</strong></td>
+          <td class="secondary-text">Complete Medical Guide</td>
+          <td>~6 GB</td>
+          <td>
+            <form action="/api/jobs" method="POST" style="display:inline;">
+              <input type="hidden" name="type" value="preset">
+              <input type="hidden" name="target" value="wikimed">
+              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get WikiMed (6 GB)</button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Survival & Repair</strong></td>
+          <td class="secondary-text">iFixit, WikiHow, Practical Action</td>
+          <td>~15 GB</td>
+          <td>
+            <form action="/api/jobs" method="POST" style="display:inline;">
+              <input type="hidden" name="type" value="preset">
+              <input type="hidden" name="target" value="survival_repair">
+              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Survival Pack</button>
+            </form>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Project Gutenberg</strong></td>
+          <td class="secondary-text">70,000+ Public Domain E-Books</td>
+          <td>~70 GB full</td>
+          <td>
+            <form action="/api/jobs" method="POST" style="display:inline;">
+              <input type="hidden" name="type" value="preset">
+              <input type="hidden" name="target" value="gutenberg">
+              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Books</button>
+            </form>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Download Any URL or Media</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">
+    Archive websites (.zim), YouTube channels/videos (.webm AV1/Opus), audio, or PDFs.
+  </p>
+  <form action="/api/jobs" method="POST" style="display: flex; flex-direction: column; gap: 1rem; max-width: 600px;">
+    <div class="form-group" style="margin-bottom: 0;">
+      <label for="url-input" class="form-label">Target URL</label>
+      <input type="url" id="url-input" name="target" class="form-control" placeholder="https://..." required>
+    </div>
+    <div class="form-group" style="margin-bottom: 0;">
+      <label for="type-select" class="form-label">Archive Type</label>
+      <select id="type-select" name="type" class="form-control">
+        <option value="video">Video (AV1 + Opus in .webm)</option>
+        <option value="video_h264">Compatible Video (H.264 .mp4)</option>
+        <option value="music">Music (.opus 96k)</option>
+        <option value="zim">Website as ZIM (zimit)</option>
+        <option value="doc">Document / File (aria2)</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Start Download</button>
+  </form>
+</div>
+{{ end }}

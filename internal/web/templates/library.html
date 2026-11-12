@@ -1,0 +1,52 @@
+{{ define "content" }}
+<div class="card-header">
+  <h1 class="page-title">Offline Library</h1>
+  <a href="/get-content" class="btn btn-primary">+ Get Content</a>
+</div>
+
+<div class="card">
+  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+    <button class="btn btn-primary" style="min-height: 40px; padding: 0.25rem 1rem;">All</button>
+    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Wikipedia & ZIM</button>
+    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Maps</button>
+    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Videos</button>
+    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Books & PDFs</button>
+    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Medical</button>
+  </div>
+
+  {{ if .Items }}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Category</th>
+            <th>Size</th>
+            <th>Date</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Items }}
+          <tr>
+            <td><strong>{{ .Title }}</strong></td>
+            <td><span class="badge">{{ .Category }}</span></td>
+            <td class="secondary-text">{{ .Size }}</td>
+            <td class="secondary-text">{{ .Date }}</td>
+            <td>
+              <a href="{{ .OpenURL }}" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+  {{ else }}
+    <div style="text-align: center; padding: 3rem 1rem;">
+      <h2>Your offline library is empty</h2>
+      <p class="secondary-text" style="margin-bottom: 1.5rem;">Download presets, Kiwix knowledge archives, or offline maps to get started.</p>
+      <a href="/get-content" class="btn btn-primary">Get Content &rarr;</a>
+    </div>
+  {{ end }}
+</div>
+{{ end }}

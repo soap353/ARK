@@ -1,0 +1,10 @@
+version: 1
+id: cyberchef
+name: Tools
+category: tools
+icon: tool.svg
+image: ghcr.io/gchq/cyberchef:latest
+port: 80
+proxy: path
+healthcheck: /
+lan: read

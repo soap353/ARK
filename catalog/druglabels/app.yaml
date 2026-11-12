@@ -1,0 +1,12 @@
+version: 1
+id: druglabels
+name: Drug Labels
+category: medical
+icon: activity.svg
+image: ark/druglabels:latest
+port: 8080
+proxy: path
+volumes:
+  - "druglabels:/data:rw"
+healthcheck: /
+lan: read

@@ -1,0 +1,14 @@
+version: 1
+id: flatnotes
+name: Notes
+category: knowledge
+icon: edit.svg
+image: dullage/flatnotes:latest
+port: 8080
+proxy: path
+volumes:
+  - "notes:/data:rw"
+env:
+  FLATNOTES_PATH: /data
+healthcheck: /
+lan: admin

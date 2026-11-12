@@ -1,0 +1,61 @@
+{{ define "content" }}
+<div class="card-header">
+  <h1 class="page-title">Background Job Queue</h1>
+  <button class="btn" onclick="location.reload()">Refresh</button>
+</div>
+
+<div class="card">
+  <h2>Active &amp; Queued Jobs</h2>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Type</th>
+          <th>Target</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ if .Jobs }}
+          {{ range .Jobs }}
+          <tr>
+            <td><code>{{ .ID }}</code></td>
+            <td>{{ .Type }}</td>
+            <td>{{ .Target }}</td>
+            <td>
+              <span class="badge {{ if eq .Status "running" }}badge-accent{{ else if eq .Status "done" }}badge-success{{ else if eq .Status "failed" }}badge-error{{ else }}badge{{ end }}">
+                {{ .Status }}
+              </span>
+            </td>
+            <td>
+              <div style="min-width: 120px;">
+                <div style="font-size: 12px; margin-bottom: 4px;">{{ printf "%.1f" .Progress }}%</div>
+                <div class="storage-bar" style="height: 8px;">
+                  <div class="storage-segment segment-zim" style="width: {{ .Progress }}%;"></div>
+                </div>
+              </div>
+            </td>
+            <td>
+              {{ if eq .Status "failed" }}
+                <button class="btn" style="min-height: 32px; padding: 0.15rem 0.5rem; font-size: 14px;">Retry</button>
+              {{ else if eq .Status "running" }}
+                <button class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.5rem; font-size: 14px;">Pause</button>
+              {{ else }}
+                <span class="secondary-text">-</span>
+              {{ end }}
+            </td>
+          </tr>
+          {{ end }}
+        {{ else }}
+          <tr>
+            <td colspan="6" class="secondary-text" style="text-align: center; padding: 2rem;">No jobs in queue.</td>
+          </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ end }}

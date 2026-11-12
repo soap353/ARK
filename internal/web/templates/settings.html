@@ -1,0 +1,81 @@
+{{ define "content" }}
+<h1 class="page-title">Settings</h1>
+
+<div class="card">
+  <h2>General</h2>
+  <form action="/settings/general" method="POST" style="max-width: 600px;">
+    <div class="form-group">
+      <label for="device_name" class="form-label">Device Name</label>
+      <input type="text" id="device_name" name="device_name" class="form-control" value="Ark">
+    </div>
+    <div class="form-group">
+      <label for="port" class="form-label">Port</label>
+      <input type="number" id="port" name="port" class="form-control" value="8080">
+    </div>
+    <div class="form-group">
+      <label class="form-label">LAN Access</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 48px;">
+        <input type="checkbox" id="lan_enabled" name="lan_enabled" checked style="width: 24px; height: 24px;">
+        <label for="lan_enabled">Allow read-only browsing from local network (LAN)</label>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save General Settings</button>
+  </form>
+</div>
+
+<div class="card" id="ai">
+  <h2>Central AI Server</h2>
+  <p class="secondary-text" style="margin-bottom: 1.5rem;">
+    Point to any local OpenAI-compatible server (Ollama, LM Studio, vLLM, llama.cpp).
+  </p>
+  <form action="/settings/ai" method="POST" style="max-width: 600px;">
+    <div class="form-group">
+      <label for="ai_server_url" class="form-label">Server Address</label>
+      <input type="text" id="ai_server_url" name="ai_server_url" class="form-control" placeholder="http://127.0.0.1:11434">
+    </div>
+    <div class="form-group">
+      <label for="ai_api_key" class="form-label">API Key (optional)</label>
+      <input type="password" id="ai_api_key" name="ai_api_key" class="form-control" placeholder="Bearer key if required">
+    </div>
+    <div class="form-group">
+      <label for="ai_chat_model" class="form-label">Chat Model</label>
+      <input type="text" id="ai_chat_model" name="ai_chat_model" class="form-control" placeholder="llama3.2:3b">
+    </div>
+    <div class="form-group">
+      <label for="ai_embed_model" class="form-label">Embedding Model</label>
+      <input type="text" id="ai_embed_model" name="ai_embed_model" class="form-control" placeholder="nomic-embed-text">
+    </div>
+    <div style="display: flex; gap: 1rem;">
+      <button type="submit" class="btn btn-primary">Save AI Settings</button>
+      <button type="button" class="btn">Test Connection</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Downloads &amp; Archival</h2>
+  <form action="/settings/downloads" method="POST" style="max-width: 600px;">
+    <div class="form-group">
+      <label for="max_concurrent_jobs" class="form-label">Max Concurrent Jobs</label>
+      <input type="number" id="max_concurrent_jobs" name="max_concurrent_jobs" class="form-control" value="3">
+    </div>
+    <div class="form-group">
+      <label for="video_quality" class="form-label">Default Video Quality</label>
+      <select id="video_quality" name="video_quality" class="form-control">
+        <option value="balanced" selected>Balanced (AV1 CRF 35, 720p, Opus 96k)</option>
+        <option value="aggressive">Aggressive (480p, Opus 48k)</option>
+        <option value="compatible">Compatible (H.264 mp4)</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Download Settings</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Copy to USB Drive</h2>
+  <p class="secondary-text" style="margin-bottom: 1.5rem;">
+    Export Ark binaries, Docker images, and downloaded content to an external USB drive for offline air-gapped deployment.
+  </p>
+  <button class="btn btn-primary">Launch USB Export Wizard</button>
+</div>
+{{ end }}

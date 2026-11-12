@@ -1,0 +1,10 @@
+version: 1
+id: convertx
+name: Convert
+category: tools
+icon: refresh-cw.svg
+image: ghcr.io/c4illin/convertx:latest
+port: 3000
+proxy: path
+healthcheck: /
+lan: read

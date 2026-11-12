@@ -1,0 +1,12 @@
+version: 1
+id: kolibri
+name: Kolibri
+category: education
+icon: book-open.svg
+image: ark/kolibri:latest
+port: 8080
+proxy: path
+volumes:
+  - "kolibri:/root/.kolibri:rw"
+healthcheck: /
+lan: read

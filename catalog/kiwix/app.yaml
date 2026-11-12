@@ -1,0 +1,16 @@
+version: 1
+id: kiwix
+name: Library
+category: knowledge
+icon: kiwix.svg
+image: ghcr.io/kiwix/kiwix-serve:3.7.0
+command:
+  - "--urlRootLocation"
+  - "/a/kiwix"
+  - "/data/zim"
+port: 8080
+proxy: path
+volumes:
+  - "zim:/data/zim:ro"
+healthcheck: /
+lan: read

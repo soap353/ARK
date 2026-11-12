@@ -1,0 +1,96 @@
+{{ define "content" }}
+<h1 class="page-title">Installed App Modules</h1>
+<p class="secondary-text" style="margin-bottom: 2rem;">
+  Each module runs in its own isolated Docker container. Ark Command Center manages lifecycle and reverse proxies traffic.
+</p>
+
+<div class="card">
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th>Mode</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Library (Kiwix)</strong></td>
+          <td class="secondary-text">ZIM reader for Wikipedia, StackExchange, etc.</td>
+          <td><span class="badge badge-success">Running</span></td>
+          <td class="secondary-text">Path (/a/kiwix/)</td>
+          <td>
+            <a href="/a/kiwix/" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Maps (Protomaps)</strong></td>
+          <td class="secondary-text">Offline vector tile map server</td>
+          <td><span class="badge badge-success">Running</span></td>
+          <td class="secondary-text">Path (/a/maps/)</td>
+          <td>
+            <a href="/a/maps/" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Medical (Drug Labels)</strong></td>
+          <td class="secondary-text">FDA clinical drug search & dosages</td>
+          <td><span class="badge badge-success">Running</span></td>
+          <td class="secondary-text">Path (/a/druglabels/)</td>
+          <td>
+            <a href="/a/druglabels/" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Tools (CyberChef)</strong></td>
+          <td class="secondary-text">300+ offline encoding, crypto, and data tools</td>
+          <td><span class="badge badge-success">Running</span></td>
+          <td class="secondary-text">Path (/a/cyberchef/)</td>
+          <td>
+            <a href="/a/cyberchef/" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Notes (FlatNotes)</strong></td>
+          <td class="secondary-text">Local markdown wiki & knowledge base</td>
+          <td><span class="badge">Stopped</span></td>
+          <td class="secondary-text">Path (/a/flatnotes/)</td>
+          <td>
+            <button class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Start</button>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Education (Kolibri)</strong></td>
+          <td class="secondary-text">Khan Academy and structured courses</td>
+          <td><span class="badge">Stopped</span></td>
+          <td class="secondary-text">Path (/a/kolibri/)</td>
+          <td>
+            <button class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Start</button>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>AI Vector DB (Qdrant)</strong></td>
+          <td class="secondary-text">Semantic search vector database for RAG</td>
+          <td><span class="badge badge-success">Running</span></td>
+          <td class="secondary-text">Port (6333)</td>
+          <td>
+            <span class="secondary-text">Internal</span>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>AI Server (Ollama)</strong></td>
+          <td class="secondary-text">Optional local LLM runner</td>
+          <td><span class="badge">Stopped</span></td>
+          <td class="secondary-text">Port (11434)</td>
+          <td>
+            <button class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Start</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ end }}

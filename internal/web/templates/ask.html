@@ -1,0 +1,26 @@
+{{ define "content" }}
+<h1 class="page-title">Ask Local AI</h1>
+
+{{ if not .AIConnected }}
+  <div class="card" style="border-color: var(--color-accent); text-align: center; padding: 3rem 1.5rem;">
+    <h2>No AI Server Connected</h2>
+    <p class="secondary-text" style="max-width: 600px; margin: 0.5rem auto 1.5rem auto;">
+      Connect any OpenAI-compatible local AI server (such as Ollama, LM Studio, vLLM, or llama.cpp) to enable offline semantic Q&amp;A across your documents and Kiwix articles.
+    </p>
+    <a href="/settings#ai" class="btn btn-primary">Connect AI Server</a>
+  </div>
+{{ else }}
+  <div class="card" style="display: flex; flex-direction: column; min-height: 500px;">
+    <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+      <div style="background-color: var(--color-surface-hover); padding: 1rem; border-radius: 6px;">
+        <strong>Ark AI:</strong> Hello! Ask me anything about the content stored in your offline library.
+      </div>
+    </div>
+
+    <form style="display: flex; gap: 0.75rem;">
+      <input type="text" class="form-control" placeholder="Ask a question..." style="flex: 1;" autofocus>
+      <button type="submit" class="btn btn-primary">Send</button>
+    </form>
+  </div>
+{{ end }}
+{{ end }}
