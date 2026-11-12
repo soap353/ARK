@@ -17,6 +17,7 @@ import (
 
 	"ark/internal/apps"
 	"ark/internal/docker"
+	"ark/internal/jobs"
 	"ark/internal/storage"
 )
 
@@ -25,11 +26,13 @@ var embeddedFiles embed.FS
 
 // JobView represents a background job rendered in the UI
 type JobView struct {
-	ID       string
-	Type     string
-	Target   string
-	Status   string
-	Progress float64
+	ID          string
+	Type        string
+	Target      string
+	Status      string
+	Progress    float64
+	ProgressMsg string
+	ErrorMsg    string
 }
 
 // LibraryItemView represents an offline media/zim entry
@@ -66,6 +69,7 @@ type PageData struct {
 	InstalledApps      []AppView
 	AvailableApps      []AppView
 	AIConnected        bool
+	HasActiveJobs      bool
 }
 
 // Server handles Ark web UI and API routing
@@ -75,6 +79,7 @@ type Server struct {
 	templates map[string]*template.Template
 	docker    *docker.Client
 	proxy     *apps.ProxyManager
+	queue     *jobs.QueueManager
 }
 
 // NewServer initializes templates and returns a configured Server
@@ -112,6 +117,11 @@ func (s *Server) SetDockerClient(d *docker.Client) {
 	s.docker = d
 }
 
+// SetQueueManager attaches the background job queue manager.
+func (s *Server) SetQueueManager(qm *jobs.QueueManager) {
+	s.queue = qm
+}
+
 // ProxyManager returns the reverse proxy manager for /a/<id>/ routes.
 func (s *Server) ProxyManager() *apps.ProxyManager {
 	return s.proxy
@@ -141,6 +151,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 
 	// API endpoints
 	mux.HandleFunc("/api/jobs", s.handleAPIJobs)
+	mux.HandleFunc("/api/jobs/cancel", s.handleAPIJobCancel)
+	mux.HandleFunc("/api/jobs/retry", s.handleAPIJobRetry)
+	mux.HandleFunc("/api/jobs/delete", s.handleAPIJobDelete)
 	mux.HandleFunc("/api/apps/install", s.handleAPIAppInstall)
 	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
 	mux.HandleFunc("/api/apps/stop", s.handleAPIAppStop)
@@ -163,13 +176,22 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func hasActive(jobsList []JobView) bool {
+	for _, j := range jobsList {
+		if j.Status == "pending" || j.Status == "running" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 
-	jobs := s.fetchRecentJobs(5)
+	jobsList := s.fetchRecentJobs(5)
 	freeGB, totalGB, usedGB, pct := s.getStorageStats(r.Context())
 	installedApps, _ := s.fetchApps()
 
@@ -180,8 +202,9 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		StorageTotalGB:     totalGB,
 		StorageUsedGB:      usedGB,
 		StorageUsedPercent: pct,
-		Jobs:               jobs,
+		Jobs:               jobsList,
 		InstalledApps:      installedApps,
+		HasActiveJobs:      hasActive(jobsList),
 	}
 	s.render(w, "home.html", data)
 }
@@ -230,11 +253,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := s.fetchRecentJobs(50)
+	jobsList := s.fetchRecentJobs(50)
 	data := PageData{
-		Title:     "Job Queue",
-		ActiveNav: "jobs",
-		Jobs:      jobs,
+		Title:         "Job Queue",
+		ActiveNav:     "jobs",
+		Jobs:          jobsList,
+		HasActiveJobs: hasActive(jobsList),
 	}
 	s.render(w, "jobs.html", data)
 }
@@ -258,19 +282,65 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobType := r.FormValue("type")
+	rawType := r.FormValue("type")
 	target := r.FormValue("target")
-	if jobType == "" || target == "" {
+	if rawType == "" || target == "" {
 		http.Error(w, "Missing type or target", http.StatusBadRequest)
 		return
 	}
 
-	if s.db != nil {
-		jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	jobType := rawType
+	meta := jobs.JobMetadata{
+		OutputDir: filepath.Join(s.dataDir, "zim"),
+	}
+
+	switch rawType {
+	case "preset":
+		jobType = jobs.TypePreset
+		meta.OutputDir = filepath.Join(s.dataDir, "zim")
+	case "doc", "download":
+		jobType = jobs.TypeDownload
+		meta.OutputDir = filepath.Join(s.dataDir, "media", "docs")
+	case "video":
+		jobType = jobs.TypeEncode
+		meta.Format = "av1"
+		meta.OutputDir = filepath.Join(s.dataDir, "media", "video")
+	case "video_h264":
+		jobType = jobs.TypeEncode
+		meta.Format = "mp4"
+		meta.OutputDir = filepath.Join(s.dataDir, "media", "video")
+	case "music":
+		jobType = jobs.TypeEncode
+		meta.Format = "music"
+		meta.OutputDir = filepath.Join(s.dataDir, "media", "music")
+	case "zim":
+		jobType = jobs.TypeZim
+		meta.OutputDir = filepath.Join(s.dataDir, "zim")
+	}
+
+	metaBytes, _ := json.Marshal(meta)
+	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+
+	if s.queue != nil {
+		job := &jobs.Job{
+			ID:          jobID,
+			Type:        jobType,
+			Target:      target,
+			Status:      jobs.StatusPending,
+			Progress:    0.0,
+			ProgressMsg: "Queued",
+			Metadata:    string(metaBytes),
+		}
+		if err := s.queue.Submit(r.Context(), job); err != nil {
+			log.Printf("Failed to submit job: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	} else if s.db != nil {
 		_, err := s.db.Exec(`
-			INSERT INTO jobs (id, type, target, status, progress, created_at, updated_at)
-			VALUES (?, ?, ?, 'pending', 0.0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`, jobID, jobType, target)
+			INSERT INTO jobs (id, type, target, status, progress, progress_msg, metadata, created_at, updated_at)
+			VALUES (?, ?, ?, 'pending', 0.0, 'Queued', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, jobID, jobType, target, string(metaBytes))
 		if err != nil {
 			log.Printf("Failed to insert job: %v", err)
 			http.Error(w, "Database error", http.StatusInternalServerError)
@@ -279,6 +349,62 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIJobCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	jobID := r.FormValue("id")
+	if jobID != "" {
+		if s.queue != nil {
+			_ = s.queue.Cancel(r.Context(), jobID)
+		} else if s.db != nil {
+			_, _ = s.db.Exec(`UPDATE jobs SET status = 'cancelled', error_msg = 'Cancelled by user', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, jobID)
+		}
+	}
+	redirect := r.FormValue("redirect")
+	if redirect == "" {
+		redirect = "/jobs"
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIJobRetry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	jobID := r.FormValue("id")
+	if jobID != "" {
+		if s.queue != nil {
+			_ = s.queue.Retry(r.Context(), jobID)
+		} else if s.db != nil {
+			_, _ = s.db.Exec(`UPDATE jobs SET status = 'pending', progress = 0, error_msg = '', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, jobID)
+		}
+	}
+	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIJobDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	jobID := r.FormValue("id")
+	if jobID != "" {
+		if s.queue != nil {
+			_ = s.queue.Remove(r.Context(), jobID)
+		} else if s.db != nil {
+			_, _ = s.db.Exec(`DELETE FROM jobs WHERE id = ?`, jobID)
+		}
+	}
+	redirect := r.FormValue("redirect")
+	if redirect == "" {
+		redirect = "/jobs"
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 func findCatalogDir() string {
@@ -524,7 +650,7 @@ func (s *Server) fetchRecentJobs(limit int) []JobView {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, type, target, status, progress
+		SELECT id, type, target, status, progress, COALESCE(progress_msg, ''), COALESCE(error_msg, '')
 		FROM jobs
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -534,14 +660,14 @@ func (s *Server) fetchRecentJobs(limit int) []JobView {
 	}
 	defer rows.Close()
 
-	var jobs []JobView
+	var jobsList []JobView
 	for rows.Next() {
 		var j JobView
-		if err := rows.Scan(&j.ID, &j.Type, &j.Target, &j.Status, &j.Progress); err == nil {
-			jobs = append(jobs, j)
+		if err := rows.Scan(&j.ID, &j.Type, &j.Target, &j.Status, &j.Progress, &j.ProgressMsg, &j.ErrorMsg); err == nil {
+			jobsList = append(jobsList, j)
 		}
 	}
-	return jobs
+	return jobsList
 }
 
 func (s *Server) fetchLibraryItems() []LibraryItemView {

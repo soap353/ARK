@@ -15,11 +15,12 @@ const (
 
 // Standard Job Statuses
 const (
-	StatusPending = "pending"
-	StatusRunning = "running"
-	StatusDone    = "done"
-	StatusFailed  = "failed"
-	StatusPaused  = "paused"
+	StatusPending   = "pending"
+	StatusRunning   = "running"
+	StatusDone      = "done"
+	StatusFailed    = "failed"
+	StatusPaused    = "paused"
+	StatusCancelled = "cancelled"
 )
 
 // Job represents a work unit in the SQLite queue.

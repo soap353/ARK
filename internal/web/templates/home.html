@@ -56,7 +56,7 @@
   </div>
 </section>
 
-<section class="card" aria-label="Active download and background jobs">
+<section id="recent-jobs-card" class="card" aria-label="Active download and background jobs" {{ if .HasActiveJobs }}hx-get="/" hx-trigger="every 2s" hx-select="#recent-jobs-card" hx-target="#recent-jobs-card" hx-swap="outerHTML"{{ end }}>
   <div class="card-header">
     <h3>Recent Jobs</h3>
     <a href="/jobs" class="secondary-text" style="font-size: 14px; text-decoration: none;">View All &rarr;</a>
@@ -71,32 +71,51 @@
           <th>Target</th>
           <th>Status</th>
           <th>Progress</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {{ range .Jobs }}
         <tr>
           <td><strong>{{ .Type }}</strong></td>
-          <td class="secondary-text">{{ .Target }}</td>
+          <td>
+            <div>{{ .Target }}</div>
+            {{ if .ErrorMsg }}
+            <div style="color: var(--color-error); font-size: 12px;">{{ .ErrorMsg }}</div>
+            {{ else if .ProgressMsg }}
+            <div class="secondary-text" style="font-size: 12px;">{{ .ProgressMsg }}</div>
+            {{ end }}
+          </td>
           <td>
             {{ if eq .Status "done" }}
             <span class="badge badge-success">Done</span>
             {{ else if eq .Status "running" }}
-            <span class="badge" style="background-color: #FFB000; color: #0B0D10;">Running</span>
-            {{ else if eq .Status "failed" }}
-            <span class="badge badge-error">Failed</span>
+            <span class="badge badge-accent">Running</span>
+            {{ else if or (eq .Status "failed") (eq .Status "cancelled") }}
+            <span class="badge badge-error">{{ .Status }}</span>
             {{ else }}
             <span class="badge">{{ .Status }}</span>
             {{ end }}
           </td>
-          <td>{{ printf "%.0f%%" .Progress }}</td>
+          <td>{{ printf "%.1f%%" .Progress }}</td>
+          <td>
+            {{ if or (eq .Status "pending") (eq .Status "running") }}
+              <form action="/api/jobs/cancel" method="POST" style="margin: 0;">
+                <input type="hidden" name="id" value="{{ .ID }}">
+                <input type="hidden" name="redirect" value="/">
+                <button type="submit" class="btn btn-danger" style="min-height: 28px; padding: 0.1rem 0.5rem; font-size: 13px;">Cancel</button>
+              </form>
+            {{ else }}
+              <span class="secondary-text">-</span>
+            {{ end }}
+          </td>
         </tr>
         {{ end }}
       </tbody>
     </table>
   </div>
   {{ else }}
-  <p class="secondary-text" style="padding: 1rem 0;">No download or background jobs running. Download presets from <a href="/get-content" style="color: #FFB000;">Get Content</a>.</p>
+  <p class="secondary-text" style="padding: 1rem 0;">No download or background jobs running. Download presets from <a href="/get-content" style="color: var(--color-accent);">Get Content</a>.</p>
   {{ end }}
 </section>
 {{ end }}

@@ -4,8 +4,13 @@
   <button class="btn" onclick="location.reload()">Refresh</button>
 </div>
 
-<div class="card">
-  <h2>Active &amp; Queued Jobs</h2>
+<div id="jobs-card" class="card" {{ if .HasActiveJobs }}hx-get="/jobs" hx-trigger="every 2s" hx-select="#jobs-card" hx-target="#jobs-card" hx-swap="outerHTML"{{ end }}>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+    <h2>Active &amp; Queued Jobs</h2>
+    {{ if .HasActiveJobs }}
+    <span class="badge badge-accent">Auto-updating every 2s</span>
+    {{ end }}
+  </div>
   <div class="table-wrapper">
     <table>
       <thead>
@@ -24,14 +29,21 @@
           <tr>
             <td><code>{{ .ID }}</code></td>
             <td>{{ .Type }}</td>
-            <td>{{ .Target }}</td>
             <td>
-              <span class="badge {{ if eq .Status "running" }}badge-accent{{ else if eq .Status "done" }}badge-success{{ else if eq .Status "failed" }}badge-error{{ else }}badge{{ end }}">
+              <div style="font-weight: 500;">{{ .Target }}</div>
+              {{ if .ErrorMsg }}
+              <div style="color: var(--color-error); font-size: 13px; margin-top: 2px;">{{ .ErrorMsg }}</div>
+              {{ else if .ProgressMsg }}
+              <div class="secondary-text" style="font-size: 13px; margin-top: 2px;">{{ .ProgressMsg }}</div>
+              {{ end }}
+            </td>
+            <td>
+              <span class="badge {{ if eq .Status "running" }}badge-accent{{ else if eq .Status "done" }}badge-success{{ else if or (eq .Status "failed") (eq .Status "cancelled") }}badge-error{{ else }}badge{{ end }}">
                 {{ .Status }}
               </span>
             </td>
             <td>
-              <div style="min-width: 120px;">
+              <div style="min-width: 140px;">
                 <div style="font-size: 12px; margin-bottom: 4px;">{{ printf "%.1f" .Progress }}%</div>
                 <div class="storage-bar" style="height: 8px;">
                   <div class="storage-segment segment-zim" style="width: {{ .Progress }}%;"></div>
@@ -39,13 +51,30 @@
               </div>
             </td>
             <td>
-              {{ if eq .Status "failed" }}
-                <button class="btn" style="min-height: 32px; padding: 0.15rem 0.5rem; font-size: 14px;">Retry</button>
-              {{ else if eq .Status "running" }}
-                <button class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.5rem; font-size: 14px;">Pause</button>
-              {{ else }}
-                <span class="secondary-text">-</span>
-              {{ end }}
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                {{ if or (eq .Status "pending") (eq .Status "running") }}
+                  <form action="/api/jobs/cancel" method="POST" style="margin: 0;">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Cancel</button>
+                  </form>
+                {{ else if or (eq .Status "failed") (eq .Status "cancelled") }}
+                  <form action="/api/jobs/retry" method="POST" style="margin: 0;">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <button type="submit" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Retry</button>
+                  </form>
+                  <form action="/api/jobs/delete" method="POST" style="margin: 0;">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Remove</button>
+                  </form>
+                {{ else if eq .Status "done" }}
+                  <form action="/api/jobs/delete" method="POST" style="margin: 0;">
+                    <input type="hidden" name="id" value="{{ .ID }}">
+                    <button type="submit" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Remove</button>
+                  </form>
+                {{ else }}
+                  <span class="secondary-text">-</span>
+                {{ end }}
+              </div>
             </td>
           </tr>
           {{ end }}

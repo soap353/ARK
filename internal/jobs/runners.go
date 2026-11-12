@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +79,21 @@ func (r *Aria2cRunner) Run(ctx context.Context, job *Job, progress ProgressFunc)
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
+	targetURL := job.Target
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		if progress != nil {
+			progress(1.0, fmt.Sprintf("Resolving mirror for preset '%s'...", targetURL), 0, 0, 0)
+		}
+		resolved, err := r.resolvePresetURL(ctx, targetURL)
+		if err != nil {
+			return fmt.Errorf("resolve preset %q: %w", targetURL, err)
+		}
+		targetURL = resolved
+		jobCopy := *job
+		jobCopy.Target = targetURL
+		job = &jobCopy
+	}
+
 	// If aria2c is available on host, use it
 	if r.Aria2cBin != "" {
 		if _, err := exec.LookPath(r.Aria2cBin); err == nil {
@@ -88,6 +105,68 @@ func (r *Aria2cRunner) Run(ctx context.Context, job *Job, progress ProgressFunc)
 
 	// Fallback to pure Go HTTP client download (ponytail principles: standard library first)
 	return r.runHTTPFallback(ctx, job, meta, outputDir, progress)
+}
+
+func (r *Aria2cRunner) resolvePresetURL(ctx context.Context, preset string) (string, error) {
+	queryMap := map[string]string{
+		"wikipedia_en_top100": "wikipedia_en_top",
+		"wikipedia_en_mini":   "wikipedia_en_all_mini",
+		"wikipedia_en_nopic":  "wikipedia_en_all_nopic",
+		"wikipedia_en_full":   "wikipedia_en_all_maxi",
+		"wikimed":             "wikimed_en_all",
+		"survival_repair":     "ifixit_en_all",
+		"gutenberg":           "gutenberg_en_all",
+		"starter_pack":        "wikimed_en_all",
+		"ray_charles":         "wikipedia_en_ray_charles",
+	}
+	q := queryMap[preset]
+	if q == "" {
+		q = preset
+	}
+
+	opdsURL := "https://library.kiwix.org/catalog/v2/entries?count=1&q=" + url.QueryEscape(q)
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, opdsURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("kiwix catalog status %d", resp.StatusCode)
+	}
+
+	var feed struct {
+		Entries []struct {
+			Links []struct {
+				Rel  string `xml:"rel,attr"`
+				Href string `xml:"href,attr"`
+				Type string `xml:"type,attr"`
+			} `xml:"link"`
+		} `xml:"entry"`
+	}
+	if err := xml.NewDecoder(resp.Body).Decode(&feed); err != nil {
+		return "", fmt.Errorf("decode kiwix opds: %w", err)
+	}
+	if len(feed.Entries) == 0 {
+		return "", fmt.Errorf("no catalog entry found for %s", q)
+	}
+
+	for _, l := range feed.Entries[0].Links {
+		if strings.Contains(l.Rel, "acquisition") && l.Href != "" {
+			href := strings.TrimSuffix(l.Href, ".meta4")
+			return href, nil
+		}
+	}
+	return "", fmt.Errorf("no download link found in catalog for %s", q)
 }
 
 func (r *Aria2cRunner) runAria2c(ctx context.Context, job *Job, meta JobMetadata, outputDir string, progress ProgressFunc) error {
@@ -189,6 +268,14 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 	totalBytes := resp.ContentLength
 	if resp.StatusCode == http.StatusPartialContent {
 		totalBytes += existingBytes
+	}
+
+	if progress != nil {
+		var initPct float64 = 1.0
+		if totalBytes > 0 && existingBytes > 0 {
+			initPct = (float64(existingBytes) / float64(totalBytes)) * 100.0
+		}
+		progress(initPct, fmt.Sprintf("Downloading %s...", fileName), existingBytes, totalBytes, 0)
 	}
 
 	flags := os.O_CREATE | os.O_WRONLY

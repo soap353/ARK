@@ -16,6 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"ark/internal/docker"
+	"ark/internal/jobs"
 	"ark/internal/web"
 )
 
@@ -212,6 +213,14 @@ func runServer(args []string) {
 	if err != nil {
 		log.Fatalf("[Ark] Failed to initialize web server: %v", err)
 	}
+
+	// Initialize SQLite-backed Job Queue Manager
+	jobStore := jobs.NewJobStore(db)
+	_ = jobStore.ResetStaleRunning(context.Background())
+	queueMgr := jobs.NewQueueManager(jobStore, jobs.DefaultQueueConfig())
+	queueMgr.Start(context.Background())
+	defer queueMgr.Stop()
+	webServer.SetQueueManager(queueMgr)
 
 	// Initialize Docker client (graceful if Docker daemon is offline)
 	if dockerCli, err := docker.NewClient(); err == nil {

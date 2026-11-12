@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -31,7 +32,8 @@ type QueueManager struct {
 	encodeSem   chan struct{}
 	indexSem    chan struct{}
 
-	runners map[string]Runner
+	runners       map[string]Runner
+	activeCancels map[string]context.CancelFunc
 
 	notifyCh chan struct{}
 	stopCh   chan struct{}
@@ -58,13 +60,14 @@ func NewQueueManager(store *JobStore, cfg QueueConfig) *QueueManager {
 	ytdlp := NewYtDlpRunner("")
 
 	qm := &QueueManager{
-		store:       store,
-		downloadSem: make(chan struct{}, cfg.MaxDownloads),
-		encodeSem:   make(chan struct{}, cfg.MaxEncodes),
-		indexSem:    make(chan struct{}, cfg.MaxIndexes),
-		runners:     make(map[string]Runner),
-		notifyCh:    make(chan struct{}, 10),
-		stopCh:      make(chan struct{}),
+		store:         store,
+		downloadSem:   make(chan struct{}, cfg.MaxDownloads),
+		encodeSem:     make(chan struct{}, cfg.MaxEncodes),
+		indexSem:      make(chan struct{}, cfg.MaxIndexes),
+		runners:       make(map[string]Runner),
+		activeCancels: make(map[string]context.CancelFunc),
+		notifyCh:      make(chan struct{}, 10),
+		stopCh:        make(chan struct{}),
 	}
 
 	// Register default runners
@@ -118,6 +121,50 @@ func (qm *QueueManager) Submit(ctx context.Context, job *Job) error {
 	}
 	qm.notify()
 	return nil
+}
+
+// Notify wakes the dispatch loop to check for pending jobs.
+func (qm *QueueManager) Notify() {
+	qm.notify()
+}
+
+// Cancel cancels a pending or running job.
+func (qm *QueueManager) Cancel(ctx context.Context, jobID string) error {
+	qm.mu.Lock()
+	cancel, isRunning := qm.activeCancels[jobID]
+	qm.mu.Unlock()
+
+	if isRunning && cancel != nil {
+		cancel()
+	}
+
+	if err := qm.store.SetStatus(ctx, jobID, StatusCancelled, "Cancelled by user"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Retry resets a failed or cancelled job back to pending and wakes the dispatcher.
+func (qm *QueueManager) Retry(ctx context.Context, jobID string) error {
+	_ = qm.store.UpdateProgress(ctx, jobID, 0.0, "Queued for retry", 0, 0, 0)
+	if err := qm.store.SetStatus(ctx, jobID, StatusPending, ""); err != nil {
+		return err
+	}
+	qm.notify()
+	return nil
+}
+
+// Remove cancels the job if running and deletes it from the database.
+func (qm *QueueManager) Remove(ctx context.Context, jobID string) error {
+	qm.mu.Lock()
+	cancel, isRunning := qm.activeCancels[jobID]
+	qm.mu.Unlock()
+
+	if isRunning && cancel != nil {
+		cancel()
+	}
+
+	return qm.store.Delete(ctx, jobID)
 }
 
 func (qm *QueueManager) notify() {
@@ -200,7 +247,16 @@ indexLoop:
 }
 
 func (qm *QueueManager) runWorker(ctx context.Context, job *Job, sem chan struct{}) {
+	jobCtx, cancel := context.WithCancel(ctx)
+	qm.mu.Lock()
+	qm.activeCancels[job.ID] = cancel
+	qm.mu.Unlock()
+
 	defer func() {
+		cancel()
+		qm.mu.Lock()
+		delete(qm.activeCancels, job.ID)
+		qm.mu.Unlock()
 		<-sem
 		qm.wg.Done()
 		qm.notify() // Check if another job can immediately take the freed slot
@@ -219,8 +275,15 @@ func (qm *QueueManager) runWorker(ctx context.Context, job *Job, sem chan struct
 		_ = qm.store.UpdateProgress(ctx, job.ID, progress, msg, bytesDown, totalBytes, eta)
 	}
 
-	err := runner.Run(ctx, job, progressFunc)
+	err := runner.Run(jobCtx, job, progressFunc)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || jobCtx.Err() != nil {
+			_ = qm.store.SetStatus(ctx, job.ID, StatusCancelled, "Cancelled by user")
+			return
+		}
+		if cur, getErr := qm.store.Get(ctx, job.ID); getErr == nil && cur.Status == StatusCancelled {
+			return
+		}
 		_ = qm.store.SetStatus(ctx, job.ID, StatusFailed, err.Error())
 	} else {
 		_ = qm.store.UpdateProgress(ctx, job.ID, 100.0, "Completed", job.TotalBytes, job.TotalBytes, 0)

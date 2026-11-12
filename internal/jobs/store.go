@@ -153,7 +153,7 @@ func (s *JobStore) SetStatus(ctx context.Context, id string, status string, erro
 	var query string
 	var args []any
 
-	if status == StatusDone || status == StatusFailed {
+	if status == StatusDone || status == StatusFailed || status == StatusCancelled {
 		query = `
 			UPDATE jobs
 			SET status = ?,
@@ -328,6 +328,18 @@ func (s *JobStore) AcquireNextPending(ctx context.Context, allowedTypes []string
 	}
 
 	return &j, nil
+}
+
+// Delete removes a job from the database by ID.
+func (s *JobStore) Delete(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id)
+	return err
+}
+
+// ResetStaleRunning marks any jobs left in 'running' state (e.g. after a restart) back to 'pending'.
+func (s *JobStore) ResetStaleRunning(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE status = 'running'`)
+	return err
 }
 
 // CountByStatus returns a map of count by job status.
