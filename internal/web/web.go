@@ -10,11 +10,13 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"ark/internal/apps"
+	"ark/internal/docker"
 	"ark/internal/storage"
 )
 
@@ -71,6 +73,8 @@ type Server struct {
 	db        *sql.DB
 	dataDir   string
 	templates map[string]*template.Template
+	docker    *docker.Client
+	proxy     *apps.ProxyManager
 }
 
 // NewServer initializes templates and returns a configured Server
@@ -98,8 +102,19 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		db:        db,
 		dataDir:   dataDir,
 		templates: tmplMap,
+		proxy:     apps.NewProxyManager(),
 	}
 	return s, nil
+}
+
+// SetDockerClient attaches the Docker client used to manage app containers.
+func (s *Server) SetDockerClient(d *docker.Client) {
+	s.docker = d
+}
+
+// ProxyManager returns the reverse proxy manager for /a/<id>/ routes.
+func (s *Server) ProxyManager() *apps.ProxyManager {
+	return s.proxy
 }
 
 // RegisterRoutes binds all application routes to the given mux
@@ -130,6 +145,11 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
 	mux.HandleFunc("/api/apps/stop", s.handleAPIAppStop)
 	mux.HandleFunc("/api/apps/uninstall", s.handleAPIAppUninstall)
+
+	// App reverse proxy
+	if s.proxy != nil {
+		mux.Handle("/a/", s.proxy)
+	}
 
 	return nil
 }
@@ -303,14 +323,78 @@ func (s *Server) handleAPIAppInstall(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/apps", http.StatusSeeOther)
 }
 
+func (s *Server) startAppContainer(ctx context.Context, appID string) error {
+	if s.docker == nil || !s.docker.IsAvailable(ctx) {
+		return nil
+	}
+	catDir := findCatalogDir()
+	m, err := apps.LoadManifest(filepath.Join(catDir, appID, "app.yaml"))
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+	if err := s.docker.Pull(ctx, m.Image); err != nil {
+		log.Printf("[Ark] Pull warning for %s (%s): %v", appID, m.Image, err)
+	}
+	info, err := s.docker.EnsureRunning(ctx, m, s.dataDir)
+	if err != nil {
+		return fmt.Errorf("ensure running: %w", err)
+	}
+	if s.proxy != nil && info.HostPort > 0 {
+		target, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", info.HostPort))
+		if err == nil {
+			stripPrefix := m.ID != "kiwix"
+			s.proxy.Register(m.ID, target, stripPrefix)
+		}
+	}
+	if s.db != nil {
+		_, _ = s.db.Exec("UPDATE app_states SET container_id = ?, port = ?, status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", info.ID, info.HostPort, appID)
+	}
+	return nil
+}
+
+// RestoreRunningApps re-registers proxies for any apps marked running in SQLite.
+func (s *Server) RestoreRunningApps(ctx context.Context) {
+	if s.db == nil {
+		return
+	}
+	rows, err := s.db.Query("SELECT id FROM app_states WHERE status = 'running'")
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range ids {
+		if err := s.startAppContainer(ctx, id); err != nil {
+			log.Printf("[Ark] Failed to restore app %s: %v", id, err)
+		}
+	}
+}
+
 func (s *Server) handleAPIAppStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	appID := r.FormValue("id")
-	if appID != "" && s.db != nil {
-		_, _ = s.db.Exec("UPDATE app_states SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+	if appID != "" {
+		if err := s.startAppContainer(r.Context(), appID); err != nil {
+			log.Printf("[Ark] Failed to start app %s: %v", appID, err)
+			if s.db != nil {
+				_, _ = s.db.Exec("UPDATE app_states SET status = 'error', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+			}
+			http.Error(w, "Failed to start app container: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if s.docker == nil && s.db != nil {
+			_, _ = s.db.Exec("UPDATE app_states SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+		}
 	}
 	http.Redirect(w, r, "/apps", http.StatusSeeOther)
 }
@@ -321,8 +405,18 @@ func (s *Server) handleAPIAppStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	appID := r.FormValue("id")
-	if appID != "" && s.db != nil {
-		_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+	if appID != "" {
+		if s.docker != nil && s.docker.IsAvailable(r.Context()) {
+			if err := s.docker.Stop(r.Context(), appID, 10); err != nil {
+				log.Printf("[Ark] Failed to stop container %s: %v", appID, err)
+			}
+		}
+		if s.proxy != nil {
+			s.proxy.Unregister(appID)
+		}
+		if s.db != nil {
+			_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+		}
 	}
 	http.Redirect(w, r, "/apps", http.StatusSeeOther)
 }
@@ -333,8 +427,16 @@ func (s *Server) handleAPIAppUninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	appID := r.FormValue("id")
-	if appID != "" && s.db != nil {
-		_, _ = s.db.Exec("DELETE FROM app_states WHERE id = ?", appID)
+	if appID != "" {
+		if s.docker != nil && s.docker.IsAvailable(r.Context()) {
+			_ = s.docker.Remove(r.Context(), appID, true)
+		}
+		if s.proxy != nil {
+			s.proxy.Unregister(appID)
+		}
+		if s.db != nil {
+			_, _ = s.db.Exec("DELETE FROM app_states WHERE id = ?", appID)
+		}
 	}
 	http.Redirect(w, r, "/apps", http.StatusSeeOther)
 }

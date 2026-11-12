@@ -1,17 +1,18 @@
-/* Ark — Offline Internet Archive (N.O.M.A.D. Style)
-   WCAG AAA High-Contrast Low-Density Stylesheet */
+/* Ark — Offline Internet Archive
+   Bright Daylight Archival Palette + High-Density Low-Contrast Stencil Art */
 
 :root {
-  --color-bg: #0B0D10;
-  --color-surface: #15181D;
-  --color-surface-hover: #1D2128;
-  --color-border: #5C6168;
-  --color-text-primary: #F4F4F0;
-  --color-text-secondary: #80868B;
-  --color-accent: #FFB000;
-  --color-accent-text: #0B0D10;
-  --color-success: #3DD68C;
-  --color-error: #E5484D;
+  --color-bg: #F4F6F9;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #E9EEF4;
+  --color-border: #CBD5E1;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-accent: #0369A1;
+  --color-accent-hover: #075985;
+  --color-accent-text: #FFFFFF;
+  --color-success: #15803D;
+  --color-error: #B91C1C;
 
   --font-base: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   --font-size-base: 18px;
@@ -40,6 +41,10 @@
 
 body {
   background-color: var(--color-bg);
+  /* High-density, low-contrast archival & field-manual stencil art */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'%3E%3Cg fill='none' stroke='%230F172A' stroke-opacity='0.055' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0 40h240M0 120h240M0 200h240M40 0v240M120 0v240M200 0v240' stroke-dasharray='2 6'/%3E%3Ccircle cx='60' cy='60' r='22'/%3E%3Ccircle cx='60' cy='60' r='14' stroke-dasharray='4 3'/%3E%3Cpath d='M60 32v10M60 78v10M32 60h10M78 60h10M48 48l6 6M66 66l6 6M72 48l-6 6M54 66l-6 6'/%3E%3Cpath d='M150 36h36v44h-36z'/%3E%3Cpath d='M156 46h24M156 54h24M156 62h16M156 70h20'/%3E%3Cpath d='M10 155c18-14 34 8 52-6s32 10 50-4'/%3E%3Cpath d='M10 170c18-14 34 8 52-6s32 10 50-4' stroke-dasharray='3 3'/%3E%3Cpath d='M10 185c18-14 34 8 52-6s32 10 50-4'/%3E%3Cpolygon points='180,130 206,145 206,175 180,190 154,175 154,145'/%3E%3Cpolygon points='180,140 198,150 198,170 180,180 162,170 162,150' stroke-dasharray='3 2'/%3E%3Ccircle cx='180' cy='160' r='4'/%3E%3Cpath d='M120 205a28 28 0 0 1 28 28M120 215a18 18 0 0 1 18 18M120 225a8 8 0 0 1 8 8'/%3E%3Cpath d='M25 25l8-8m0 8l-8-8M215 25l8-8m0 8l-8-8M25 215l8-8m0 8l-8-8M215 215l8-8m0 8l-8-8'/%3E%3Cpath d='M95 95h10m-5-5v10M220 100h12M100 15v12'/%3E%3Ccircle cx='15' cy='105' r='2' fill='%230F172A' fill-opacity='0.055'/%3E%3Ccircle cx='135' cy='85' r='2' fill='%230F172A' fill-opacity='0.055'/%3E%3Ccircle cx='225' cy='225' r='2' fill='%230F172A' fill-opacity='0.055'/%3E%3Ccircle cx='85' cy='215' r='2' fill='%230F172A' fill-opacity='0.055'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 240px 240px;
   color: var(--color-text-primary);
   font-family: var(--font-base);
   font-size: var(--font-size-base);
@@ -209,7 +214,7 @@ p, span, label {
 }
 
 .btn-primary:hover {
-  background-color: #E59F00;
+  background-color: var(--color-accent-hover);
 }
 
 .btn-danger {
@@ -219,7 +224,7 @@ p, span, label {
 
 .btn-danger:hover {
   background-color: var(--color-error);
-  color: var(--color-text-primary);
+  color: #FFFFFF;
 }
 
 /* App Grid & Tiles (Low Density, Icon + One Word) */
@@ -276,6 +281,7 @@ p, span, label {
   border-radius: var(--border-radius);
   padding: 1.5rem;
   margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .card-header {

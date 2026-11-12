@@ -75,11 +75,11 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 <html>
 <head><title>App Unreachable — Ark</title>
 <style>
-body { background: #0B0D10; color: #F4F4F0; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-.box { text-align: center; max-width: 480px; padding: 32px; background: #15181D; border-radius: 8px; border: 1px solid #2A2F37; }
-h1 { color: #FFB000; font-size: 1.5rem; margin-bottom: 12px; }
-p { color: #80868B; line-height: 1.5; }
-a { color: #FFB000; text-decoration: none; }
+body { background: #F4F6F9; color: #0F172A; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { text-align: center; max-width: 480px; padding: 32px; background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
+h1 { color: #0369A1; font-size: 1.5rem; margin-bottom: 12px; }
+p { color: #475569; line-height: 1.5; }
+a { color: #0369A1; text-decoration: none; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -158,11 +158,11 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 <html>
 <head><title>App Not Running — Ark</title>
 <style>
-body { background: #0B0D10; color: #F4F4F0; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-.box { text-align: center; max-width: 480px; padding: 32px; background: #15181D; border-radius: 8px; border: 1px solid #2A2F37; }
-h1 { color: #FFB000; font-size: 1.5rem; margin-bottom: 12px; }
-p { color: #80868B; line-height: 1.5; }
-a { color: #FFB000; text-decoration: none; }
+body { background: #F4F6F9; color: #0F172A; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { text-align: center; max-width: 480px; padding: 32px; background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
+h1 { color: #0369A1; font-size: 1.5rem; margin-bottom: 12px; }
+p { color: #475569; line-height: 1.5; }
+a { color: #0369A1; text-decoration: none; font-weight: 600; }
 </style>
 </head>
 <body>

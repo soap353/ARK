@@ -61,7 +61,8 @@ func TestNewServerAndRoutes(t *testing.T) {
 		{"/ask", http.StatusOK, "Ask AI"},
 		{"/jobs", http.StatusOK, "Job Queue"},
 		{"/settings", http.StatusOK, "Settings"},
-		{"/static/ark.css", http.StatusOK, "--color-bg: #0B0D10;"},
+		{"/a/kiwix/", http.StatusNotFound, "App Not Active"},
+		{"/static/ark.css", http.StatusOK, "--color-bg: #F4F6F9;"},
 		{"/static/htmx.min.js", http.StatusOK, "htmx"},
 	}
 
@@ -176,14 +177,16 @@ func TestCSSWCAGPalette(t *testing.T) {
 	css := string(cssData)
 
 	expectedTokens := []string{
-		"#0B0D10", // Background
-		"#F4F4F0", // Primary text (17.7:1 AAA)
-		"#FFB000", // Accent (10.6:1 AAA)
-		"#80868B", // Secondary text (5.3:1 AA)
-		"#5C6168", // Decorative divider
-		"#3DD68C", // Success
-		"#E5484D", // Error
+		"#F4F6F9", // Bright background
+		"#FFFFFF", // Surface
+		"#0F172A", // Primary text (17.4:1 AAA)
+		"#0369A1", // Accent (5.9:1 AA+)
+		"#475569", // Secondary text (7.5:1 AAA)
+		"#CBD5E1", // Border
+		"#15803D", // Success
+		"#B91C1C", // Error
 		"18px",    // Font base size
+		"data:image/svg+xml", // Stencil art background
 		"prefers-reduced-motion",
 	}
 
