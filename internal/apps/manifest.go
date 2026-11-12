@@ -184,8 +184,13 @@ func (m *AppManifest) ResolveBinds(dataDir string) []string {
 			// Named docker volume like ark-qdrant
 			resolvedHost = hostPart
 		} else {
-			// Subfolder inside ArkData
-			resolvedHost = filepath.Join(dataDir, hostPart)
+			// Subfolder inside ArkData (must be absolute for Docker bind mounts)
+			joined := filepath.Join(dataDir, hostPart)
+			if abs, err := filepath.Abs(joined); err == nil {
+				resolvedHost = abs
+			} else {
+				resolvedHost = joined
+			}
 			_ = os.MkdirAll(resolvedHost, 0755)
 		}
 

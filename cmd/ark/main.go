@@ -195,6 +195,9 @@ func runServer(args []string) {
 	if envDir := os.Getenv("ARK_DATA_DIR"); envDir != "" {
 		dataDir = envDir
 	}
+	if absDir, err := filepath.Abs(dataDir); err == nil {
+		dataDir = absDir
+	}
 
 	log.Printf("[Ark] Initializing Command Center with data directory: %s", dataDir)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
