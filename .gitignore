@@ -5,7 +5,7 @@
 *.so
 *.dylib
 bin/
-ark
+/ark
 
 # Runtime data & databases
 data/
