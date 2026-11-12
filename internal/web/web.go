@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -9,7 +10,12 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
+
+	"ark/internal/apps"
+	"ark/internal/storage"
 )
 
 //go:embed templates/* static/*
@@ -33,15 +39,30 @@ type LibraryItemView struct {
 	OpenURL  string
 }
 
+// AppView represents an application module in the catalog or installed
+type AppView struct {
+	ID          string
+	Name        string
+	Category    string
+	Description string
+	Image       string
+	Status      string // "not_installed", "running", "stopped", "error"
+	ProxyMode   string
+	OpenURL     string
+}
+
 // PageData carries standard context for HTML templates
 type PageData struct {
 	Title              string
 	ActiveNav          string
 	StorageFreeGB      uint64
 	StorageTotalGB     uint64
+	StorageUsedGB      uint64
 	StorageUsedPercent uint64
 	Jobs               []JobView
 	Items              []LibraryItemView
+	InstalledApps      []AppView
+	AvailableApps      []AppView
 	AIConnected        bool
 }
 
@@ -105,6 +126,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 
 	// API endpoints
 	mux.HandleFunc("/api/jobs", s.handleAPIJobs)
+	mux.HandleFunc("/api/apps/install", s.handleAPIAppInstall)
+	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
+	mux.HandleFunc("/api/apps/stop", s.handleAPIAppStop)
+	mux.HandleFunc("/api/apps/uninstall", s.handleAPIAppUninstall)
 
 	return nil
 }
@@ -125,13 +150,18 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jobs := s.fetchRecentJobs(5)
+	freeGB, totalGB, usedGB, pct := s.getStorageStats(r.Context())
+	installedApps, _ := s.fetchApps()
+
 	data := PageData{
 		Title:              "Home",
 		ActiveNav:          "home",
-		StorageFreeGB:      128,
-		StorageTotalGB:     512,
-		StorageUsedPercent: 75,
+		StorageFreeGB:      freeGB,
+		StorageTotalGB:     totalGB,
+		StorageUsedGB:      usedGB,
+		StorageUsedPercent: pct,
 		Jobs:               jobs,
+		InstalledApps:      installedApps,
 	}
 	s.render(w, "home.html", data)
 }
@@ -155,9 +185,12 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
+	installedApps, availableApps := s.fetchApps()
 	data := PageData{
-		Title:     "Apps",
-		ActiveNav: "apps",
+		Title:         "Apps",
+		ActiveNav:     "apps",
+		InstalledApps: installedApps,
+		AvailableApps: availableApps,
 	}
 	s.render(w, "apps.html", data)
 }
@@ -187,9 +220,14 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	freeGB, totalGB, usedGB, pct := s.getStorageStats(r.Context())
 	data := PageData{
-		Title:     "Settings",
-		ActiveNav: "settings",
+		Title:              "Settings",
+		ActiveNav:          "settings",
+		StorageFreeGB:      freeGB,
+		StorageTotalGB:     totalGB,
+		StorageUsedGB:      usedGB,
+		StorageUsedPercent: pct,
 	}
 	s.render(w, "settings.html", data)
 }
@@ -221,6 +259,161 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/jobs", http.StatusSeeOther)
+}
+
+func findCatalogDir() string {
+	candidates := []string{"catalog", "../../catalog", "../catalog"}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && fi.IsDir() {
+			return c
+		}
+	}
+	return "catalog"
+}
+
+func (s *Server) handleAPIAppInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	appID := r.FormValue("id")
+	if appID == "" || s.db == nil {
+		http.Error(w, "Invalid app ID", http.StatusBadRequest)
+		return
+	}
+
+	catDir := findCatalogDir()
+	m, err := apps.LoadManifest(filepath.Join(catDir, appID, "app.yaml"))
+	if err != nil {
+		http.Error(w, "Manifest not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	_, err = s.db.Exec(`
+		INSERT INTO app_states (id, name, category, image, status, proxy_mode, auto_start, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'stopped', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET status = 'stopped', updated_at = CURRENT_TIMESTAMP
+	`, m.ID, m.Name, m.Category, m.Image, m.Proxy)
+	if err != nil {
+		log.Printf("Failed to install app %s: %v", appID, err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/apps", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIAppStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	appID := r.FormValue("id")
+	if appID != "" && s.db != nil {
+		_, _ = s.db.Exec("UPDATE app_states SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+	}
+	http.Redirect(w, r, "/apps", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIAppStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	appID := r.FormValue("id")
+	if appID != "" && s.db != nil {
+		_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+	}
+	http.Redirect(w, r, "/apps", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIAppUninstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	appID := r.FormValue("id")
+	if appID != "" && s.db != nil {
+		_, _ = s.db.Exec("DELETE FROM app_states WHERE id = ?", appID)
+	}
+	http.Redirect(w, r, "/apps", http.StatusSeeOther)
+}
+
+func (s *Server) fetchApps() ([]AppView, []AppView) {
+	catDir := findCatalogDir()
+	manifests, _ := apps.LoadAllManifests(catDir)
+
+	installedMap := make(map[string]AppView)
+	if s.db != nil {
+		rows, err := s.db.Query(`
+			SELECT id, name, category, image, status, proxy_mode
+			FROM app_states
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var id, name, category, image, status, proxyMode string
+				if err := rows.Scan(&id, &name, &category, &image, &status, &proxyMode); err == nil {
+					openURL := "#"
+					if proxyMode == "path" {
+						openURL = fmt.Sprintf("/a/%s/", id)
+					}
+					installedMap[id] = AppView{
+						ID:        id,
+						Name:      name,
+						Category:  category,
+						Image:     image,
+						Status:    status,
+						ProxyMode: proxyMode,
+						OpenURL:   openURL,
+					}
+				}
+			}
+		}
+	}
+
+	var installed []AppView
+	var available []AppView
+
+	for _, m := range manifests {
+		app := AppView{
+			ID:        m.ID,
+			Name:      m.Name,
+			Category:  m.Category,
+			Image:     m.Image,
+			Status:    "not_installed",
+			ProxyMode: m.Proxy,
+			OpenURL:   fmt.Sprintf("/a/%s/", m.ID),
+		}
+
+		if state, found := installedMap[m.ID]; found {
+			app.Status = state.Status
+			if state.Status == "running" || state.Status == "stopped" {
+				installed = append(installed, app)
+			}
+		}
+		available = append(available, app)
+	}
+
+	return installed, available
+}
+
+func (s *Server) getStorageStats(ctx context.Context) (uint64, uint64, uint64, uint64) {
+	if s.dataDir == "" {
+		return 0, 0, 0, 0
+	}
+	report, err := storage.GetDiskUsage(ctx, s.dataDir)
+	if err != nil || report == nil {
+		return 0, 0, 0, 0
+	}
+	usedGB := uint64(report.TotalUsedBytes / (1024 * 1024 * 1024))
+	freeGB := uint64(report.TotalFreeBytes / (1024 * 1024 * 1024))
+	totalGB := uint64(report.DiskTotalBytes / (1024 * 1024 * 1024))
+	var pct uint64
+	if totalGB > 0 {
+		pct = (usedGB * 100) / totalGB
+	}
+	return freeGB, totalGB, usedGB, pct
 }
 
 func (s *Server) fetchRecentJobs(limit int) []JobView {

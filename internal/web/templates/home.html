@@ -7,125 +7,96 @@
 </section>
 
 <section aria-label="Installed applications">
-  <h2>Applications</h2>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Installed Applications</h2>
+    <a href="/apps" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Manage Apps</a>
+  </div>
+
+  {{ if .InstalledApps }}
   <div class="app-grid">
-    <a href="/library" class="app-tile" aria-label="Open Library">
+    {{ range .InstalledApps }}
+    <a href="{{ .OpenURL }}" class="app-tile" aria-label="Open {{ .Name }}">
       <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
       </svg>
-      <span class="tile-label">Library</span>
-      <span class="tile-status">Offline</span>
+      <span class="tile-label">{{ .Name }}</span>
+      <span class="tile-status">{{ .Status }}</span>
     </a>
-
-    <a href="/a/kiwix/" class="app-tile" aria-label="Open Wikipedia and Kiwix Archives">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-2h2v2zm0-4H9V7h2v5zm4 4h-2v-2h2v2zm0-4h-2V7h2v5z"/>
-      </svg>
-      <span class="tile-label">Wikipedia</span>
-      <span class="tile-status">Kiwix</span>
-    </a>
-
-    <a href="/a/maps/" class="app-tile" aria-label="Open Offline Maps">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/>
-      </svg>
-      <span class="tile-label">Maps</span>
-      <span class="tile-status">Vector OSM</span>
-    </a>
-
-    <a href="/a/druglabels/" class="app-tile" aria-label="Open Medical Drug Labels">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4.5 10.5C3.67 10.5 3 11.17 3 12s.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5h-15zM10.5 4.5C10.5 3.67 11.17 3 12 3s1.5.67 1.5 1.5v15c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5v-15z"/>
-      </svg>
-      <span class="tile-label">Medical</span>
-      <span class="tile-status">FDA Labels</span>
-    </a>
-
-    <a href="/a/cyberchef/" class="app-tile" aria-label="Open CyberChef Tools">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/>
-      </svg>
-      <span class="tile-label">Tools</span>
-      <span class="tile-status">CyberChef</span>
-    </a>
-
-    <a href="/a/flatnotes/" class="app-tile" aria-label="Open FlatNotes">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-      </svg>
-      <span class="tile-label">Notes</span>
-      <span class="tile-status">FlatNotes</span>
-    </a>
-
-    <a href="/a/kolibri/" class="app-tile" aria-label="Open Kolibri Education">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
-      </svg>
-      <span class="tile-label">Education</span>
-      <span class="tile-status">Kolibri</span>
-    </a>
-
-    <a href="/ask" class="app-tile" aria-label="Open Local AI Assistant">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
-      </svg>
-      <span class="tile-label">Ask</span>
-      <span class="tile-status">AI Server</span>
-    </a>
+    {{ end }}
   </div>
+  {{ else }}
+  <div class="card" style="text-align: center; padding: 2.5rem 1.5rem;">
+    <h3 style="margin-bottom: 0.5rem;">Zero Pre-installed Apps</h3>
+    <p class="secondary-text" style="max-width: 520px; margin: 0 auto 1.5rem auto;">
+      Ark comes completely unbundled with no pre-installed packages, default content, or running background containers. Choose and install only the modular apps you want.
+    </p>
+    <a href="/apps" class="btn btn-primary">Browse Available Apps</a>
+  </div>
+  {{ end }}
 </section>
 
 <section class="card" aria-label="Storage status">
   <div class="card-header">
     <h3>Storage</h3>
-    <span class="secondary-text">{{ .StorageFreeGB }} GB free of {{ .StorageTotalGB }} GB</span>
+    <span class="secondary-text">{{ .StorageUsedGB }} GB used of {{ .StorageTotalGB }} GB ({{ .StorageFreeGB }} GB free)</span>
   </div>
   <div class="storage-bar-wrapper">
     <div class="storage-bar" role="progressbar" aria-valuenow="{{ .StorageUsedPercent }}" aria-valuemin="0" aria-valuemax="100">
-      <div class="storage-segment segment-zim" style="width: 35%;" title="ZIM Wikipedia / Knowledge"></div>
-      <div class="storage-segment segment-maps" style="width: 15%;" title="Maps"></div>
-      <div class="storage-segment segment-media" style="width: 10%;" title="Media & Video"></div>
-      <div class="storage-segment segment-ai" style="width: 5%;" title="AI & Models"></div>
+      {{ if gt .StorageUsedPercent 0 }}
+      <div class="storage-segment segment-zim" style="width: {{ .StorageUsedPercent }}%;" title="Used storage ({{ .StorageUsedGB }} GB)"></div>
+      {{ end }}
     </div>
   </div>
-  <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 14px;">
-    <span><span style="color: #FFB000;">&#x25CF;</span> ZIM Knowledge</span>
-    <span><span style="color: #3DD68C;">&#x25CF;</span> Maps</span>
-    <span><span style="color: #5C8CFF;">&#x25CF;</span> Media</span>
-    <span><span style="color: #B466FF;">&#x25CF;</span> AI</span>
+  <div style="margin-top: 0.75rem; font-size: 14px;">
+    {{ if eq .StorageUsedGB 0 }}
+    <span class="secondary-text">Storage is clean (0 GB downloaded).</span>
+    {{ else }}
+    <span class="secondary-text">{{ .StorageUsedGB }} GB utilized on disk.</span>
+    {{ end }}
   </div>
 </section>
 
 <section class="card" aria-label="Active download and background jobs">
   <div class="card-header">
-    <h3>Active Jobs</h3>
-    <a href="/jobs" class="btn" style="padding: 0.25rem 0.75rem; min-height: 36px; font-size: 14px;">View Queue</a>
+    <h3>Recent Jobs</h3>
+    <a href="/jobs" class="secondary-text" style="font-size: 14px; text-decoration: none;">View All &rarr;</a>
   </div>
+
   {{ if .Jobs }}
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Target</th>
-            <th>Status</th>
-            <th>Progress</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{ range .Jobs }}
-          <tr>
-            <td>{{ .Type }}</td>
-            <td>{{ .Target }}</td>
-            <td><span class="badge {{ if eq .Status "running" }}badge-accent{{ else }}badge-success{{ end }}">{{ .Status }}</span></td>
-            <td>{{ printf "%.1f" .Progress }}%</td>
-          </tr>
-          {{ end }}
-        </tbody>
-      </table>
-    </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Target</th>
+          <th>Status</th>
+          <th>Progress</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Jobs }}
+        <tr>
+          <td><strong>{{ .Type }}</strong></td>
+          <td class="secondary-text">{{ .Target }}</td>
+          <td>
+            {{ if eq .Status "done" }}
+            <span class="badge badge-success">Done</span>
+            {{ else if eq .Status "running" }}
+            <span class="badge" style="background-color: #FFB000; color: #0B0D10;">Running</span>
+            {{ else if eq .Status "failed" }}
+            <span class="badge badge-error">Failed</span>
+            {{ else }}
+            <span class="badge">{{ .Status }}</span>
+            {{ end }}
+          </td>
+          <td>{{ printf "%.0f%%" .Progress }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
   {{ else }}
-    <p class="secondary-text">No active background jobs. System idle.</p>
+  <p class="secondary-text" style="padding: 1rem 0;">No download or background jobs running. Download presets from <a href="/get-content" style="color: #FFB000;">Get Content</a>.</p>
   {{ end }}
 </section>
 {{ end }}
