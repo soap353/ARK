@@ -6,11 +6,12 @@ import (
 
 // Standard Job Types
 const (
-	TypeDownload = "download"
-	TypeEncode   = "encode"
-	TypeIndex    = "index"
-	TypeZim      = "zim"
-	TypePreset   = "preset"
+	TypeDownload   = "download"
+	TypeEncode     = "encode"
+	TypeIndex      = "index"
+	TypeZim        = "zim"
+	TypePreset     = "preset"
+	TypeDrugLabels = "druglabels"
 )
 
 // Standard Job Statuses

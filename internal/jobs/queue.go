@@ -75,6 +75,7 @@ func NewQueueManager(store *JobStore, cfg QueueConfig) *QueueManager {
 	qm.RegisterRunner(TypePreset, aria2)
 	qm.RegisterRunner(TypeZim, zimit)
 	qm.RegisterRunner(TypeEncode, ytdlp)
+	qm.RegisterRunner(TypeDrugLabels, NewDrugLabelsRunner())
 
 	return qm
 }
@@ -199,7 +200,7 @@ downloadLoop:
 	for {
 		select {
 		case qm.downloadSem <- struct{}{}:
-			job, err := qm.store.AcquireNextPending(ctx, []string{TypeDownload, TypePreset})
+			job, err := qm.store.AcquireNextPending(ctx, []string{TypeDownload, TypePreset, TypeDrugLabels})
 			if err != nil || job == nil {
 				<-qm.downloadSem
 				break downloadLoop

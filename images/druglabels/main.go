@@ -225,6 +225,14 @@ const htmlIndex = `<!DOCTYPE html>
     margin-right: 6px;
     font-weight: 600;
   }
+  @media (max-width: 600px) {
+    body { padding: 14px; font-size: 16px; }
+    .search-row { flex-direction: column; }
+    .btn { width: 100%; min-height: 48px; }
+    .mode-tab { flex: 1 1 auto; text-align: center; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+    .chip { padding: 8px 12px; }
+    .card { padding: 14px; }
+  }
 </style>
 </head>
 <body>

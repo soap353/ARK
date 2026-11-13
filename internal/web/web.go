@@ -497,6 +497,24 @@ func (s *Server) handleAPIAppInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if m.ID == "druglabels" && s.queue != nil {
+		dbFile := filepath.Join(s.dataDir, "druglabels", "druglabels.db")
+		if _, statErr := os.Stat(dbFile); os.IsNotExist(statErr) {
+			metaBytes, _ := json.Marshal(jobs.JobMetadata{
+				OutputDir: filepath.Join(s.dataDir, "druglabels"),
+			})
+			_ = s.queue.Submit(r.Context(), &jobs.Job{
+				ID:          fmt.Sprintf("job-druglabels-%d", time.Now().UnixNano()),
+				Type:        jobs.TypeDrugLabels,
+				Target:      "openFDA Drug Labels Database",
+				Status:      jobs.StatusPending,
+				Progress:    0.0,
+				ProgressMsg: "Queued FDA drug labels database download",
+				Metadata:    string(metaBytes),
+			})
+		}
+	}
+
 	http.Redirect(w, r, "/apps", http.StatusSeeOther)
 }
 
