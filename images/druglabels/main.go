@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,6 +25,8 @@ type DrugLabel struct {
 	BrandName      string `json:"brand_name"`
 	GenericName    string `json:"generic_name"`
 	Manufacturer   string `json:"manufacturer"`
+	NDC            string `json:"ndc"`
+	Imprint        string `json:"imprint"`
 	BoxedWarning   string `json:"boxed_warning"`
 	Indications    string `json:"indications_and_usage"`
 	Dosage         string `json:"dosage_and_administration"`
@@ -35,7 +38,42 @@ type DrugLabel struct {
 	Storage        string `json:"storage_and_handling"`
 }
 
-var db *sql.DB
+type Situation struct {
+	Label string
+	Query string
+}
+
+var commonSituations = []Situation{
+	{"Fever", "fever"},
+	{"Fever (Child)", "fever child"},
+	{"Pain / Ache", "pain"},
+	{"Headache / Migraine", "headache"},
+	{"Burn / Sunburn", "burn"},
+	{"Cut / Wound / Antiseptic", "wound OR cut OR antiseptic"},
+	{"Allergy / Hives", "allergy"},
+	{"Rash / Itching", "rash OR itch"},
+	{"Cough", "cough"},
+	{"Cold / Congestion", "congestion OR cold"},
+	{"Sore Throat", "sore throat"},
+	{"Nausea / Vomiting", "nausea OR vomiting"},
+	{"Diarrhea", "diarrhea"},
+	{"Constipation", "constipation"},
+	{"Heartburn / Acid Reflux", "heartburn OR acid"},
+	{"Asthma / Breathing", "asthma OR breathing"},
+	{"Bacterial Infection", "infection"},
+	{"Eye Irritation", "eye"},
+	{"Earache", "ear"},
+	{"Insect Bite / Sting", "bite OR sting"},
+	{"Sprain / Swelling", "swelling OR inflammation"},
+	{"Sleep / Insomnia", "sleep OR insomnia"},
+}
+
+var (
+	db         *sql.DB
+	importMu   sync.Mutex
+	isImporting bool
+	importErr  string
+)
 
 const htmlIndex = `<!DOCTYPE html>
 <html lang="en">
@@ -62,15 +100,42 @@ const htmlIndex = `<!DOCTYPE html>
     font-size: 18px;
     line-height: 1.6;
   }
-  .container { max-width: 820px; margin: 0 auto; }
-  h1 { font-size: 1.8rem; margin-bottom: 6px; }
+  .container { max-width: 860px; margin: 0 auto; }
+  .topbar { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 12px; }
+  h1 { font-size: 1.8rem; margin: 0 0 4px 0; }
   .quiet-disclaimer {
     color: var(--secondary);
     font-size: 0.9rem;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
+  }
+  .mode-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .mode-tab {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  .mode-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #FFFFFF;
+  }
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
   }
   input[type="text"] {
-    width: 100%;
+    flex: 1;
     box-sizing: border-box;
     padding: 14px 18px;
     background: var(--surface);
@@ -79,10 +144,23 @@ const htmlIndex = `<!DOCTYPE html>
     color: var(--primary);
     font-size: 1.05rem;
     outline: none;
-    margin-bottom: 24px;
   }
   input[type="text"]:focus {
     border-color: var(--accent);
+  }
+  .btn {
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--accent);
+    color: #FFFFFF;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--primary);
   }
   .card {
     background: var(--surface);
@@ -94,6 +172,27 @@ const htmlIndex = `<!DOCTYPE html>
   }
   .card h2 { margin-top: 0; font-size: 1.35rem; color: var(--accent); }
   .card .meta { color: var(--secondary); font-size: 0.92rem; margin-bottom: 12px; }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .chip {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+  .chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
   .boxed-warning {
     background: #FEF2F2;
     border-left: 4px solid var(--danger);
@@ -130,12 +229,53 @@ const htmlIndex = `<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
-  <h1>FDA Drug Labels</h1>
+  <div class="topbar">
+    <h1>FDA Drug Labels</h1>
+    <span class="badge">{{.LabelCount}} labels offline</span>
+  </div>
   <div class="quiet-disclaimer">Label text from FDA. Not medical advice.</div>
 
-  <form method="GET" action="">
-    <input type="text" name="q" value="{{.Query}}" placeholder="Search by name (ibuprofen) or situation (fever child, burn)..." autofocus>
+  {{if eq .LabelCount 0}}
+  <div class="card" style="border-color: var(--accent);">
+    <h2 style="margin-bottom: 8px;">Offline Drug Database Empty</h2>
+    <p style="margin-top: 0; color: var(--secondary); font-size: 0.95rem;">
+      Download the public-domain openFDA drug label dataset into your local storage so name, situation, and pill ID/NDC searches work offline.
+    </p>
+    {{if .Importing}}
+      <div class="badge" style="background: #DBEAFE; color: #1E40AF;">Importing openFDA labels in background... Refresh in a minute.</div>
+    {{else}}
+      <form method="POST" action="api/import" style="margin: 0;">
+        <button type="submit" class="btn">Download FDA Drug Labels</button>
+      </form>
+    {{end}}
+    {{if .ImportError}}
+      <p style="color: var(--danger); font-size: 0.9rem; margin-bottom: 0;">Last import error: {{.ImportError}}</p>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="mode-tabs">
+    <a href="?{{if .Query}}q={{.Query}}{{end}}" class="mode-tab {{if eq .Mode ""}}active{{end}}">All (Name / Situation / Pill ID)</a>
+    <a href="?mode=situation{{if .Query}}&q={{.Query}}{{end}}" class="mode-tab {{if eq .Mode "situation"}}active{{end}}">By Situation</a>
+    <a href="?mode=pill{{if .Query}}&q={{.Query}}{{end}}" class="mode-tab {{if eq .Mode "pill"}}active{{end}}">By Pill ID / Imprint / NDC</a>
+  </div>
+
+  <form method="GET" action="" class="search-row">
+    {{if .Mode}}<input type="hidden" name="mode" value="{{.Mode}}">{{end}}
+    <input type="text" name="q" value="{{.Query}}" placeholder="{{if eq .Mode "pill"}}Enter pill imprint (e.g. L484, I-2, M365) or NDC (0573-0169)...{{else if eq .Mode "situation"}}Enter symptom or situation (e.g. fever child, burn, allergy)...{{else}}Search by drug name (ibuprofen), situation (fever child), or pill imprint / NDC...{{end}}" autofocus>
+    <button type="submit" class="btn">Search</button>
   </form>
+
+  {{if or (eq .Query "") (eq .Mode "situation")}}
+  <div class="card">
+    <strong style="font-size: 0.95rem;">Common Situations &amp; Symptoms</strong>
+    <div class="chips">
+      {{range .Situations}}
+        <a class="chip" href="?mode=situation&q={{.Query}}">{{.Label}}</a>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
 
   {{if .Query}}
     <div style="margin-bottom: 16px; color: var(--secondary);">Showing {{len .Results}} result(s) for "{{.Query}}"</div>
@@ -147,6 +287,8 @@ const htmlIndex = `<!DOCTYPE html>
     <div class="meta">
       {{if .GenericName}}<div><span class="badge">Generic</span>{{.GenericName}}</div>{{end}}
       {{if .Manufacturer}}<div><span class="badge">Manufacturer</span>{{.Manufacturer}}</div>{{end}}
+      {{if .NDC}}<div><span class="badge">NDC</span>{{.NDC}}</div>{{end}}
+      {{if .Imprint}}<div><span class="badge">Pill ID / Description</span>{{.Imprint}}</div>{{end}}
     </div>
 
     {{if .BoxedWarning}}
@@ -207,9 +349,7 @@ const htmlIndex = `<!DOCTYPE html>
   </div>
   {{else}}
     {{if .Query}}
-      <p style="color: var(--secondary);">No matching drug labels found. Try searching for generic names or symptoms.</p>
-    {{else}}
-      <p style="color: var(--secondary);">Enter a medication name or symptom above to search FDA approved drug labels.</p>
+      <p style="color: var(--secondary);">No matching drug labels found. Try another medication name, situation chip, or pill imprint / NDC.</p>
     {{end}}
   {{end}}
 </div>
@@ -217,8 +357,13 @@ const htmlIndex = `<!DOCTYPE html>
 </html>`
 
 type PageData struct {
-	Query   string
-	Results []DrugLabel
+	Query       string
+	Mode        string
+	LabelCount  int
+	Importing   bool
+	ImportError string
+	Situations  []Situation
+	Results     []DrugLabel
 }
 
 func dbFilePath() string {
@@ -237,6 +382,8 @@ func ensureSchema(targetDB *sql.DB) error {
 		brand_name TEXT,
 		generic_name TEXT,
 		manufacturer TEXT,
+		ndc TEXT DEFAULT '',
+		imprint TEXT DEFAULT '',
 		boxed_warning TEXT,
 		indications TEXT,
 		dosage TEXT,
@@ -246,25 +393,35 @@ func ensureSchema(targetDB *sql.DB) error {
 		active_ingredient TEXT,
 		inactive_ingredient TEXT,
 		storage TEXT
-	);
+	);`
+	if _, err := targetDB.Exec(schema); err != nil {
+		return err
+	}
+	// Migrate older DBs safely if ndc/imprint columns were absent
+	_, _ = targetDB.Exec(`ALTER TABLE labels ADD COLUMN ndc TEXT DEFAULT ''`)
+	_, _ = targetDB.Exec(`ALTER TABLE labels ADD COLUMN imprint TEXT DEFAULT ''`)
+
+	ftsSchema := `
 	CREATE VIRTUAL TABLE IF NOT EXISTS labels_fts USING fts5(
 		set_id UNINDEXED,
 		brand_name,
 		generic_name,
+		ndc,
+		imprint,
 		indications,
 		warnings,
 		content='labels',
 		content_rowid='rowid'
 	);
 	CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels BEGIN
-		INSERT INTO labels_fts(rowid, brand_name, generic_name, indications, warnings)
-		VALUES (new.rowid, new.brand_name, new.generic_name, new.indications, new.warnings);
+		INSERT INTO labels_fts(rowid, brand_name, generic_name, ndc, imprint, indications, warnings)
+		VALUES (new.rowid, new.brand_name, new.generic_name, new.ndc, new.imprint, new.indications, new.warnings);
 	END;
 	CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels BEGIN
-		INSERT INTO labels_fts(labels_fts, rowid, brand_name, generic_name, indications, warnings)
-		VALUES ('delete', old.rowid, old.brand_name, old.generic_name, old.indications, old.warnings);
+		INSERT INTO labels_fts(labels_fts, rowid, brand_name, generic_name, ndc, imprint, indications, warnings)
+		VALUES ('delete', old.rowid, old.brand_name, old.generic_name, old.ndc, old.imprint, old.indications, old.warnings);
 	END;`
-	_, err := targetDB.Exec(schema)
+	_, err := targetDB.Exec(ftsSchema)
 	return err
 }
 
@@ -283,6 +440,25 @@ func initDB() {
 
 func firstStr(arr []string) string {
 	return strings.TrimSpace(strings.Join(arr, "\n"))
+}
+
+func joinUnique(parts ...[]string) string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, list := range parts {
+		for _, item := range list {
+			item = strings.TrimSpace(item)
+			if item != "" && !seen[item] {
+				seen[item] = true
+				out = append(out, item)
+			}
+		}
+	}
+	res := strings.Join(out, " | ")
+	if len(res) > 500 {
+		res = res[:500]
+	}
+	return res
 }
 
 // importOpenFDA streams FDA drug label partitions from api.fda.gov/download.json into a temp SQLite DB and swaps atomically.
@@ -363,7 +539,12 @@ func importOpenFDA(ctx context.Context, manifestURL string) error {
 						BrandName        []string `json:"brand_name"`
 						GenericName      []string `json:"generic_name"`
 						ManufacturerName []string `json:"manufacturer_name"`
+						ProductNDC       []string `json:"product_ndc"`
+						PackageNDC       []string `json:"package_ndc"`
 					} `json:"openfda"`
+					SPLProductData []string `json:"spl_product_data_elements"`
+					Description    []string `json:"description"`
+					HowSupplied    []string `json:"how_supplied"`
 					BoxedWarning   []string `json:"boxed_warning"`
 					Indications    []string `json:"indications_and_usage"`
 					Dosage         []string `json:"dosage_and_administration"`
@@ -379,16 +560,20 @@ func importOpenFDA(ctx context.Context, manifestURL string) error {
 			rc.Close()
 
 			tx, _ := tmpDB.Begin()
-			stmt, _ := tx.Prepare(`INSERT OR REPLACE INTO labels (set_id, brand_name, generic_name, manufacturer, boxed_warning, indications, dosage, warnings, do_not_use, stop_use, active_ingredient, inactive_ingredient, storage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+			stmt, _ := tx.Prepare(`INSERT OR REPLACE INTO labels (set_id, brand_name, generic_name, manufacturer, ndc, imprint, boxed_warning, indications, dosage, warnings, do_not_use, stop_use, active_ingredient, inactive_ingredient, storage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 			for _, rec := range payload.Results {
 				if rec.SetID == "" {
 					continue
 				}
+				ndc := joinUnique(rec.OpenFDA.ProductNDC, rec.OpenFDA.PackageNDC)
+				imprint := joinUnique(rec.SPLProductData, rec.Description, rec.HowSupplied)
 				_, _ = stmt.Exec(
 					rec.SetID,
 					firstStr(rec.OpenFDA.BrandName),
 					firstStr(rec.OpenFDA.GenericName),
 					firstStr(rec.OpenFDA.ManufacturerName),
+					ndc,
+					imprint,
 					firstStr(rec.BoxedWarning),
 					firstStr(rec.Indications),
 					firstStr(rec.Dosage),
@@ -417,7 +602,16 @@ func importOpenFDA(ctx context.Context, manifestURL string) error {
 	return nil
 }
 
-func searchLabels(query string) []DrugLabel {
+func countLabels() int {
+	if db == nil {
+		return 0
+	}
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM labels`).Scan(&n)
+	return n
+}
+
+func searchLabels(query, mode string) []DrugLabel {
 	if db == nil || strings.TrimSpace(query) == "" {
 		return nil
 	}
@@ -426,30 +620,45 @@ func searchLabels(query string) []DrugLabel {
 	var rows *sql.Rows
 	var err error
 
-	ftsQuery := `
-		SELECT l.set_id, l.brand_name, l.generic_name, l.manufacturer,
-		       l.boxed_warning, l.indications, l.dosage, l.warnings,
-		       l.do_not_use, l.stop_use, l.active_ingredient, l.inactive_ingredient, l.storage
-		FROM labels_fts f
-		JOIN labels l ON f.rowid = l.rowid
-		WHERE labels_fts MATCH ?
-		ORDER BY bm25(labels_fts)
-		LIMIT 25`
-	rows, err = db.Query(ftsQuery, cleanQ+"*")
-	if err != nil {
+	if mode == "pill" {
 		likeQ := "%" + cleanQ + "%"
-		likeQuery := `
-			SELECT set_id, brand_name, generic_name, manufacturer,
+		rows, err = db.Query(`
+			SELECT set_id, brand_name, generic_name, manufacturer, COALESCE(ndc,''), COALESCE(imprint,''),
 			       boxed_warning, indications, dosage, warnings,
 			       do_not_use, stop_use, active_ingredient, inactive_ingredient, storage
 			FROM labels
-			WHERE brand_name LIKE ? OR generic_name LIKE ? OR indications LIKE ?
-			LIMIT 25`
-		rows, err = db.Query(likeQuery, likeQ, likeQ, likeQ)
-		if err != nil {
-			log.Printf("Search query failed: %v", err)
-			return nil
+			WHERE ndc LIKE ? OR imprint LIKE ? OR brand_name LIKE ?
+			LIMIT 25`, likeQ, likeQ, likeQ)
+	} else {
+		ftsExpr := cleanQ
+		if !strings.Contains(cleanQ, " OR ") && !strings.HasSuffix(cleanQ, "*") {
+			ftsExpr = cleanQ + "*"
 		}
+		ftsQuery := `
+			SELECT l.set_id, l.brand_name, l.generic_name, l.manufacturer, COALESCE(l.ndc,''), COALESCE(l.imprint,''),
+			       l.boxed_warning, l.indications, l.dosage, l.warnings,
+			       l.do_not_use, l.stop_use, l.active_ingredient, l.inactive_ingredient, l.storage
+			FROM labels_fts f
+			JOIN labels l ON f.rowid = l.rowid
+			WHERE labels_fts MATCH ?
+			ORDER BY bm25(labels_fts)
+			LIMIT 25`
+		rows, err = db.Query(ftsQuery, ftsExpr)
+		if err != nil {
+			likeQ := "%" + cleanQ + "%"
+			likeQuery := `
+				SELECT set_id, brand_name, generic_name, manufacturer, COALESCE(ndc,''), COALESCE(imprint,''),
+				       boxed_warning, indications, dosage, warnings,
+				       do_not_use, stop_use, active_ingredient, inactive_ingredient, storage
+				FROM labels
+				WHERE brand_name LIKE ? OR generic_name LIKE ? OR indications LIKE ? OR ndc LIKE ? OR imprint LIKE ?
+				LIMIT 25`
+			rows, err = db.Query(likeQuery, likeQ, likeQ, likeQ, likeQ, likeQ)
+		}
+	}
+	if err != nil {
+		log.Printf("Search query failed: %v", err)
+		return nil
 	}
 	defer rows.Close()
 
@@ -457,7 +666,7 @@ func searchLabels(query string) []DrugLabel {
 	for rows.Next() {
 		var item DrugLabel
 		if err := rows.Scan(
-			&item.SetID, &item.BrandName, &item.GenericName, &item.Manufacturer,
+			&item.SetID, &item.BrandName, &item.GenericName, &item.Manufacturer, &item.NDC, &item.Imprint,
 			&item.BoxedWarning, &item.Indications, &item.Dosage, &item.Warnings,
 			&item.DoNotUse, &item.StopUse, &item.ActiveIngred, &item.InactiveIngred, &item.Storage,
 		); err == nil {
@@ -490,9 +699,33 @@ func main() {
 
 	http.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
-		res := searchLabels(q)
+		mode := r.URL.Query().Get("mode")
+		res := searchLabels(q, mode)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
+	})
+
+	http.HandleFunc("/api/import", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		importMu.Lock()
+		if !isImporting {
+			isImporting = true
+			importErr = ""
+			go func() {
+				err := importOpenFDA(context.Background(), "")
+				importMu.Lock()
+				isImporting = false
+				if err != nil {
+					importErr = err.Error()
+				}
+				importMu.Unlock()
+			}()
+		}
+		importMu.Unlock()
+		http.Redirect(w, r, "../", http.StatusSeeOther)
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -501,10 +734,22 @@ func main() {
 			return
 		}
 		q := r.URL.Query().Get("q")
-		res := searchLabels(q)
+		mode := r.URL.Query().Get("mode")
+		res := searchLabels(q, mode)
+
+		importMu.Lock()
+		importing := isImporting
+		lastErr := importErr
+		importMu.Unlock()
+
 		data := PageData{
-			Query:   q,
-			Results: res,
+			Query:       q,
+			Mode:        mode,
+			LabelCount:  countLabels(),
+			Importing:   importing,
+			ImportError: lastErr,
+			Situations:  commonSituations,
+			Results:     res,
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = tmpl.Execute(w, data)
