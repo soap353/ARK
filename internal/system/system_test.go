@@ -3,10 +3,14 @@ package system
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestCollectMetrics(t *testing.T) {
@@ -67,5 +71,39 @@ func TestSSEFeed(t *testing.T) {
 
 	if !foundEvent || !foundData {
 		t.Fatalf("Did not find expected SSE stream format. Body:\n%s", body)
+	}
+}
+
+func TestShutdownAndStartupDowntimeTracking(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "dt.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create settings: %v", err)
+	}
+
+	ctx := t.Context()
+	t0 := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	if err := RecordShutdownTime(ctx, db, t0); err != nil {
+		t.Fatalf("RecordShutdownTime: %v", err)
+	}
+
+	t1 := t0.Add(2*time.Hour + 15*time.Minute)
+	dt := RecordStartupAndComputeDowntime(ctx, db, t1)
+	if !dt.HasPrevious || dt.DowntimeHuman != "2h 15m" {
+		t.Fatalf("expected 2h 15m downtime, got %+v", dt)
+	}
+
+	loaded := GetDowntimeInfo(ctx, db)
+	if !loaded.HasPrevious || loaded.DowntimeHuman != "2h 15m" {
+		t.Fatalf("expected persisted downtime 2h 15m, got %+v", loaded)
+	}
+
+	// Clock rollback safety: earlier timestamp should clamp to 0s without negative duration
+	dtBack := RecordStartupAndComputeDowntime(ctx, db, t0.Add(-5*time.Minute))
+	if !dtBack.HasPrevious || dtBack.Downtime != 0 {
+		t.Errorf("expected clock rollback clamped to 0, got %+v", dtBack)
 	}
 }

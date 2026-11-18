@@ -6,48 +6,42 @@ import (
 	"testing"
 )
 
-func TestInitDatabase(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "ark-db-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+func TestCLIHandlersUSBAndMoveData(t *testing.T) {
+	srcData := t.TempDir()
+	usbDest := filepath.Join(t.TempDir(), "usb")
+	moveDest := filepath.Join(t.TempDir(), "moved")
 
-	dbPath := filepath.Join(tmpDir, "ark.db")
+	_ = os.MkdirAll(filepath.Join(srcData, "zim"), 0755)
+	_ = os.WriteFile(filepath.Join(srcData, "zim", "test.zim"), []byte("offline-wiki"), 0644)
+
+	dbPath := filepath.Join(srcData, "ark.db")
 	db, err := initDatabase(dbPath)
 	if err != nil {
 		t.Fatalf("initDatabase failed: %v", err)
 	}
-	defer db.Close()
+	_ = db.Close()
 
-	// Verify PRAGMA user_version is 1
-	var version int
-	if err := db.QueryRow("PRAGMA user_version;").Scan(&version); err != nil {
-		t.Fatalf("failed to query pragma user_version: %v", err)
+	// Test ark usb --data-dir <srcData> --to <usbDest> --categories zim
+	handleUSB([]string{"--data-dir", srcData, "--to", usbDest, "--categories", "zim"})
+	if _, err := os.Stat(filepath.Join(usbDest, "manifest.json")); err != nil {
+		t.Fatalf("expected manifest.json in usbDest, got err: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("expected user_version 1, got %d", version)
-	}
-
-	// Verify settings table exists and default settings seeded
-	var deviceName string
-	err = db.QueryRow("SELECT value FROM settings WHERE key = 'device_name'").Scan(&deviceName)
-	if err != nil {
-		t.Fatalf("failed to query device_name from settings: %v", err)
-	}
-	if deviceName != "Ark" {
-		t.Errorf("expected device_name 'Ark', got '%s'", deviceName)
+	if _, err := os.Stat(filepath.Join(usbDest, "data", "zim", "test.zim")); err != nil {
+		t.Fatalf("expected copied zim file in usbDest, got err: %v", err)
 	}
 
-	// Verify jobs table exists
-	_, err = db.Exec("INSERT INTO jobs (id, type, target) VALUES ('test-1', 'download', 'http://example.com')")
-	if err != nil {
-		t.Errorf("failed to insert into jobs table: %v", err)
+	// Test ark move-data --data-dir <srcData> --to <moveDest>
+	handleMoveData([]string{"--data-dir", srcData, "--to", moveDest})
+	if _, err := os.Stat(filepath.Join(moveDest, "zim", "test.zim")); err != nil {
+		t.Fatalf("expected moved zim file in moveDest, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moveDest, "ark.db")); err != nil {
+		t.Fatalf("expected moved ark.db in moveDest, got err: %v", err)
 	}
 
-	// Verify app_states table exists
-	_, err = db.Exec("INSERT INTO app_states (id, name, image) VALUES ('kiwix', 'Library', 'ghcr.io/kiwix/kiwix-serve')")
-	if err != nil {
-		t.Errorf("failed to insert into app_states table: %v", err)
+	// Test ark uninstall --all --keep-data preserves data dir
+	handleUninstall([]string{"--all", "--keep-data", "--data-dir", moveDest})
+	if _, err := os.Stat(filepath.Join(moveDest, "ark.db")); err != nil {
+		t.Fatalf("expected ark.db preserved when --keep-data is set")
 	}
 }

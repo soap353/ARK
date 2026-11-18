@@ -1,7 +1,9 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -247,5 +249,43 @@ func TestHTTPFallbackDownload(t *testing.T) {
 	}
 	if string(data) != content {
 		t.Errorf("Output content mismatch: got %q, want %q", string(data), content)
+	}
+}
+
+func TestAria2cRunnerParallelRangeDownload(t *testing.T) {
+	// 2.5 MB payload triggers 6x parallel segmented Range download path (>= 2 MB)
+	payload := bytes.Repeat([]byte("ARK-RANGE-TEST-BLOCK-0123456789!"), (2*1024*1024+512*1024)/32)
+	wantHash := sha256.Sum256(payload)
+
+	var rangeReqs atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			rangeReqs.Add(1)
+		}
+		http.ServeContent(w, r, "big.bin", time.Now(), bytes.NewReader(payload))
+	}))
+	defer ts.Close()
+
+	tempDir := t.TempDir()
+	runner := NewAria2cRunner("non-existent-binary-path")
+	job := &Job{
+		ID:       "test-range-6x",
+		Type:     TypeDownload,
+		Target:   ts.URL + "/big.bin",
+		Metadata: fmt.Sprintf(`{"output_dir":"%s","file_name":"big.bin"}`, filepath.ToSlash(tempDir)),
+	}
+	if err := runner.Run(context.Background(), job, nil); err != nil {
+		t.Fatalf("parallel Range download failed: %v", err)
+	}
+	if rangeReqs.Load() < 2 {
+		t.Errorf("expected parallel Range requests >= 2, got %d", rangeReqs.Load())
+	}
+
+	gotBytes, err := os.ReadFile(filepath.Join(tempDir, "big.bin"))
+	if err != nil {
+		t.Fatalf("read big.bin: %v", err)
+	}
+	if sha256.Sum256(gotBytes) != wantHash {
+		t.Fatalf("parallel range file SHA-256 mismatch (got %d bytes, want %d)", len(gotBytes), len(payload))
 	}
 }

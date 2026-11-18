@@ -2,14 +2,16 @@ version: 1
 id: maps
 name: Maps
 category: maps
+description: Offline regional vector maps, TileJSON, and saved waypoints.
 icon: map.svg
-image: protomaps/go-pmtiles:v1.12.0
+image: ghcr.io/protomaps/go-pmtiles:latest
 command:
   - "serve"
   - "/data/maps"
   - "--cors=*"
 port: 8080
 proxy: path
+open_url: /maps
 volumes:
   - "maps:/data/maps:ro"
 healthcheck: /

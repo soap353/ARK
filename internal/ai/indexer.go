@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +58,7 @@ func EnsureSchema(ctx context.Context, db *sql.DB) error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
+		CREATE VIRTUAL TABLE IF NOT EXISTS rag_fts USING fts5(chunk_id UNINDEXED, doc_id UNINDEXED, source_path UNINDEXED, title, content);
 	`)
 	return err
 }
@@ -134,25 +134,19 @@ func ExtractFile(ctx context.Context, filePath string) ([]ExtractedDoc, error) {
 		if err != nil {
 			return nil, err
 		}
-		raw := string(b)
-		title := filepath.Base(filePath)
-		if m := titleTagRe.FindStringSubmatch(raw); len(m) > 1 {
-			t := strings.TrimSpace(html.UnescapeString(htmlTagRe.ReplaceAllString(m[1], "")))
-			if t != "" {
-				title = t
-			}
-		}
-		cleaned := scriptStyleRe.ReplaceAllString(raw, " ")
-		cleaned = htmlTagRe.ReplaceAllString(cleaned, "\n")
-		cleaned = html.UnescapeString(cleaned)
-		cleaned = multiSpaceRe.ReplaceAllString(cleaned, " ")
-		cleaned = multiNewline.ReplaceAllString(cleaned, "\n\n")
+		title, plain := htmlToPlainText(string(b), filepath.Base(filePath), 0)
 		return []ExtractedDoc{{
 			Path:  filePath,
 			Title: title,
-			Text:  strings.TrimSpace(cleaned),
+			Text:  plain,
 		}}, nil
-	case ".pdf", ".epub", ".zim", ".png", ".jpg", ".jpeg", ".webp", ".tiff":
+	case ".zim":
+		return extractZIM(ctx, filePath)
+	case ".epub":
+		return extractEPUB(ctx, filePath)
+	case ".pdf":
+		return extractPDF(ctx, filePath)
+	case ".png", ".jpg", ".jpeg", ".webp", ".tiff":
 		return extractViaDockerIndexer(ctx, filePath)
 	default:
 		b, err := os.ReadFile(filePath)
@@ -235,11 +229,16 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 	}
 
 	if progress != nil {
-		progress(10.0, "Extracting text...")
+		progress(10.0, "Extracting text from "+filepath.Base(sourcePath)+"...")
 	}
 	docs, err := ExtractFile(ctx, sourcePath)
 	if err != nil {
 		return 0, err
+	}
+
+	// Archive path for ZIM/EPUB containers so single-article archives still record archive-level source_path.
+	if len(docs) > 1 || strings.EqualFold(filepath.Ext(sourcePath), ".zim") || strings.EqualFold(filepath.Ext(sourcePath), ".epub") {
+		return indexArchiveDocs(ctx, db, conn, qdrant, collection, sourceType, sourcePath, titleOverride, docs, progress)
 	}
 
 	totalChunks := 0
@@ -248,7 +247,7 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 			return totalChunks, ctx.Err()
 		}
 		docTitle := doc.Title
-		if titleOverride != "" && len(docs) == 1 {
+		if titleOverride != "" {
 			docTitle = titleOverride
 		}
 		if docTitle == "" {
@@ -270,12 +269,6 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 			continue
 		}
 
-		// Clean previous chunks for this doc
-		_, _ = db.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
-		if qdrant != nil {
-			_ = qdrant.DeleteBySource(ctx, collection, doc.Path)
-		}
-
 		// Compute embeddings if embedding model and Qdrant are available
 		var embeddings [][]float32
 		if conn.BaseURL != "" && conn.EmbedModel != "" && qdrant != nil && qdrant.IsHealthy(ctx) {
@@ -290,13 +283,30 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 			}
 		}
 
+		tx, txErr := db.BeginTx(ctx, nil)
+		if txErr != nil {
+			return totalChunks, txErr
+		}
+		_, _ = tx.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
+		_, _ = tx.ExecContext(ctx, `DELETE FROM rag_fts WHERE doc_id = ?`, docID)
+		if qdrant != nil {
+			_ = qdrant.DeleteBySource(ctx, collection, doc.Path)
+		}
+
 		var points []VectorPoint
 		for ci, chunkText := range chunks {
 			chunkID := deterministicUUID(fmt.Sprintf("%s#%d", doc.Path, ci))
-			_, _ = db.ExecContext(ctx, `
+			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO rag_chunks (id, doc_id, source_path, title, chunk_index, content, content_hash, embed_model)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			`, chunkID, docID, doc.Path, docTitle, ci, chunkText, docHash, conn.EmbedModel)
+			`, chunkID, docID, doc.Path, docTitle, ci, chunkText, docHash, conn.EmbedModel); err != nil {
+				_ = tx.Rollback()
+				return totalChunks, err
+			}
+			_, _ = tx.ExecContext(ctx, `
+				INSERT INTO rag_fts (chunk_id, doc_id, source_path, title, content)
+				VALUES (?, ?, ?, ?, ?)
+			`, chunkID, docID, doc.Path, docTitle, chunkText)
 
 			if len(embeddings) == len(chunks) {
 				points = append(points, VectorPoint{
@@ -316,11 +326,12 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 
 		if len(points) > 0 && qdrant != nil {
 			if err := qdrant.Upsert(ctx, collection, points); err != nil {
+				_ = tx.Rollback()
 				return totalChunks, err
 			}
 		}
 
-		_, err = db.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO rag_documents (id, source_type, source_path, title, indexed_pages, qdrant_collection, indexed_at)
 			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(id) DO UPDATE SET
@@ -330,6 +341,10 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 				indexed_at = CURRENT_TIMESTAMP
 		`, docID, sourceType, doc.Path, docTitle, len(chunks), collection)
 		if err != nil {
+			_ = tx.Rollback()
+			return totalChunks, err
+		}
+		if err := tx.Commit(); err != nil {
 			return totalChunks, err
 		}
 
@@ -341,6 +356,110 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 
 	if progress != nil {
 		progress(100.0, fmt.Sprintf("Indexed %d chunks", totalChunks))
+	}
+	return totalChunks, nil
+}
+
+func indexArchiveDocs(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClient, collection, sourceType, sourcePath, titleOverride string, docs []ExtractedDoc, progress func(float64, string)) (int, error) {
+	docID := "rag-" + hashText(sourcePath)[:16]
+	archiveTitle := strings.TrimSpace(titleOverride)
+	if archiveTitle == "" {
+		archiveTitle = strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
+	}
+	archiveHash := hashText(fmt.Sprintf("%s:%d:%s", sourcePath, len(docs), docs[0].Title))
+	if st, err := os.Stat(sourcePath); err == nil {
+		archiveHash = hashText(fmt.Sprintf("%s:%d:%d", sourcePath, st.Size(), st.ModTime().Unix()))
+	}
+
+	var existingHash string
+	if err := db.QueryRowContext(ctx, `SELECT content_hash FROM rag_chunks WHERE doc_id = ? LIMIT 1`, docID).Scan(&existingHash); err == nil && existingHash == archiveHash {
+		if progress != nil {
+			progress(100.0, fmt.Sprintf("Already indexed (%d articles cached)", len(docs)))
+		}
+		return 0, nil
+	}
+
+	if progress != nil {
+		progress(35.0, fmt.Sprintf("Indexing %d extracted articles into FTS search...", len(docs)))
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	_, _ = tx.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM rag_fts WHERE doc_id = ?`, docID)
+
+	stmtChunk, err := tx.PrepareContext(ctx, `
+		INSERT INTO rag_chunks (id, doc_id, source_path, title, chunk_index, content, content_hash, embed_model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '')
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	defer stmtChunk.Close()
+
+	stmtFTS, err := tx.PrepareContext(ctx, `
+		INSERT INTO rag_fts (chunk_id, doc_id, source_path, title, content)
+		VALUES (?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	defer stmtFTS.Close()
+
+	totalChunks := 0
+	for i, doc := range docs {
+		if i%500 == 0 {
+			if ctx.Err() != nil {
+				_ = tx.Rollback()
+				return totalChunks, ctx.Err()
+			}
+			if progress != nil {
+				pct := 35.0 + (float64(i)/float64(len(docs)))*60.0
+				progress(pct, fmt.Sprintf("Indexed %d / %d articles (%d chunks)...", i, len(docs), totalChunks))
+			}
+		}
+		itemTitle := doc.Title
+		if itemTitle == "" {
+			itemTitle = archiveTitle
+		}
+		displayTitle := itemTitle + " (" + archiveTitle + ")"
+		chunks := ChunkText(doc.Text, 3200, 300)
+		for ci, chunkText := range chunks {
+			chunkID := deterministicUUID(fmt.Sprintf("%s#%s#%d", sourcePath, doc.Path, ci))
+			if _, err := stmtChunk.ExecContext(ctx, chunkID, docID, doc.Path, displayTitle, totalChunks, chunkText, archiveHash); err != nil {
+				_ = tx.Rollback()
+				return totalChunks, err
+			}
+			if _, err := stmtFTS.ExecContext(ctx, chunkID, docID, doc.Path, displayTitle, chunkText); err != nil {
+				_ = tx.Rollback()
+				return totalChunks, err
+			}
+			totalChunks++
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO rag_documents (id, source_type, source_path, title, indexed_pages, qdrant_collection, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			title = excluded.title,
+			indexed_pages = excluded.indexed_pages,
+			qdrant_collection = excluded.qdrant_collection,
+			indexed_at = CURRENT_TIMESTAMP
+	`, docID, sourceType, sourcePath, archiveTitle, totalChunks, collection)
+	if err != nil {
+		_ = tx.Rollback()
+		return totalChunks, err
+	}
+	if err := tx.Commit(); err != nil {
+		return totalChunks, err
+	}
+	if progress != nil {
+		progress(100.0, fmt.Sprintf("Indexed %d articles (%d chunks)", len(docs), totalChunks))
 	}
 	return totalChunks, nil
 }
@@ -366,11 +485,65 @@ func SearchKnowledge(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantC
 		}
 	}
 
-	// 2. Local SQLite keyword fallback over indexed chunks
+	// 2. Local SQLite FTS5 search (handles tens of thousands of chunks in milliseconds)
 	if db == nil {
 		return nil, nil
 	}
 	_ = EnsureSchema(ctx, db)
+
+	runFTS := func(ftsExpr string, limit int) []ScoredPoint {
+		if ftsExpr == "" || limit <= 0 {
+			return nil
+		}
+		frows, ferr := db.QueryContext(ctx, `
+			SELECT chunk_id, source_path, title, content, bm25(rag_fts, 3.0, 1.0) AS rank
+			FROM rag_fts
+			WHERE rag_fts MATCH ?
+			ORDER BY rank ASC
+			LIMIT ?
+		`, ftsExpr, limit)
+		if ferr != nil {
+			return nil
+		}
+		defer frows.Close()
+		var out []ScoredPoint
+		for frows.Next() {
+			var sp ScoredPoint
+			var rank float64
+			if err := frows.Scan(&sp.ID, &sp.SourcePath, &sp.Title, &sp.Text, &rank); err == nil {
+				sp.Score = float32(1.0 / (1.0 - rank))
+				out = append(out, sp)
+			}
+		}
+		return out
+	}
+
+	if andExpr, orExpr := buildFTSQueries(query); orExpr != "" {
+		var ftsHits []ScoredPoint
+		seenID := make(map[string]bool)
+		if andExpr != "" && andExpr != orExpr {
+			for _, h := range runFTS(andExpr, topK) {
+				if !seenID[h.ID] {
+					seenID[h.ID] = true
+					ftsHits = append(ftsHits, h)
+				}
+			}
+		}
+		if len(ftsHits) < topK {
+			for _, h := range runFTS(orExpr, topK) {
+				if !seenID[h.ID] {
+					seenID[h.ID] = true
+					ftsHits = append(ftsHits, h)
+					if len(ftsHits) >= topK {
+						break
+					}
+				}
+			}
+		}
+		if len(ftsHits) > 0 {
+			return ftsHits, nil
+		}
+	}
 
 	terms := strings.Fields(strings.ToLower(query))
 	rows, err := db.QueryContext(ctx, `SELECT id, source_path, title, chunk_index, content FROM rag_chunks LIMIT 500`)
@@ -455,9 +628,50 @@ func RemoveDocument(ctx context.Context, db *sql.DB, qdrant *QdrantClient, docID
 	if qdrant != nil && sourcePath != "" {
 		_ = qdrant.DeleteBySource(ctx, coll, sourcePath)
 	}
+	_, _ = db.ExecContext(ctx, `DELETE FROM rag_fts WHERE doc_id = ?`, docID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
 	_, err := db.ExecContext(ctx, `DELETE FROM rag_documents WHERE id = ?`, docID)
 	return err
+}
+
+var ftsTokenRe = regexp.MustCompile(`[a-zA-Z0-9]{2,}`)
+
+var ftsStopWords = map[string]bool{
+	"about": true, "after": true, "all": true, "also": true, "and": true, "are": true,
+	"brief": true, "briefly": true, "can": true, "concise": true, "could": true, "did": true, "does": true,
+	"explain": true, "for": true, "from": true, "give": true, "have": true, "how": true, "into": true, "its": true,
+	"know": true, "like": true, "make": true, "more": true, "please": true, "quick": true, "quickly": true,
+	"short": true, "some": true, "summarize": true, "summary": true, "tell": true, "than": true, "that": true,
+	"the": true, "their": true, "them": true, "then": true, "there": true, "these": true, "they": true, "this": true,
+	"using": true, "want": true, "was": true, "were": true, "what": true, "when": true, "where": true,
+	"which": true, "who": true, "why": true, "will": true, "with": true, "would": true, "you": true, "your": true,
+}
+
+func buildFTSQueries(raw string) (andQuery, orQuery string) {
+	tokens := ftsTokenRe.FindAllString(strings.ToLower(raw), 16)
+	if len(tokens) == 0 {
+		return "", ""
+	}
+	seen := make(map[string]bool, len(tokens))
+	var out, fallback []string
+	for _, t := range tokens {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		quoted := `"` + t + `"`
+		fallback = append(fallback, quoted)
+		if !ftsStopWords[t] {
+			out = append(out, quoted)
+		}
+	}
+	if len(out) == 0 {
+		out = fallback
+	}
+	if len(out) >= 2 && len(out) <= 5 {
+		andQuery = strings.Join(out, " ")
+	}
+	return andQuery, strings.Join(out, " OR ")
 }
 
 // LoadConnFromDB reads AI connection settings from SQLite settings table.

@@ -81,10 +81,18 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 	}
 
 	destPath := filepath.Join(outDir, "druglabels.db")
+	if isHealthyPopulatedDB(destPath) {
+		if progress != nil {
+			progress(100.0, "FDA Drug Labels database ready", 0, 0, 0)
+		}
+		return nil
+	}
+
 	tmpPath := destPath + ".tmp"
 	_ = os.Remove(tmpPath)
+	_ = os.Remove(tmpPath + "-journal")
 
-	tmpDB, err := sql.Open("sqlite", tmpPath)
+	tmpDB, err := sql.Open("sqlite", tmpPath+"?_pragma=journal_mode(DELETE)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return err
 	}
@@ -113,21 +121,6 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 			inactive_ingredient TEXT,
 			storage TEXT
 		);
-		CREATE VIRTUAL TABLE IF NOT EXISTS labels_fts USING fts5(
-			set_id UNINDEXED,
-			brand_name,
-			generic_name,
-			ndc,
-			imprint,
-			indications,
-			warnings,
-			content='labels',
-			content_rowid='rowid'
-		);
-		CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels BEGIN
-			INSERT INTO labels_fts(rowid, brand_name, generic_name, ndc, imprint, indications, warnings)
-			VALUES (new.rowid, new.brand_name, new.generic_name, new.ndc, new.imprint, new.indications, new.warnings);
-		END;
 	`); err != nil {
 		return err
 	}
@@ -140,7 +133,7 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 			return ctx.Err()
 		}
 		if progress != nil {
-			pct := 2.0 + (float64(idx)/float64(len(parts)))*95.0
+			pct := 2.0 + (float64(idx)/float64(len(parts)))*90.0
 			progress(pct, fmt.Sprintf("Downloading FDA partition %d/%d...", idx+1, len(parts)), 0, 0, 0)
 		}
 
@@ -232,17 +225,74 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 		}
 	}
 
+	if progress != nil {
+		progress(94.0, "Building offline full-text index...", 0, 0, 0)
+	}
+	if _, err := tmpDB.Exec(`
+		CREATE VIRTUAL TABLE IF NOT EXISTS labels_fts USING fts5(
+			set_id UNINDEXED,
+			brand_name,
+			generic_name,
+			ndc,
+			imprint,
+			indications,
+			warnings,
+			content='labels',
+			content_rowid='rowid'
+		);
+		INSERT INTO labels_fts(labels_fts) VALUES('rebuild');
+		CREATE TRIGGER IF NOT EXISTS labels_ai AFTER INSERT ON labels BEGIN
+			INSERT INTO labels_fts(rowid, brand_name, generic_name, ndc, imprint, indications, warnings)
+			VALUES (new.rowid, new.brand_name, new.generic_name, new.ndc, new.imprint, new.indications, new.warnings);
+		END;
+		CREATE TRIGGER IF NOT EXISTS labels_ad AFTER DELETE ON labels BEGIN
+			INSERT INTO labels_fts(labels_fts, rowid, brand_name, generic_name, ndc, imprint, indications, warnings)
+			VALUES ('delete', old.rowid, old.brand_name, old.generic_name, old.ndc, old.imprint, old.indications, old.warnings);
+		END;
+	`); err != nil {
+		return fmt.Errorf("build FTS5 index: %w", err)
+	}
+
 	_, _ = tmpDB.Exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('export_date', ?)`, manifest.Results.Drug.Label.ExportDate)
 	_ = tmpDB.Close()
 	tmpDB = nil
 
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		return err
+	var renameErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		renameErr = os.Rename(tmpPath, destPath)
+		if renameErr == nil {
+			break
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	if renameErr != nil {
+		return renameErr
 	}
 	if progress != nil {
 		progress(100.0, "FDA Drug Labels database ready", 0, 0, 0)
 	}
 	return nil
+}
+
+func isHealthyPopulatedDB(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() < 1<<20 {
+		return false
+	}
+	d, err := sql.Open("sqlite", path+"?mode=ro")
+	if err != nil {
+		return false
+	}
+	defer d.Close()
+	var chk string
+	if err := d.QueryRow(`PRAGMA quick_check(1)`).Scan(&chk); err != nil || chk != "ok" {
+		return false
+	}
+	var count int
+	if err := d.QueryRow(`SELECT COALESCE(MAX(rowid), 0) FROM labels`).Scan(&count); err != nil {
+		return false
+	}
+	return count >= 100000
 }
 
 func joinUniqueTrimmed(lists ...[]string) string {

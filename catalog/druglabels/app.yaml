@@ -2,6 +2,7 @@ version: 1
 id: druglabels
 name: Drug Labels
 category: medical
+description: Offline FDA medication dosages, warnings, and interactions.
 icon: activity.svg
 image: ark/druglabels:latest
 port: 8080

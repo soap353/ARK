@@ -65,13 +65,11 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("X-Forwarded-Prefix", "/a/"+appID)
 
-		// Ensure connection headers are maintained for websockets
+		// Request uncompressed HTML so the proxy can cleanly inject the shared Ark navigation bar.
 		if _, ok := req.Header["User-Agent"]; !ok {
 			req.Header.Set("User-Agent", "Ark-Proxy")
 		}
-		if appID == "kiwix" {
-			req.Header.Del("Accept-Encoding")
-		}
+		req.Header.Del("Accept-Encoding")
 	}
 
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
@@ -99,12 +97,10 @@ a { color: #0369A1; text-decoration: none; font-weight: 600; }
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Director:      director,
-		FlushInterval: 100 * time.Millisecond,
-		ErrorHandler:  errorHandler,
-	}
-	if appID == "kiwix" {
-		proxy.ModifyResponse = injectKiwixAIToolbar
+		Director:       director,
+		FlushInterval:  100 * time.Millisecond,
+		ErrorHandler:   errorHandler,
+		ModifyResponse: injectArkAppNavbar(appID),
 	}
 
 	pm.routes[appID] = &AppRoute{
@@ -188,23 +184,61 @@ a { color: #0369A1; text-decoration: none; font-weight: 600; }
 	route.Proxy.ServeHTTP(w, r)
 }
 
-func injectKiwixAIToolbar(resp *http.Response) error {
-	if resp.StatusCode != http.StatusOK || resp.ContentLength > 2*1024*1024 {
+func injectArkAppNavbar(appID string) func(*http.Response) error {
+	return func(resp *http.Response) error {
+		if resp.StatusCode != http.StatusOK || resp.ContentLength > 4*1024*1024 {
+			return nil
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(strings.ToLower(ct), "text/html") || resp.Header.Get("Content-Encoding") != "" {
+			return nil
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+
+		extraBtn := ""
+		if appID == "kiwix" {
+			extraBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);fetch('/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="margin-left:auto;background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">+ Add to AI</button>`
+		}
+
+		navbar := `<nav id="ark-proxy-nav" style="position:sticky;top:0;z-index:99999;background:#1B2E26;border-bottom:1px solid #2A4338;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:14px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
+			`<a href="/" style="color:#F5F2EB;font-weight:700;text-decoration:none;font-size:15px;white-space:nowrap;flex-shrink:0;">&#8592; Ark Home</a>` +
+			`<span style="color:#436153;flex-shrink:0;">|</span>` +
+			`<a href="/library" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Library</a>` +
+			`<a href="/kiwix" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Kiwix Catalog</a>` +
+			`<a href="/get-content" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Get Content</a>` +
+			`<a href="/field-guide" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Field Guide</a>` +
+			`<a href="/apps" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Apps</a>` +
+			`<a href="/maps" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Maps</a>` +
+			`<a href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Ask AI</a>` +
+			`<a href="/system" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">System</a>` +
+			`<a href="/settings" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:14px;white-space:nowrap;flex-shrink:0;">Settings</a>` +
+			extraBtn + `</nav>`
+
+		replaced := insertAfterBodyOpen(body, []byte(navbar))
+		resp.Body = io.NopCloser(bytes.NewReader(replaced))
+		resp.ContentLength = int64(len(replaced))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(replaced)))
 		return nil
 	}
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(strings.ToLower(ct), "text/html") || resp.Header.Get("Content-Encoding") != "" {
-		return nil
+}
+
+func insertAfterBodyOpen(htmlBytes, snippet []byte) []byte {
+	lower := bytes.ToLower(htmlBytes)
+	idx := bytes.Index(lower, []byte("<body"))
+	if idx >= 0 {
+		end := bytes.IndexByte(lower[idx:], '>')
+		if end >= 0 {
+			pos := idx + end + 1
+			out := make([]byte, 0, len(htmlBytes)+len(snippet))
+			out = append(out, htmlBytes[:pos]...)
+			out = append(out, snippet...)
+			out = append(out, htmlBytes[pos:]...)
+			return out
+		}
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-	resp.Body.Close()
-	if err != nil {
-		return err
-	}
-	const toolbar = `<div id="ark-ai-bar" style="position:fixed;bottom:14px;right:14px;z-index:99999;background:#FFFFFF;border:1px solid #CBD5E1;border-radius:8px;padding:6px 10px;box-shadow:0 4px 12px rgba(15,23,42,.12);font-family:system-ui,sans-serif;display:flex;gap:8px;align-items:center;"><a href="/" style="color:#0369A1;font-weight:600;text-decoration:none;font-size:13px;">Ark Home</a><button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';fetch('/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:document.body.innerText})}).then(r=>r.ok?(b.textContent='Added to AI'):(b.textContent='Error')).catch(()=>{b.textContent='Error'});" style="background:#0369A1;color:#FFFFFF;border:none;border-radius:6px;padding:5px 10px;font-size:13px;font-weight:600;cursor:pointer;">+ Add to AI</button></div></body>`
-	replaced := bytes.Replace(body, []byte("</body>"), []byte(toolbar), 1)
-	resp.Body = io.NopCloser(bytes.NewReader(replaced))
-	resp.ContentLength = int64(len(replaced))
-	resp.Header.Set("Content-Length", strconv.Itoa(len(replaced)))
-	return nil
+	return bytes.Replace(htmlBytes, []byte("</body>"), append(snippet, []byte("</body>")...), 1)
 }

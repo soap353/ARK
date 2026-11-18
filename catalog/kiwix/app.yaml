@@ -1,13 +1,16 @@
 version: 1
 id: kiwix
-name: Library
+name: Kiwix
 category: knowledge
+description: Browse offline Wikipedia, medical, and ZIM reference archives.
 icon: kiwix.svg
 image: ghcr.io/kiwix/kiwix-serve:3.7.0
 command:
   - "--urlRootLocation"
   - "/a/kiwix"
-  - "/data/zim"
+  - "--monitorLibrary"
+  - "--library"
+  - "/data/zim/library.xml"
 port: 8080
 proxy: path
 volumes:

@@ -1,11 +1,26 @@
 {{ define "content" }}
-<h1 class="page-title">Ask Local AI</h1>
+<link rel="stylesheet" href="/static/vendor/katex.min.css">
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/katex.min.js"></script>
+<script src="/static/vendor/auto-render.min.js"></script>
+<h1 class="page-title" style="margin-bottom: 1rem;">Ask Local AI</h1>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
 
 {{ if not .AIConnected }}
-  <div class="card" style="border-color: var(--color-accent); text-align: center; padding: 3rem 1.5rem;">
+  <div class="card" style="border-color: var(--color-accent); text-align: center; padding: 2.5rem 1.5rem;">
     <h2>No AI Server Connected</h2>
     <p class="secondary-text" style="max-width: 600px; margin: 0.5rem auto 1.5rem auto;">
-      Connect any OpenAI-compatible local AI server (such as Ollama, LM Studio, vLLM, or llama.cpp) to enable offline semantic Q&amp;A across your documents and Kiwix articles.
+      Connect any OpenAI-compatible local AI server (Ollama, LM Studio, vLLM, or llama.cpp) to enable offline semantic Q&amp;A across your documents and Kiwix articles.
     </p>
     <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
       <a href="/settings#ai" class="btn btn-primary">Connect AI Server</a>
@@ -13,31 +28,47 @@
     </div>
   </div>
 {{ else }}
-  <div class="card" style="display: flex; flex-direction: column; min-height: 440px;">
-    <div class="card-header" style="margin-bottom: 1rem;">
-      <h2>Offline RAG Chat</h2>
-      <span class="badge badge-success">Connected</span>
+  <div class="card ai-chat-card" style="display: flex; flex-direction: column; min-height: 620px; height: 72vh;">
+    <div class="card-header" style="margin-bottom: 0.75rem; gap: 0.65rem; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+        <h2 style="margin: 0;">Offline RAG Chat</h2>
+        <span class="badge badge-success">{{ $m := index .Settings "ai_chat_model" }}{{ if $m }}Connected ({{ $m }}){{ else }}Connected{{ end }}</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-left: auto;">
+        <select id="ask-session-select" class="form-control" aria-label="Chat history sessions" style="min-height: 34px; padding: 0.25rem 0.6rem; font-size: 13px; min-width: 190px; width: auto;" onchange="switchAskSession(this.value)">
+          <option value="">+ New Chat (Saved 2d)</option>
+        </select>
+        <button type="button" class="btn" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px;" onclick="startNewChat()">New Chat</button>
+        <button type="button" id="ask-pin-btn" class="btn" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="togglePinSession()">Keep Permanently</button>
+        <button type="button" id="ask-del-btn" class="btn btn-danger" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="deleteCurrentSession()">Delete</button>
+      </div>
     </div>
-    <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
-      <div style="background-color: var(--color-bg); border: 1px solid var(--color-border); padding: 1rem; border-radius: 6px;">
-        <strong>Ark AI:</strong> Ready. Ask a question across your indexed documents, ZIM articles, and notes.
+    <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 0.9rem; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
+      <div class="ai-msg-open">
+        <div class="ai-msg-role">Ark AI</div>
+        <div class="ai-markdown">Ready. Ask a question across your indexed library, or attach a temporary file or image below.</div>
       </div>
     </div>
 
-    <form id="ask-form" onsubmit="return sendAsk(event)" style="display: flex; gap: 0.75rem;">
-      <input type="text" id="ask-input" name="q" class="form-control" placeholder="Ask a question..." style="flex: 1;" autofocus required>
+    <div id="ask-attachments" style="display: none; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;"></div>
+    <form id="ask-form" onsubmit="return sendAsk(event)" style="display: flex; gap: 0.55rem; align-items: center;">
+      <input type="file" id="ask-files" multiple accept="image/*,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.htm,.pdf,.epub" style="display: none;" onchange="handleAskFilesSelected(this.files)">
+      <button type="button" id="ask-attach-btn" class="btn" title="Attach temporary files or images" style="min-height: 42px; padding: 0.35rem 0.75rem; font-size: 14px; white-space: nowrap;" onclick="document.getElementById('ask-files').click()">+ Attach</button>
+      <input type="text" id="ask-input" name="q" class="form-control" placeholder="Ask a question..." style="flex: 1;" autofocus>
       <button type="submit" id="ask-submit" class="btn btn-primary">Send</button>
     </form>
   </div>
 {{ end }}
 
+<!-- Knowledge Index -->
 <div class="card" id="knowledge">
   <div class="card-header" style="margin-bottom: 1rem;">
-    <h2>Knowledge Index</h2>
+    <h2 style="margin: 0;">Knowledge Index</h2>
     <span class="secondary-text">{{ len .RAGDocs }} source(s) indexed</span>
   </div>
 
   <form action="/api/ai/index" method="POST" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+    <input type="hidden" name="redirect" value="/ask#knowledge">
     <input type="text" name="path" class="form-control" placeholder="File path inside Ark data or workspace (e.g. README.md, guide.html, manual.pdf)" style="flex: 1; min-width: 240px;" required>
     <button type="submit" class="btn btn-primary">Queue Index Job</button>
   </form>
@@ -59,7 +90,7 @@
         <tr>
           <td><strong>{{ .Title }}</strong></td>
           <td><span class="badge">{{ .SourceType }}</span></td>
-          <td>{{ .IndexedPages }}</td>
+          <td class="tabular">{{ .IndexedPages }}</td>
           <td class="secondary-text" style="font-size: 13px;">{{ .SourcePath }}</td>
           <td>
             <form action="/api/ai/knowledge/remove" method="POST" style="margin: 0;">
@@ -78,44 +109,438 @@
 </div>
 
 <script>
+function protectMathForMarkdown(text) {
+  const mathTokens = [];
+  let out = '';
+  let i = 0;
+  const n = text.length;
+
+  function addToken(raw) {
+    const idx = mathTokens.length;
+    mathTokens.push(raw);
+    return 'ARKMATHPHX' + idx + 'XEND';
+  }
+
+  while (i < n) {
+    // Skip fenced code blocks ```...```
+    if (text.startsWith('```', i)) {
+      const end = text.indexOf('```', i + 3);
+      if (end !== -1) {
+        out += text.slice(i, end + 3);
+        i = end + 3;
+        continue;
+      }
+    }
+    // Skip inline code `...`
+    if (text[i] === '`') {
+      const end = text.indexOf('`', i + 1);
+      if (end !== -1 && text.slice(i + 1, end).indexOf('\n') === -1) {
+        out += text.slice(i, end + 1);
+        i = end + 1;
+        continue;
+      }
+    }
+    // Escaped dollar \$
+    if (text[i] === '\\' && i + 1 < n && text[i + 1] === '$') {
+      out += text.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    // Display math $$...$$
+    if (text.startsWith('$$', i)) {
+      const end = text.indexOf('$$', i + 2);
+      if (end !== -1) {
+        out += addToken(text.slice(i, end + 2));
+        i = end + 2;
+        continue;
+      }
+    }
+    // Display math \[...\]
+    if (text.startsWith('\\[', i)) {
+      const end = text.indexOf('\\]', i + 2);
+      if (end !== -1) {
+        out += addToken(text.slice(i, end + 2));
+        i = end + 2;
+        continue;
+      }
+    }
+    // Inline math \(...\)
+    if (text.startsWith('\\(', i)) {
+      const end = text.indexOf('\\)', i + 2);
+      if (end !== -1) {
+        out += addToken(text.slice(i, end + 2));
+        i = end + 2;
+        continue;
+      }
+    }
+    // Inline math $...$ (avoid matching currency like $5 and $10)
+    if (text[i] === '$' && i + 1 < n && !/\s/.test(text[i + 1])) {
+      let j = i + 1;
+      let found = -1;
+      while (j < n && text[j] !== '\n') {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '$' && !/\s/.test(text[j - 1])) {
+          if (j + 1 >= n || !/[0-9]/.test(text[j + 1])) {
+            found = j;
+            break;
+          }
+        }
+        j++;
+      }
+      if (found !== -1) {
+        out += addToken(text.slice(i, found + 1));
+        i = found + 1;
+        continue;
+      }
+    }
+    out += text[i];
+    i++;
+  }
+  return { masked: out, mathTokens };
+}
+
+function sanitizeRenderedDOM(root) {
+  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM']);
+  const walk = (node) => {
+    const children = Array.from(node.childNodes);
+    for (const child of children) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        if (blockedTags.has(child.tagName)) {
+          child.remove();
+          continue;
+        }
+        for (const attr of Array.from(child.attributes)) {
+          const name = attr.name.toLowerCase();
+          const val = (attr.value || '').trim().toLowerCase();
+          if (name.startsWith('on') || ((name === 'href' || name === 'src') && val.startsWith('javascript:'))) {
+            child.removeAttribute(attr.name);
+          }
+        }
+        walk(child);
+      }
+    }
+  };
+  walk(root);
+}
+
+function renderMarkdownAndMath(targetEl, rawText) {
+  const src = String(rawText || '');
+  if (typeof window.marked === 'undefined') {
+    targetEl.textContent = src;
+    return;
+  }
+  const { masked, mathTokens } = protectMathForMarkdown(src);
+  targetEl.innerHTML = window.marked.parse(masked, { gfm: true, breaks: true });
+  sanitizeRenderedDOM(targetEl);
+
+  if (mathTokens.length > 0) {
+    const walker = document.createTreeWalker(targetEl, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let cur;
+    while ((cur = walker.nextNode())) {
+      if (cur.nodeValue && cur.nodeValue.indexOf('ARKMATHPHX') !== -1) {
+        textNodes.push(cur);
+      }
+    }
+    for (const tn of textNodes) {
+      tn.nodeValue = tn.nodeValue.replace(/ARKMATHPHX(\d+)XEND/g, function(_, idxStr) {
+        const idx = parseInt(idxStr, 10);
+        return mathTokens[idx] !== undefined ? mathTokens[idx] : _;
+      });
+    }
+  }
+
+  if (typeof window.renderMathInElement === 'function') {
+    window.renderMathInElement(targetEl, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false }
+      ],
+      throwOnError: false
+    });
+  }
+}
+
+var pendingAskFiles = [];
+var activeSessionID = '';
+var activeSessionPinned = false;
+
+function updateSessionButtons() {
+  var pinBtn = document.getElementById('ask-pin-btn');
+  var delBtn = document.getElementById('ask-del-btn');
+  if (!pinBtn || !delBtn) return;
+  if (!activeSessionID) {
+    pinBtn.style.display = 'none';
+    delBtn.style.display = 'none';
+    return;
+  }
+  pinBtn.style.display = 'inline-flex';
+  delBtn.style.display = 'inline-flex';
+  if (activeSessionPinned) {
+    pinBtn.textContent = 'Kept Permanently (Click to Unpin)';
+    pinBtn.classList.add('btn-primary');
+  } else {
+    pinBtn.textContent = 'Keep Permanently';
+    pinBtn.classList.remove('btn-primary');
+  }
+}
+
+function loadAskSessions(selectID) {
+  var sel = document.getElementById('ask-session-select');
+  if (!sel) return;
+  fetch('/api/ai/sessions')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) return;
+      var list = data.sessions || [];
+      sel.innerHTML = '<option value="">+ New Chat (Saved 2d)</option>';
+      list.forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.title + (s.pinned ? ' [Saved]' : ' [2d]');
+        sel.appendChild(opt);
+      });
+      var target = selectID !== undefined ? selectID : activeSessionID;
+      sel.value = target || '';
+    })
+    .catch(function() {});
+}
+
+function resetChatWelcome() {
+  var box = document.getElementById('chat-messages');
+  if (!box) return;
+  box.innerHTML = '<div class="ai-msg-open"><div class="ai-msg-role">Ark AI</div><div class="ai-markdown">Ready. Ask a question across your indexed library, or attach a temporary file or image below.</div></div>';
+}
+
+function startNewChat() {
+  activeSessionID = '';
+  activeSessionPinned = false;
+  var sel = document.getElementById('ask-session-select');
+  if (sel) sel.value = '';
+  updateSessionButtons();
+  resetChatWelcome();
+}
+
+function renderNumberedReferences(refEl, citations) {
+  if (!refEl) return;
+  refEl.innerHTML = '';
+  if (!Array.isArray(citations) || citations.length === 0) {
+    refEl.style.display = 'none';
+    return;
+  }
+  refEl.style.display = 'flex';
+  citations.forEach(function(c, idx) {
+    var num = c.num || (idx + 1);
+    var label = '[' + num + ']';
+    var name = c.clean_title || c.title || ('Source ' + num);
+    var tip = name + (c.snippet ? ' — "' + c.snippet + '"' : '');
+    var el;
+    if (c.url) {
+      el = document.createElement('a');
+      el.href = c.url;
+      el.target = '_blank';
+      el.rel = 'noopener noreferrer';
+    } else {
+      el = document.createElement('span');
+    }
+    el.className = 'ai-ref-badge';
+    el.title = tip;
+    el.textContent = label;
+    refEl.appendChild(el);
+  });
+}
+
+function switchAskSession(id) {
+  if (!id) {
+    startNewChat();
+    return;
+  }
+  fetch('/api/ai/sessions/get?id=' + encodeURIComponent(id))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok || !data.session) return;
+      activeSessionID = data.session.id;
+      activeSessionPinned = !!data.session.pinned;
+      updateSessionButtons();
+      var box = document.getElementById('chat-messages');
+      box.innerHTML = '';
+      (data.messages || []).forEach(function(m) {
+        if (m.role === 'user') {
+          var uDiv = document.createElement('div');
+          uDiv.className = 'user-msg-compact';
+          uDiv.appendChild(document.createTextNode(m.content || ''));
+          if (m.attachments) {
+            var att = document.createElement('div');
+            att.className = 'user-msg-atts';
+            att.textContent = '[' + m.attachments + ']';
+            uDiv.appendChild(att);
+          }
+          box.appendChild(uDiv);
+        } else {
+          var bDiv = document.createElement('div');
+          bDiv.className = 'ai-msg-open';
+          bDiv.innerHTML = '<div class="ai-msg-role">Ark AI</div><div class="ans ai-markdown"></div><div class="ai-ref-list" style="display:none;"></div>';
+          box.appendChild(bDiv);
+          renderMarkdownAndMath(bDiv.querySelector('.ans'), m.content || '');
+          if (m.attachments && m.attachments.charAt(0) === '[') {
+            try {
+              renderNumberedReferences(bDiv.querySelector('.ai-ref-list'), JSON.parse(m.attachments));
+            } catch (e) {}
+          }
+        }
+      });
+      box.scrollTop = box.scrollHeight;
+    })
+    .catch(function() {});
+}
+
+function togglePinSession() {
+  if (!activeSessionID) return;
+  var nextPinned = !activeSessionPinned;
+  fetch('/api/ai/sessions/pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'id=' + encodeURIComponent(activeSessionID) + '&pinned=' + (nextPinned ? '1' : '0')
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        activeSessionPinned = !!d.pinned;
+        updateSessionButtons();
+        loadAskSessions(activeSessionID);
+      }
+    })
+    .catch(function() {});
+}
+
+function deleteCurrentSession() {
+  if (!activeSessionID) return;
+  if (!confirm('Delete this chat session permanently?')) return;
+  var delID = activeSessionID;
+  fetch('/api/ai/sessions/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'id=' + encodeURIComponent(delID)
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        startNewChat();
+        loadAskSessions('');
+      }
+    })
+    .catch(function() {});
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadAskSessions('');
+  updateSessionButtons();
+});
+
+function renderAttachmentChips() {
+  var wrap = document.getElementById('ask-attachments');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (pendingAskFiles.length === 0) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'flex';
+  pendingAskFiles.forEach(function(file, idx) {
+    var chip = document.createElement('span');
+    chip.className = 'ask-att-chip';
+    var nameEl = document.createElement('span');
+    nameEl.textContent = file.name;
+    var rm = document.createElement('button');
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.setAttribute('aria-label', 'Remove attachment');
+    rm.onclick = function() {
+      pendingAskFiles.splice(idx, 1);
+      renderAttachmentChips();
+    };
+    chip.appendChild(nameEl);
+    chip.appendChild(rm);
+    wrap.appendChild(chip);
+  });
+}
+
+function handleAskFilesSelected(fileList) {
+  if (!fileList) return;
+  for (var i = 0; i < fileList.length; i++) {
+    pendingAskFiles.push(fileList[i]);
+  }
+  var picker = document.getElementById('ask-files');
+  if (picker) picker.value = '';
+  renderAttachmentChips();
+}
+
 async function sendAsk(ev) {
   ev.preventDefault();
   const input = document.getElementById('ask-input');
   const btn = document.getElementById('ask-submit');
   const box = document.getElementById('chat-messages');
   const q = input.value.trim();
-  if (!q) return false;
+  const filesToSend = pendingAskFiles.slice();
+  if (!q && filesToSend.length === 0) return false;
 
   const userDiv = document.createElement('div');
-  userDiv.style.cssText = 'background:#EFF6FF;border:1px solid #BFDBFE;padding:0.85rem 1rem;border-radius:6px;align-self:flex-end;max-width:85%;';
-  userDiv.innerHTML = '<strong>You:</strong> ';
-  userDiv.appendChild(document.createTextNode(q));
+  userDiv.className = 'user-msg-compact';
+  if (q) {
+    userDiv.appendChild(document.createTextNode(q));
+  }
+  if (filesToSend.length > 0) {
+    const attNote = document.createElement('div');
+    attNote.className = 'user-msg-atts';
+    attNote.textContent = filesToSend.map(f => '[' + f.name + ']').join(' ');
+    userDiv.appendChild(attNote);
+  }
   box.appendChild(userDiv);
 
   const botDiv = document.createElement('div');
-  botDiv.style.cssText = 'background:var(--color-bg);border:1px solid var(--color-border);padding:1rem;border-radius:6px;white-space:pre-wrap;';
-  botDiv.innerHTML = '<strong>Ark AI:</strong> <span class="ans">Thinking...</span><div class="cites" style="margin-top:0.5rem;font-size:13px;"></div>';
+  botDiv.className = 'ai-msg-open';
+  botDiv.innerHTML = '<div class="ai-msg-role">Ark AI</div><div class="ans ai-markdown">Thinking...</div><div class="ai-ref-list" style="display:none;"></div>';
   box.appendChild(botDiv);
   const ansSpan = botDiv.querySelector('.ans');
-  const citesDiv = botDiv.querySelector('.cites');
+  const refList = botDiv.querySelector('.ai-ref-list');
 
   input.value = '';
+  pendingAskFiles = [];
+  renderAttachmentChips();
   btn.disabled = true;
+
   try {
-    const resp = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q })
-    });
-    const data = await resp.json();
-    ansSpan.textContent = data.answer || data.error || 'No response';
-    if (data.citations && data.citations.length > 0) {
-      citesDiv.innerHTML = '<strong>Sources:</strong> ' + data.citations.map(c =>
-        '<span class="badge" style="margin-right:4px;">' + c.title.replace(/</g,'&lt;') + '</span>'
-      ).join('');
+    let resp;
+    if (filesToSend.length > 0) {
+      const fd = new FormData();
+      fd.append('question', q);
+      if (activeSessionID) fd.append('session_id', activeSessionID);
+      filesToSend.forEach(f => fd.append('files', f, f.name));
+      resp = await fetch('/api/ai/chat', { method: 'POST', body: fd });
+    } else {
+      resp = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q, session_id: activeSessionID })
+      });
     }
-  } catch (e) {
-    ansSpan.textContent = 'Request failed: ' + e;
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      ansSpan.textContent = data.error || ('Request error ' + resp.status);
+    } else {
+      renderMarkdownAndMath(ansSpan, data.answer || '');
+      renderNumberedReferences(refList, data.citations || []);
+      if (data.session_id) {
+        activeSessionID = data.session_id;
+        activeSessionPinned = !!data.session_pinned;
+        updateSessionButtons();
+        loadAskSessions(activeSessionID);
+      }
+    }
+  } catch (err) {
+    ansSpan.textContent = 'Connection error: ' + err.message;
   } finally {
     btn.disabled = false;
     box.scrollTop = box.scrollHeight;

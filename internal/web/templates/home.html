@@ -1,4 +1,10 @@
 {{ define "content" }}
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+
 <section class="search-container" aria-label="Global offline search">
   <form action="/library" method="GET" class="search-input-wrapper">
     <input type="search" name="q" class="search-input" placeholder="Search offline library, Wikipedia, maps, medical labels..." autofocus aria-label="Global offline search query">
@@ -8,22 +14,94 @@
 
 <section aria-label="Installed applications">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-    <h2>Installed Applications</h2>
+    <h2 style="margin: 0;">Installed Applications</h2>
     <a href="/apps" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Manage Apps</a>
   </div>
 
   {{ if .InstalledApps }}
   <div class="app-grid">
     {{ range .InstalledApps }}
-    <a href="{{ .OpenURL }}" class="app-tile" aria-label="Open {{ .Name }}">
-      <svg class="tile-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/>
-      </svg>
-      <span class="tile-label">{{ .Name }}</span>
-      <span class="tile-status">{{ .Status }}</span>
+    <a href="{{ .OpenURL }}" target="_blank" rel="noopener noreferrer" class="app-tile" data-app-id="{{ .ID }}" data-app-name="{{ .Name }}" data-app-status="{{ .Status }}" data-open="{{ .OpenURL }}" aria-label="Open {{ .Name }}">
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        {{ appIcon .ID }}
+        <span class="badge {{ if eq .Status "running" }}badge-success{{ end }}" style="font-size: 11px; text-transform: capitalize;">{{ .Status }}</span>
+      </div>
+      <div>
+        <div class="tile-label">{{ .Name }}</div>
+        {{ if .Description }}
+        <div class="tile-desc" style="margin-top: 0.3rem;">{{ .Description }}</div>
+        {{ end }}
+      </div>
     </a>
     {{ end }}
   </div>
+
+  <!-- Right-click Context Menu for Home App Tiles -->
+  <div id="home-app-menu" class="context-menu" role="menu" aria-label="App actions">
+    <a id="app-ctx-open" href="#" target="_blank" rel="noopener noreferrer" role="menuitem">Open App</a>
+    <button type="button" id="app-ctx-start" role="menuitem">Start App</button>
+    <button type="button" id="app-ctx-stop" class="ctx-danger" role="menuitem">Stop App</button>
+  </div>
+  <form id="home-app-action-form" method="POST" style="display: none;">
+    <input type="hidden" id="home-app-action-id" name="id" value="">
+    <input type="hidden" name="redirect" value="/">
+  </form>
+  <script>
+  (function() {
+    var menu = document.getElementById('home-app-menu');
+    var openEl = document.getElementById('app-ctx-open');
+    var startBtn = document.getElementById('app-ctx-start');
+    var stopBtn = document.getElementById('app-ctx-stop');
+    var form = document.getElementById('home-app-action-form');
+    var idInput = document.getElementById('home-app-action-id');
+    var activeTile = null;
+
+    function hideMenu() {
+      menu.style.display = 'none';
+      activeTile = null;
+    }
+
+    document.querySelectorAll('.app-tile[data-app-id]').forEach(function(tile) {
+      tile.addEventListener('contextmenu', function(ev) {
+        ev.preventDefault();
+        activeTile = tile;
+        var st = tile.getAttribute('data-app-status');
+        openEl.href = tile.getAttribute('data-open') || '#';
+        openEl.style.display = st === 'running' ? 'block' : 'none';
+        startBtn.style.display = st === 'running' ? 'none' : 'block';
+        stopBtn.style.display = st === 'running' ? 'block' : 'none';
+
+        var x = Math.min(ev.clientX, window.innerWidth - 190);
+        var y = Math.min(ev.clientY, window.innerHeight - 130);
+        menu.style.left = Math.max(8, x) + 'px';
+        menu.style.top = Math.max(8, y) + 'px';
+        menu.style.display = 'block';
+      });
+    });
+
+    document.addEventListener('click', function(ev) {
+      if (!menu.contains(ev.target)) hideMenu();
+    });
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') hideMenu();
+    });
+
+    startBtn.addEventListener('click', function() {
+      if (!activeTile) return;
+      idInput.value = activeTile.getAttribute('data-app-id');
+      form.action = '/api/apps/start';
+      hideMenu();
+      form.submit();
+    });
+    stopBtn.addEventListener('click', function() {
+      if (!activeTile) return;
+      idInput.value = activeTile.getAttribute('data-app-id');
+      form.action = '/api/apps/stop';
+      hideMenu();
+      form.submit();
+    });
+  })();
+  </script>
   {{ else }}
   <div class="card" style="text-align: center; padding: 2.5rem 1.5rem;">
     <h3 style="margin-bottom: 0.5rem;">Zero Pre-installed Apps</h3>
@@ -32,90 +110,6 @@
     </p>
     <a href="/apps" class="btn btn-primary">Browse Available Apps</a>
   </div>
-  {{ end }}
-</section>
-
-<section class="card" aria-label="Storage status">
-  <div class="card-header">
-    <h3>Storage</h3>
-    <span class="secondary-text">{{ .StorageUsedGB }} GB used of {{ .StorageTotalGB }} GB ({{ .StorageFreeGB }} GB free)</span>
-  </div>
-  <div class="storage-bar-wrapper">
-    <div class="storage-bar" role="progressbar" aria-valuenow="{{ .StorageUsedPercent }}" aria-valuemin="0" aria-valuemax="100">
-      {{ if gt .StorageUsedPercent 0 }}
-      <div class="storage-segment segment-zim" style="width: {{ .StorageUsedPercent }}%;" title="Used storage ({{ .StorageUsedGB }} GB)"></div>
-      {{ end }}
-    </div>
-  </div>
-  <div style="margin-top: 0.75rem; font-size: 14px;">
-    {{ if eq .StorageUsedGB 0 }}
-    <span class="secondary-text">Storage is clean (0 GB downloaded).</span>
-    {{ else }}
-    <span class="secondary-text">{{ .StorageUsedGB }} GB utilized on disk.</span>
-    {{ end }}
-  </div>
-</section>
-
-<section id="recent-jobs-card" class="card" aria-label="Active download and background jobs" {{ if .HasActiveJobs }}hx-get="/" hx-trigger="every 2s" hx-select="#recent-jobs-card" hx-target="#recent-jobs-card" hx-swap="outerHTML"{{ end }}>
-  <div class="card-header">
-    <h3>Recent Jobs</h3>
-    <a href="/jobs" class="secondary-text" style="font-size: 14px; text-decoration: none;">View All &rarr;</a>
-  </div>
-
-  {{ if .Jobs }}
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Target</th>
-          <th>Status</th>
-          <th>Progress</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{ range .Jobs }}
-        <tr>
-          <td><strong>{{ .Type }}</strong></td>
-          <td>
-            <div>{{ .Target }}</div>
-            {{ if .ErrorMsg }}
-            <div style="color: var(--color-error); font-size: 12px;">{{ .ErrorMsg }}</div>
-            {{ else if .ProgressMsg }}
-            <div class="secondary-text" style="font-size: 12px;">{{ .ProgressMsg }}</div>
-            {{ end }}
-          </td>
-          <td>
-            {{ if eq .Status "done" }}
-            <span class="badge badge-success">Done</span>
-            {{ else if eq .Status "running" }}
-            <span class="badge badge-accent">Running</span>
-            {{ else if or (eq .Status "failed") (eq .Status "cancelled") }}
-            <span class="badge badge-error">{{ .Status }}</span>
-            {{ else }}
-            <span class="badge">{{ .Status }}</span>
-            {{ end }}
-          </td>
-          <td>{{ printf "%.1f%%" .Progress }}</td>
-          <td>
-            {{ if or (eq .Status "pending") (eq .Status "running") }}
-              <form action="/api/jobs/cancel" method="POST" style="margin: 0;">
-                <input type="hidden" name="id" value="{{ .ID }}">
-                <input type="hidden" name="redirect" value="/">
-                <button type="submit" class="btn btn-danger" style="min-height: 28px; padding: 0.1rem 0.5rem; font-size: 13px;">Cancel</button>
-              </form>
-            {{ else }}
-              <span class="secondary-text">-</span>
-            {{ end }}
-          </td>
-        </tr>
-        {{ end }}
-      </tbody>
-    </table>
-  </div>
-  {{ else }}
-  <p class="secondary-text" style="padding: 1rem 0;">No download or background jobs running. Download presets from <a href="/get-content" style="color: var(--color-accent);">Get Content</a>.</p>
   {{ end }}
 </section>
 {{ end }}

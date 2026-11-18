@@ -1,105 +1,358 @@
 {{ define "content" }}
-<h1 class="page-title">Get Content</h1>
-
-<div class="card">
-  <h2>Prepper Starter Pack</h2>
-  <p class="secondary-text" style="margin-bottom: 1rem;">
-    Recommended offline bundle (approx. 25–30 GB): WikiMed, Wikipedia Mini, iFixit, WikiHow, Regional Map, Small AI Model, and FDA Drug Labels.
-  </p>
-  <form action="/api/jobs" method="POST">
-    <input type="hidden" name="type" value="preset">
-    <input type="hidden" name="target" value="starter_pack">
-    <button type="submit" class="btn btn-primary">Download Starter Pack (30 GB)</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2>Curated Knowledge Presets</h2>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Preset</th>
-          <th>Tiers / Options</th>
-          <th>Size</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Wikipedia (English)</strong></td>
-          <td class="secondary-text">Mini / Top 100 / Full</td>
-          <td>~12 GB – 110 GB</td>
-          <td>
-            <form action="/api/jobs" method="POST" style="display:inline;">
-              <input type="hidden" name="type" value="preset">
-              <input type="hidden" name="target" value="wikipedia_en_mini">
-              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Mini (12 GB)</button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td><strong>WikiMed (Medical Encyclopedia)</strong></td>
-          <td class="secondary-text">Complete Medical Guide</td>
-          <td>~6 GB</td>
-          <td>
-            <form action="/api/jobs" method="POST" style="display:inline;">
-              <input type="hidden" name="type" value="preset">
-              <input type="hidden" name="target" value="wikimed">
-              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get WikiMed (6 GB)</button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Survival & Repair</strong></td>
-          <td class="secondary-text">iFixit, WikiHow, Practical Action</td>
-          <td>~15 GB</td>
-          <td>
-            <form action="/api/jobs" method="POST" style="display:inline;">
-              <input type="hidden" name="type" value="preset">
-              <input type="hidden" name="target" value="survival_repair">
-              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Survival Pack</button>
-            </form>
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Project Gutenberg</strong></td>
-          <td class="secondary-text">70,000+ Public Domain E-Books</td>
-          <td>~70 GB full</td>
-          <td>
-            <form action="/api/jobs" method="POST" style="display:inline;">
-              <input type="hidden" name="type" value="preset">
-              <input type="hidden" name="target" value="gutenberg">
-              <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Get Books</button>
-            </form>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+<div class="card-header" style="margin-bottom: 1.25rem;">
+  <div>
+    <h1 class="page-title" style="margin-bottom: 0.25rem;">Get Content</h1>
+    <p class="secondary-text" style="margin: 0;">Download curated offline knowledge bundles, regional maps, direct Kiwix ZIM archives, or individual web pages and media.</p>
+  </div>
+  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <a href="/read/zim/" class="btn">Open Local ZIM Reader &rarr;</a>
   </div>
 </div>
 
-<div class="card">
-  <h2>Download Any URL or Media</h2>
-  <p class="secondary-text" style="margin-bottom: 1rem;">
-    Archive websites (.zim), YouTube channels/videos (.webm AV1/Opus), audio, or PDFs.
-  </p>
-  <form action="/api/jobs" method="POST" style="display: flex; flex-direction: column; gap: 1rem; max-width: 600px;">
-    <div class="form-group" style="margin-bottom: 0;">
-      <label for="url-input" class="form-label">Target URL</label>
-      <input type="url" id="url-input" name="target" class="form-control" placeholder="https://..." required>
+<!-- 1. Wikipedia Packages + Prepper Starter Pack -->
+<section class="card" aria-label="Wikipedia Packages">
+  <div class="card-header">
+    <div>
+      <h2 style="margin: 0;">Wikipedia</h2>
+      <span class="secondary-text" style="font-size: 14px;">Select a Wikipedia offline package tier, or grab the all-in-one Starter Pack.</span>
     </div>
-    <div class="form-group" style="margin-bottom: 0;">
-      <label for="type-select" class="form-label">Archive Type</label>
-      <select id="type-select" name="type" class="form-control">
-        <option value="video">Video (AV1 + Opus in .webm)</option>
-        <option value="video_h264">Compatible Video (H.264 .mp4)</option>
-        <option value="music">Music (.opus 96k)</option>
-        <option value="zim">Website as ZIM (zimit)</option>
-        <option value="doc">Document / File (aria2)</option>
+    <form action="/api/jobs" method="POST" style="margin: 0;">
+      <input type="hidden" name="type" value="preset">
+      <input type="hidden" name="target" value="starter_pack">
+      <button type="submit" class="btn btn-primary" style="min-height: 40px; padding: 0.35rem 1rem; font-size: 15px;">Download Prepper Starter Pack (~27 GB)</button>
+    </form>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.85rem;">
+    {{ range .WikipediaOptions }}
+    <div style="border: 1px solid {{ if .Installed }}var(--color-success){{ else }}var(--color-border){{ end }}; border-radius: var(--border-radius); padding: 1rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem; background: var(--color-surface);">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.35rem;">
+          <strong style="font-size: 17px;">{{ .Name }}</strong>
+          {{ if .Installed }}
+          <span class="badge badge-success">Installed</span>
+          {{ end }}
+        </div>
+        <p class="secondary-text" style="font-size: 14px; margin: 0;">{{ .Description }}</p>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
+        <span class="badge">{{ .SizeLabel }}</span>
+        <form action="/api/jobs" method="POST" style="margin: 0;">
+          <input type="hidden" name="type" value="preset">
+          <input type="hidden" name="target" value="{{ .PresetTarget }}">
+          <button type="submit" class="btn {{ if not .Installed }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
+            {{ if .Installed }}Re-download{{ else }}Download{{ end }}
+          </button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+</section>
+
+<!-- 2. Additional Content (6 Curated Collections with Essential / Standard / Comprehensive tiers) -->
+<section class="card" aria-label="Additional Curated Collections">
+  <div style="margin-bottom: 1rem;">
+    <h2 style="margin: 0 0 0.2rem;">Additional Content</h2>
+    <p class="secondary-text" style="font-size: 14px; margin: 0;">Curated collections for offline reference. Choose Essential, Standard, or Comprehensive for each collection.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">
+    {{ range .NomadCollections }}
+    {{ $col := . }}
+    <div class="collection-card" data-collection="{{ $col.Slug }}" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 1.1rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.85rem; background: var(--color-surface);">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.65rem;">
+          <h3 style="margin: 0; font-size: 18px;">{{ $col.Name }}</h3>
+          <span class="secondary-text tabular" style="font-size: 13px; white-space: nowrap;">{{ $col.SizeRange }}</span>
+        </div>
+
+        <!-- Tier Selector Pills -->
+        <div role="tablist" aria-label="{{ $col.Name }} tiers" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          {{ range $idx, $tier := $col.Tiers }}
+          <button
+            type="button"
+            class="btn tier-pill tier-pill-{{ $col.Slug }}{{ if eq $idx 0 }} active{{ end }}"
+            data-tier-slug="{{ $tier.Slug }}"
+            data-tier-name="{{ $tier.Name }}"
+            data-tier-size="{{ $tier.SizeLabel }}"
+            data-tier-tags="{{ $tier.BundleTagsCSV }}"
+            onclick="selectCollectionTier('{{ $col.Slug }}', this)"
+            style="min-height: 34px; padding: 0.2rem 0.7rem; font-size: 13px;">
+            {{ $tier.Name }}
+          </button>
+          {{ end }}
+        </div>
+
+        <!-- Reactive Bundle List for Selected Tier -->
+        {{ with index $col.Tiers 0 }}
+        <div id="tier-detail-{{ $col.Slug }}" style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.7rem 0.75rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong id="tier-title-{{ $col.Slug }}" style="font-size: 13px;">{{ .Name }} &bull; {{ len .BundleTags }} bundles</strong>
+            <span id="tier-size-{{ $col.Slug }}" class="badge tabular">{{ .SizeLabel }}</span>
+          </div>
+          <ul id="tier-tags-{{ $col.Slug }}" style="margin: 0; padding-left: 1.15rem; font-size: 13px; color: var(--color-text-secondary); columns: 2; column-gap: 1rem;">
+            {{ range .BundleTags }}
+            <li style="margin-bottom: 0.2rem;">{{ . }}</li>
+            {{ end }}
+          </ul>
+        </div>
+        {{ end }}
+      </div>
+
+      {{ with index $col.Tiers 0 }}
+      <form action="/api/jobs" method="POST" style="margin: 0;">
+        <input type="hidden" name="type" value="preset">
+        <input type="hidden" id="tier-target-{{ $col.Slug }}" name="target" value="{{ .Slug }}">
+        <button type="submit" id="tier-btn-{{ $col.Slug }}" class="btn btn-primary" style="width: 100%; min-height: 40px; font-size: 15px;">
+          Download {{ $col.Name }} ({{ .Name }})
+        </button>
+      </form>
+      {{ end }}
+    </div>
+    {{ end }}
+  </div>
+</section>
+
+<!-- 3. Regional Maps (9 US Regions + Maps Manager Link) -->
+<section class="card" aria-label="Regional Offline Maps">
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem;">
+    <div>
+      <h2 style="margin: 0 0 0.2rem;">Regional Offline Maps</h2>
+      <p class="secondary-text" style="font-size: 14px; margin: 0;">Download Protomaps (<code>.pmtiles</code>) regional packs directly into Ark's offline Maps server.</p>
+    </div>
+    <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.55rem 0.85rem; font-size: 13px;">
+      Only need a specific country, or want the whole world? Open the <a href="/maps" style="color: var(--color-accent); font-weight: 600;">Maps Manager</a>.
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.9rem;">
+    {{ range .MapRegions }}
+    <div style="border: 1px solid {{ if .AllDownloaded }}var(--color-success){{ else }}var(--color-border){{ end }}; border-radius: var(--border-radius); padding: 1rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem; background: var(--color-surface);">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+          <strong style="font-size: 17px;">{{ .Name }}</strong>
+          {{ if .AllDownloaded }}
+          <span class="badge badge-success">All items downloaded</span>
+          {{ else if gt .DownloadedCount 0 }}
+          <span class="badge badge-accent">{{ .DownloadedCount }}/{{ .ItemCount }} on disk</span>
+          {{ end }}
+        </div>
+        <p class="secondary-text" style="font-size: 14px; margin: 0;">{{ .Description }}</p>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
+        <span class="secondary-text" style="font-size: 13px;">Items: {{ .ItemCount }} | Size: {{ .SizeLabel }}</span>
+        <form action="/api/jobs" method="POST" style="margin: 0;">
+          <input type="hidden" name="type" value="preset">
+          <input type="hidden" name="target" value="map-{{ .Slug }}">
+          <button type="submit" class="btn {{ if not .AllDownloaded }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
+            {{ if .AllDownloaded }}Re-download{{ else }}Download{{ end }}
+          </button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+</section>
+
+<!-- 4. Open Offline Video & Creator Channels -->
+<section class="card" aria-label="Offline Video and Creator Channels">
+  <div style="margin-bottom: 1rem;">
+    <h2 style="margin: 0 0 0.2rem;">Offline Video &amp; Creator Channels</h2>
+    <p class="secondary-text" style="font-size: 14px; margin: 0;">Self-contained video ZIM archives for homesteading, emergency preparedness, and education.</p>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.85rem;">
+    {{ range .CreatorVideoPacks }}
+    <div style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 1rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.65rem; background: var(--color-surface);">
+      <div>
+        <strong style="font-size: 16px;">{{ .Name }}</strong>
+        <div class="secondary-text" style="font-size: 12px; margin-bottom: 0.35rem;">By {{ .Creator }}</div>
+        <p class="secondary-text" style="font-size: 13px; margin: 0;">{{ .Description }}</p>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
+        <span class="badge">{{ .SizeLabel }}</span>
+        <form action="/api/jobs" method="POST" style="margin: 0;">
+          <input type="hidden" name="type" value="preset">
+          <input type="hidden" name="target" value="{{ .ID }}">
+          <button type="submit" class="btn btn-primary" style="min-height: 36px; padding: 0.2rem 0.85rem; font-size: 14px;">Download</button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+</section>
+
+<!-- 5. Direct Kiwix Library Browser & Downloader -->
+<section class="card" aria-label="Kiwix Library Direct Download">
+  <div class="card-header">
+    <div>
+      <h2 style="margin: 0 0 0.2rem;">Kiwix Library Direct Access</h2>
+      <span class="secondary-text" style="font-size: 14px;">Search and download any <code>.zim</code> directly from <code>library.kiwix.org</code> into your offline Kiwix Library.</span>
+    </div>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+      <a href="/kiwix" class="btn btn-primary" style="min-height: 36px; padding: 0.25rem 0.8rem; font-size: 14px;">Full Kiwix Catalog Browser &rarr;</a>
+      <a href="/read/zim/" class="btn" style="min-height: 36px; padding: 0.25rem 0.8rem; font-size: 14px;">Local ZIM Reader &rarr;</a>
+      <a href="https://library.kiwix.org/" target="_blank" rel="noopener" class="btn" style="min-height: 36px; padding: 0.25rem 0.8rem; font-size: 14px;">library.kiwix.org &#8599;</a>
+    </div>
+  </div>
+
+  <form id="kiwix-search-form" onsubmit="event.preventDefault(); searchKiwixCatalog();" style="display: flex; gap: 0.65rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+    <input type="text" id="kiwix-q" placeholder="Search Kiwix Library (e.g. wikipedia, medicine, python, fixit, gutenberg)..." style="flex: 2; min-width: 220px; padding: 0.55rem 0.85rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); font-size: 15px;">
+    <select id="kiwix-category" style="padding: 0.55rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); font-size: 15px;">
+      <option value="all">All Categories</option>
+      <option value="wikipedia">Wikipedia</option>
+      <option value="stack_exchange">Stack Exchange</option>
+      <option value="iFixit">iFixit</option>
+      <option value="gutenberg">Project Gutenberg</option>
+      <option value="wikibooks">Wikibooks</option>
+      <option value="wikiversity">Wikiversity</option>
+      <option value="wiktionary">Wiktionary</option>
+      <option value="wikivoyage">Wikivoyage</option>
+      <option value="ted">TED Talks</option>
+      <option value="phet">PhET Simulations</option>
+      <option value="mooc">MOOC</option>
+      <option value="other">Other</option>
+    </select>
+    <select id="kiwix-lang" style="padding: 0.55rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); font-size: 15px;">
+      <option value="eng">English (eng)</option>
+      <option value="all">All Languages</option>
+      <option value="spa">Spanish (spa)</option>
+      <option value="fra">French (fra)</option>
+      <option value="deu">German (deu)</option>
+    </select>
+    <button type="submit" class="btn btn-primary" style="min-height: 42px; padding: 0.45rem 1.15rem; font-size: 15px;">Search Library</button>
+  </form>
+
+  <div id="kiwix-catalog-status" class="secondary-text" style="font-size: 14px; margin-bottom: 0.75rem;"></div>
+  <div id="kiwix-catalog-results" class="table-wrapper" style="display: none;">
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Category / Lang</th>
+          <th>Size</th>
+          <th>Updated</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="kiwix-catalog-tbody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 5. Download Any URL / Web Archive / Media -->
+<section class="card" aria-label="Download Custom URL">
+  <h2 style="margin-bottom: 0.5rem;">Download Any URL</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">Paste a link to an article, webpage, direct <code>.zim</code> URL, video, or audio file to archive offline.</p>
+
+  <form action="/api/jobs" method="POST" style="display: flex; flex-direction: column; gap: 1rem; max-width: 640px;">
+    <div>
+      <label for="url-input" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Target URL</label>
+      <input type="url" id="url-input" name="target" placeholder="https://example.com/article" required style="width: 100%; padding: 0.65rem 0.85rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); font-size: 16px;">
+    </div>
+
+    <div>
+      <label for="type-select" style="display: block; font-weight: 600; margin-bottom: 0.25rem;">Download / Archive Method</label>
+      <select id="type-select" name="type" style="width: 100%; padding: 0.65rem 0.85rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); font-size: 16px;">
+        <option value="doc">Article / Document / PDF</option>
+        <option value="kiwix_zim">Direct ZIM File URL (to Kiwix Library)</option>
+        <option value="zim">Archive Entire Website &rarr; ZIM (Zimit)</option>
+        <option value="video">Video &rarr; 1080p AV1 (High Compression)</option>
+        <option value="video_h264">Video &rarr; MP4 H.264 (Universal Playback)</option>
+        <option value="music">Music / Audio &rarr; AAC/MP3</option>
       </select>
     </div>
-    <button type="submit" class="btn btn-primary" style="align-self: flex-start;">Start Download</button>
+
+    <div>
+      <button type="submit" class="btn btn-primary">Queue Download</button>
+    </div>
   </form>
-</div>
+</section>
+
+<script>
+function selectCollectionTier(slug, btn) {
+  var pills = document.querySelectorAll('.tier-pill-' + slug);
+  pills.forEach(function(p) {
+    p.classList.remove('active');
+  });
+  btn.classList.add('active');
+
+  var tierName = btn.getAttribute('data-tier-name');
+  var tierSize = btn.getAttribute('data-tier-size');
+  var tierTagsRaw = btn.getAttribute('data-tier-tags') || '';
+  var tierSlug = btn.getAttribute('data-tier-slug');
+  var colTitle = btn.closest('.collection-card').querySelector('h3').textContent;
+
+  var tags = tierTagsRaw.split('|').filter(Boolean);
+  document.getElementById('tier-title-' + slug).innerHTML = escapeHTML(tierName) + ' &bull; ' + tags.length + ' bundles';
+  document.getElementById('tier-size-' + slug).textContent = tierSize;
+  document.getElementById('tier-tags-' + slug).innerHTML = tags.map(function(t) {
+    return '<li style="margin-bottom:0.2rem;">' + escapeHTML(t) + '</li>';
+  }).join('');
+  document.getElementById('tier-target-' + slug).value = tierSlug;
+  document.getElementById('tier-btn-' + slug).textContent = 'Download ' + colTitle + ' (' + tierName + ')';
+}
+
+function escapeHTML(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+function searchKiwixCatalog() {
+  var q = document.getElementById('kiwix-q').value.trim();
+  var cat = document.getElementById('kiwix-category').value;
+  var lang = document.getElementById('kiwix-lang').value;
+  var statusEl = document.getElementById('kiwix-catalog-status');
+  var wrapEl = document.getElementById('kiwix-catalog-results');
+  var tbodyEl = document.getElementById('kiwix-catalog-tbody');
+
+  statusEl.textContent = 'Searching library.kiwix.org...';
+  var url = '/api/kiwix/catalog?q=' + encodeURIComponent(q) + '&category=' + encodeURIComponent(cat) + '&lang=' + encodeURIComponent(lang) + '&count=20';
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        statusEl.textContent = data.error;
+        wrapEl.style.display = 'none';
+        return;
+      }
+      var items = data.items || [];
+      if (items.length === 0) {
+        statusEl.textContent = 'No ZIM archives matched your search.';
+        wrapEl.style.display = 'none';
+        return;
+      }
+      statusEl.textContent = 'Showing ' + items.length + (data.total ? ' of ' + data.total : '') + ' entries from library.kiwix.org';
+      tbodyEl.innerHTML = items.map(function(item) {
+        var metaBadge = '<span class="badge">' + escapeHTML(item.category || 'other') + '</span> <span class="badge">' + escapeHTML(item.language || '') + '</span>' + (item.flavour ? ' <span class="badge">' + escapeHTML(item.flavour) + '</span>' : '');
+        var btnLabel = item.installed ? 'Re-download' : 'Download ZIM';
+        var btnClass = item.installed ? 'btn' : 'btn btn-primary';
+        var installedTag = item.installed ? ' <span class="badge badge-success">Installed</span>' : '';
+        return '<tr>' +
+          '<td><strong>' + escapeHTML(item.title) + '</strong>' + installedTag + '<div class="secondary-text" style="font-size:13px; margin-top:2px;">' + escapeHTML(item.summary) + '</div></td>' +
+          '<td>' + metaBadge + '</td>' +
+          '<td style="white-space:nowrap;">' + escapeHTML(item.size_text) + '</td>' +
+          '<td class="secondary-text" style="white-space:nowrap;">' + escapeHTML(item.updated || '-') + '</td>' +
+          '<td><form action="/api/jobs" method="POST" style="margin:0;">' +
+            '<input type="hidden" name="type" value="kiwix_zim">' +
+            '<input type="hidden" name="target" value="' + escapeHTML(item.download_url) + '">' +
+            '<button type="submit" class="' + btnClass + '" style="min-height:34px; padding:0.2rem 0.75rem; font-size:13px; white-space:nowrap;">' + btnLabel + '</button>' +
+          '</form></td>' +
+        '</tr>';
+      }).join('');
+      wrapEl.style.display = 'block';
+    })
+    .catch(function(err) {
+      statusEl.textContent = 'Could not load Kiwix Library catalog: ' + err.message;
+      wrapEl.style.display = 'none';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  searchKiwixCatalog();
+});
+</script>
 {{ end }}

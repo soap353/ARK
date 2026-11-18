@@ -1,12 +1,21 @@
 {{ define "content" }}
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+<div class="card-header" style="margin-bottom: 1.25rem;">
   <div>
     <h1 class="page-title">Modular App Catalog</h1>
-    <p class="secondary-text">
-      Ark ships completely clean with no pre-installed containers. Install only the modules you want to run.
-    </p>
+    <p class="secondary-text" style="margin: 0;">Click any app name to configure, launch, update, inspect logs, or uninstall.</p>
   </div>
 </div>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
 
 <div class="card">
   <div class="table-wrapper">
@@ -17,7 +26,6 @@
           <th>Category</th>
           <th>Status</th>
           <th>Mode</th>
-          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -25,8 +33,27 @@
         {{ range .AvailableApps }}
         <tr>
           <td>
-            <strong>{{ .Name }}</strong>
-            <div class="secondary-text" style="font-size: 13px;">{{ .Image }}</div>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <span class="app-row-icon" style="color: var(--color-accent); display: inline-flex; width: 24px; height: 24px; flex-shrink: 0;">{{ appIcon .ID }}</span>
+              <div>
+                <button
+                  type="button"
+                  class="app-name-trigger"
+                  data-id="{{ .ID }}"
+                  data-name="{{ .Name }}"
+                  data-desc="{{ .Description }}"
+                  data-category="{{ .Category }}"
+                  data-image="{{ .Image }}"
+                  data-port="{{ .Port }}"
+                  data-status="{{ .Status }}"
+                  data-proxy="{{ .ProxyMode }}"
+                  data-open-url="{{ .OpenURL }}"
+                  data-custom="{{ if .IsCustom }}1{{ else }}0{{ end }}"
+                  onclick="openAppModal(this)">{{ .Name }}</button>
+                {{ if .IsCustom }}<span class="badge badge-accent" style="margin-left: 0.35rem; font-size: 11px;">Custom</span>{{ end }}
+                <div class="secondary-text" style="font-size: 13px;">{{ if .Description }}{{ .Description }}{{ else }}<code>{{ .Image }}</code>{{ end }}</div>
+              </div>
+            </div>
           </td>
           <td><span class="badge">{{ .Category }}</span></td>
           <td>
@@ -35,46 +62,189 @@
             {{ else if eq .Status "stopped" }}
             <span class="badge">Stopped</span>
             {{ else }}
-            <span class="badge" style="background: transparent; border: 1px solid #5C6168; color: #80868B;">Not Installed</span>
+            <span class="badge">Not Installed</span>
             {{ end }}
           </td>
           <td class="secondary-text">{{ .ProxyMode }}</td>
-          <td>
-            {{ if eq .Status "running" }}
-            <div style="display: flex; gap: 0.5rem;">
-              <a href="{{ .OpenURL }}" class="btn btn-primary" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
-              <form action="/api/apps/stop" method="POST" style="display: inline;">
-                <input type="hidden" name="id" value="{{ .ID }}">
-                <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Stop</button>
-              </form>
-            </div>
-            {{ else if eq .Status "stopped" }}
-            <div style="display: flex; gap: 0.5rem;">
-              <form action="/api/apps/start" method="POST" style="display: inline;">
-                <input type="hidden" name="id" value="{{ .ID }}">
-                <button type="submit" class="btn btn-primary" style="min-height: 36px; padding: 0.25rem 0.75rem;">Start</button>
-              </form>
-              <form action="/api/apps/uninstall" method="POST" style="display: inline;">
-                <input type="hidden" name="id" value="{{ .ID }}">
-                <button type="submit" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Uninstall</button>
-              </form>
-            </div>
-            {{ else }}
-            <form action="/api/apps/install" method="POST" style="display: inline;">
-              <input type="hidden" name="id" value="{{ .ID }}">
-              <button type="submit" class="btn btn-primary" style="min-height: 36px; padding: 0.25rem 0.75rem;">Install</button>
-            </form>
-            {{ end }}
-          </td>
         </tr>
         {{ end }}
         {{ else }}
         <tr>
-          <td colspan="5" class="secondary-text" style="text-align: center; padding: 2rem;">No app manifests discovered in catalog/</td>
+          <td colspan="4" class="secondary-text" style="text-align: center; padding: 2rem;">No app manifests discovered in catalog/</td>
         </tr>
         {{ end }}
       </tbody>
     </table>
   </div>
 </div>
+
+<!-- App Options Modal Popup -->
+<dialog id="app-modal" class="app-modal" aria-labelledby="modal-app-title">
+  <div style="padding: 1.35rem 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.75rem;">
+      <div>
+        <h2 id="modal-app-title" style="margin: 0 0 0.25rem; font-size: 22px;">App Options</h2>
+        <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+          <span id="modal-app-cat" class="badge"></span>
+          <span id="modal-app-status" class="badge"></span>
+        </div>
+      </div>
+      <button type="button" class="btn" style="min-height: 34px; padding: 0.2rem 0.7rem;" onclick="closeAppModal()">Close</button>
+    </div>
+
+    <p id="modal-app-desc" class="secondary-text" style="font-size: 14px; margin-bottom: 1rem;"></p>
+
+    <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.75rem 0.9rem; font-size: 13px; margin-bottom: 1.15rem;">
+      <div><strong>Docker Image:</strong> <code id="modal-app-image"></code></div>
+      <div style="margin-top: 0.25rem;"><strong>Container Port:</strong> <span id="modal-app-port" class="tabular"></span> &bull; <strong>Routing:</strong> <span id="modal-app-proxy"></span></div>
+    </div>
+
+    <div id="modal-app-actions" style="display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center;"></div>
+
+    <div id="modal-logs-wrap" style="display: none; margin-top: 1rem;">
+      <strong style="font-size: 13px; display: block; margin-bottom: 0.35rem;">Recent Container Logs</strong>
+      <pre id="modal-logs-out" style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; padding: 0.75rem; max-height: 220px; overflow: auto; font-size: 12px; line-height: 1.4;"></pre>
+    </div>
+  </div>
+</dialog>
+
+<section class="card" aria-label="Add Custom Docker Container">
+  <h2>Add Custom Docker App</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">Bring your own container image (runs on <code>ark-net</code> and reverse-proxied through Ark or bound directly to a host port).</p>
+
+  <form action="/api/apps/custom" method="POST" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; max-width: 820px;">
+    <div>
+      <label for="custom_name" class="form-label">App Name</label>
+      <input type="text" id="custom_name" name="name" class="form-control" placeholder="e.g. Syncthing" required>
+    </div>
+    <div>
+      <label for="custom_image" class="form-label">Docker Image</label>
+      <input type="text" id="custom_image" name="image" class="form-control" placeholder="e.g. lscr.io/linuxserver/syncthing:latest" required>
+    </div>
+    <div>
+      <label for="custom_port" class="form-label">Container Port</label>
+      <input type="number" id="custom_port" name="port" class="form-control" placeholder="8384" required>
+    </div>
+    <div>
+      <label for="custom_proxy" class="form-label">Routing Mode</label>
+      <select id="custom_proxy" name="proxy_mode" class="form-control">
+        <option value="path">Ark Reverse Proxy (/a/id/)</option>
+        <option value="port">Direct Host Port (localhost)</option>
+      </select>
+    </div>
+    <div>
+      <label for="custom_vol" class="form-label">Container Data Mount (optional)</label>
+      <input type="text" id="custom_vol" name="volume_target" class="form-control" placeholder="/data or /config">
+    </div>
+    <div>
+      <label for="custom_env" class="form-label">Environment (KEY=VAL per line)</label>
+      <textarea id="custom_env" name="env" class="form-control" rows="2" placeholder="TZ=UTC"></textarea>
+    </div>
+    <div style="grid-column: 1 / -1;">
+      <button type="submit" class="btn btn-primary">Save Custom Container</button>
+    </div>
+  </form>
+</section>
+
+<script>
+function closeAppModal() {
+  var dlg = document.getElementById('app-modal');
+  if (dlg && dlg.open) dlg.close();
+}
+
+function makeActionForm(action, appId, label, btnClass, redirect, extraHidden) {
+  var f = document.createElement('form');
+  f.action = action;
+  f.method = 'POST';
+  f.style.margin = '0';
+  var html = '<input type="hidden" name="id" value="' + appId + '">';
+  if (redirect) html += '<input type="hidden" name="redirect" value="' + redirect + '">';
+  if (extraHidden) html += extraHidden;
+  html += '<button type="submit" class="btn ' + btnClass + '" style="min-height:38px;padding:0.25rem 0.9rem;font-size:14px;">' + label + '</button>';
+  f.innerHTML = html;
+  return f;
+}
+
+function openAppModal(btn) {
+  var id = btn.getAttribute('data-id');
+  var name = btn.getAttribute('data-name');
+  var desc = btn.getAttribute('data-desc');
+  var cat = btn.getAttribute('data-category');
+  var image = btn.getAttribute('data-image');
+  var port = btn.getAttribute('data-port');
+  var status = btn.getAttribute('data-status');
+  var proxy = btn.getAttribute('data-proxy');
+  var openURL = btn.getAttribute('data-open-url');
+  var isCustom = btn.getAttribute('data-custom') === '1';
+
+  document.getElementById('modal-app-title').textContent = name;
+  document.getElementById('modal-app-cat').textContent = cat;
+  var statusEl = document.getElementById('modal-app-status');
+  statusEl.textContent = status === 'not_installed' ? 'Not Installed' : status;
+  statusEl.className = 'badge ' + (status === 'running' ? 'badge-success' : '');
+  document.getElementById('modal-app-desc').textContent = desc || ('Containerized module using ' + image);
+  document.getElementById('modal-app-image').textContent = image;
+  document.getElementById('modal-app-port').textContent = port;
+  document.getElementById('modal-app-proxy').textContent = proxy;
+  document.getElementById('modal-logs-wrap').style.display = 'none';
+
+  var actions = document.getElementById('modal-app-actions');
+  actions.innerHTML = '';
+
+  if (status === 'running') {
+    var openA = document.createElement('a');
+    openA.href = openURL;
+    openA.target = '_blank';
+    openA.rel = 'noopener noreferrer';
+    openA.className = 'btn btn-primary';
+    openA.style.cssText = 'min-height:38px;padding:0.25rem 0.95rem;font-size:14px;';
+    openA.textContent = 'Open App';
+    actions.appendChild(openA);
+    actions.appendChild(makeActionForm('/api/apps/stop', id, 'Stop', '', '/apps'));
+    actions.appendChild(makeActionForm('/api/containers/restart', id, 'Restart', '', '/apps'));
+    actions.appendChild(makeActionForm('/api/apps/update', id, 'Pull Update', '', '/apps'));
+  } else if (status === 'stopped') {
+    actions.appendChild(makeActionForm('/api/apps/start', id, 'Start', 'btn-primary', '/apps'));
+    actions.appendChild(makeActionForm('/api/apps/update', id, 'Pull Update', '', '/apps'));
+  } else {
+    actions.appendChild(makeActionForm('/api/apps/install', id, 'Install', 'btn-primary', '/apps'));
+  }
+
+  if (status === 'running' || status === 'stopped') {
+    var logBtn = document.createElement('button');
+    logBtn.type = 'button';
+    logBtn.className = 'btn';
+    logBtn.style.cssText = 'min-height:38px;padding:0.25rem 0.9rem;font-size:14px;';
+    logBtn.textContent = 'View Logs';
+    logBtn.onclick = function() {
+      var wrap = document.getElementById('modal-logs-wrap');
+      var out = document.getElementById('modal-logs-out');
+      wrap.style.display = 'block';
+      out.textContent = 'Fetching logs...';
+      fetch('/api/containers/logs?id=' + encodeURIComponent(id))
+        .then(function(r) { return r.text(); })
+        .then(function(txt) { out.textContent = txt || '(no logs yet)'; })
+        .catch(function(err) { out.textContent = 'Could not load logs: ' + err.message; });
+    };
+    actions.appendChild(logBtn);
+  }
+
+  if (status !== 'not_installed' || isCustom) {
+    var extra = isCustom ? '<input type="hidden" name="delete_custom" value="1">' : '';
+    var rmLabel = status === 'not_installed' ? 'Delete Custom App' : 'Uninstall';
+    actions.appendChild(makeActionForm('/api/apps/uninstall', id, rmLabel, 'btn-danger', '/apps', extra));
+  }
+
+  var dlg = document.getElementById('app-modal');
+  if (dlg.showModal) {
+    dlg.showModal();
+  } else {
+    dlg.setAttribute('open', 'open');
+  }
+}
+
+document.getElementById('app-modal').addEventListener('click', function(ev) {
+  if (ev.target === this) closeAppModal();
+});
+</script>
 {{ end }}

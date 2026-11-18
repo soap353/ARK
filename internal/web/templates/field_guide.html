@@ -1,0 +1,105 @@
+{{ define "content" }}
+<div class="card-header" style="margin-bottom: 1.25rem;">
+  <div>
+    <h1 class="page-title">Field Medical &amp; Remedies Guide</h1>
+    <p class="secondary-text" style="margin: 0;">Embedded 100% offline reference covering {{ len .GuideConditions }} conditions and {{ len .GuideRemedies }} matching home &amp; natural remedies.</p>
+  </div>
+</div>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error);">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+
+<section class="card" aria-label="Search Field Guide">
+  <form action="/field-guide" method="GET" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; align-items: end;">
+    <div style="grid-column: span 2;">
+      <label for="fg-q" class="form-label">Search Symptoms, Remedies, or Ingredients</label>
+      <input type="search" id="fg-q" name="q" class="form-control" value="{{ .InitialQuery }}" placeholder="e.g. burn, cough, aloe, ginger, nausea, dehydration...">
+    </div>
+    <div>
+      <label for="fg-kind" class="form-label">Remedy Type</label>
+      <select id="fg-kind" name="kind" class="form-control">
+        <option value="all" {{ if or (eq .SelectedGuideKind "") (eq .SelectedGuideKind "all") }}selected{{ end }}>All Types</option>
+        <option value="Home Remedy" {{ if eq .SelectedGuideKind "Home Remedy" }}selected{{ end }}>Home Remedies</option>
+        <option value="Natural Remedy" {{ if eq .SelectedGuideKind "Natural Remedy" }}selected{{ end }}>Natural Remedies</option>
+      </select>
+    </div>
+    <div>
+      <label for="fg-cond" class="form-label">Condition Filter</label>
+      <select id="fg-cond" name="condition" class="form-control">
+        <option value="">All Conditions</option>
+        {{ range .GuideConditions }}
+        <option value="{{ .Slug }}" {{ if eq $.SelectedCondition .Slug }}selected{{ end }}>{{ .Label }} ({{ .Category }})</option>
+        {{ end }}
+      </select>
+    </div>
+    <div>
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Filter Reference</button>
+    </div>
+  </form>
+
+  <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 1rem;">
+    <a href="/field-guide" class="badge" style="text-decoration: none;">Reset</a>
+    {{ range .GuideConditions }}
+    <a href="/field-guide?condition={{ .Slug }}" class="badge {{ if eq $.SelectedCondition .Slug }}badge-accent{{ end }}" style="text-decoration: none;">{{ .Label }}</a>
+    {{ end }}
+  </div>
+</section>
+
+{{ if .GuideRemedies }}
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem;">
+  {{ range .GuideRemedies }}
+  <article class="card" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem;">
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;">
+        <h2 style="margin: 0; font-size: 19px;">{{ .Name }}</h2>
+        <span class="badge {{ if eq .Kind "Home Remedy" }}badge-accent{{ else }}badge-success{{ end }}">{{ .Kind }}</span>
+      </div>
+      {{ if .CommonNames }}
+      <div class="secondary-text" style="font-size: 13px; margin-bottom: 0.5rem;">Also known as: {{ range $i, $n := .CommonNames }}{{ if $i }}, {{ end }}{{ $n }}{{ end }}</div>
+      {{ end }}
+
+      <div style="margin-bottom: 0.6rem;">
+        <strong style="font-size: 14px;">Uses:</strong>
+        <p style="font-size: 14px; margin: 0.15rem 0 0;">{{ .Uses }}</p>
+      </div>
+
+      <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.65rem 0.75rem; margin-bottom: 0.6rem;">
+        <strong style="font-size: 13px;">Preparation &amp; Application:</strong>
+        <p style="font-size: 13px; margin: 0.15rem 0 0;">{{ .How }}</p>
+      </div>
+
+      {{ if .Evidence }}
+      <p class="secondary-text" style="font-size: 13px; margin: 0 0 0.5rem;"><strong>Evidence:</strong> {{ .Evidence }}</p>
+      {{ end }}
+
+      {{ if .Cautions }}
+      <div style="background: #FCEAEA; border: 1px solid #E7A7A7; border-radius: var(--border-radius); padding: 0.55rem 0.75rem; font-size: 13px; color: #7F1D1D;">
+        <strong>Cautions:</strong> {{ .Cautions }}
+      </div>
+      {{ end }}
+    </div>
+
+    {{ if .Conditions }}
+    <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
+      {{ range .Conditions }}
+      <a href="/field-guide?condition={{ . }}" class="badge" style="text-decoration: none; font-size: 12px;">{{ . }}</a>
+      {{ end }}
+    </div>
+    {{ end }}
+  </article>
+  {{ end }}
+</div>
+{{ else }}
+<div class="card" style="text-align: center; padding: 2.5rem;">
+  <h3>No matching remedies</h3>
+  <p class="secondary-text">Try a broader symptom search or <a href="/field-guide" style="color: var(--color-accent);">reset filters</a>.</p>
+</div>
+{{ end }}
+
+<p class="secondary-text" style="margin-top: 1.5rem; font-size: 13px;">
+  For educational and offline preparedness reference only; seek professional medical care when available.
+</p>
+{{ end }}

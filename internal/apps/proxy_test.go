@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,36 @@ func TestProxyManager_Routing(t *testing.T) {
 	}
 	if loc := resp4.Header.Get("Location"); loc != "/a/cyberchef/" {
 		t.Errorf("expected redirect location '/a/cyberchef/', got %q", loc)
+	}
+}
+
+func TestProxyManager_InjectsArkNavbar(t *testing.T) {
+	htmlBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body class="app"><h1>Drug Labels</h1></body></html>`))
+	}))
+	defer htmlBackend.Close()
+
+	u, _ := url.Parse(htmlBackend.URL)
+	pm := NewProxyManager()
+	pm.Register("druglabels", u, true)
+	pm.Register("kiwix", u, false)
+
+	req := httptest.NewRequest("GET", "/a/druglabels/", nil)
+	rec := httptest.NewRecorder()
+	pm.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="ark-proxy-nav"`) || !strings.Contains(body, `href="/"`) || !strings.Contains(body, `href="/apps"`) {
+		t.Fatalf("expected shared Ark navigation bar injected into HTML response, got %q", body)
+	}
+	if strings.Contains(body, "+ Add to AI") {
+		t.Fatalf("did not expect Kiwix Add to AI button in druglabels")
+	}
+
+	reqK := httptest.NewRequest("GET", "/a/kiwix/", nil)
+	recK := httptest.NewRecorder()
+	pm.ServeHTTP(recK, reqK)
+	if !strings.Contains(recK.Body.String(), "+ Add to AI") {
+		t.Fatalf("expected Kiwix Add to AI button injected for kiwix")
 	}
 }

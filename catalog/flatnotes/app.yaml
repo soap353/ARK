@@ -1,14 +1,16 @@
 version: 1
 id: flatnotes
-name: Notes
+name: Flatnotes
 category: knowledge
+description: Fast personal markdown notebook stored locally on disk.
 icon: edit.svg
 image: dullage/flatnotes:latest
 port: 8080
-proxy: path
+proxy: port
 volumes:
   - "notes:/data:rw"
 env:
   FLATNOTES_PATH: /data
+  FLATNOTES_AUTH_TYPE: none
 healthcheck: /
 lan: admin

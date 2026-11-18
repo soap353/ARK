@@ -1,11 +1,13 @@
 version: 1
 id: ollama
-name: Ollama AI
+name: Ollama
 category: ai
+description: Run private local LLMs for offline chat and document Q&A.
 icon: cpu.svg
 image: ollama/ollama:latest
 port: 11434
 proxy: port
+open_url: /ask
 volumes:
   - "ollama:/root/.ollama:rw"
 healthcheck: /

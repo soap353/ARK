@@ -11,8 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ark/internal/apps"
@@ -84,6 +86,62 @@ func (c *Client) Ping(ctx context.Context) error {
 // IsAvailable returns true if the Docker daemon responds to ping.
 func (c *Client) IsAvailable(ctx context.Context) bool {
 	return c.Ping(ctx) == nil
+}
+
+// EnsureDaemonRunning starts Docker Desktop / Podman / systemd docker when offline and waits briefly for it to respond.
+func (c *Client) EnsureDaemonRunning(ctx context.Context) error {
+	if c == nil || c.cli == nil {
+		return errors.New("docker client is nil")
+	}
+	if c.IsAvailable(ctx) {
+		return nil
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		for _, candidate := range []string{
+			filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "Docker Desktop.exe"),
+			filepath.Join(os.Getenv("LocalAppData"), "Programs", "Docker", "Docker", "Docker Desktop.exe"),
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				_ = exec.Command(candidate).Start()
+				break
+			}
+		}
+		if _, err := exec.LookPath("podman"); err == nil {
+			_ = exec.Command("podman", "machine", "start").Start()
+		}
+	case "darwin":
+		if _, err := os.Stat("/Applications/Docker.app"); err == nil {
+			_ = exec.Command("open", "-a", "Docker").Start()
+		} else if _, err := exec.LookPath("podman"); err == nil {
+			_ = exec.Command("podman", "machine", "start").Start()
+		}
+	default:
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			_ = exec.Command("systemctl", "start", "docker").Start()
+		} else if _, err := exec.LookPath("podman"); err == nil {
+			_ = exec.Command("podman", "system", "service", "--time=0").Start()
+		}
+	}
+
+	waitDeadline := time.NewTimer(25 * time.Second)
+	defer waitDeadline.Stop()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		if c.IsAvailable(ctx) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-waitDeadline.C:
+			return errors.New("timed out waiting for Docker/Podman engine to start")
+		case <-ticker.C:
+		}
+	}
 }
 
 // Close closes the underlying Docker client transport.
@@ -188,11 +246,16 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 	portBindings := nat.PortMap{}
 
 	if app.Proxy == "port" {
+		// Avoid colliding with Ark's default port 8080 by assigning an ephemeral host port when container port is 8080.
+		hostPort := strconv.Itoa(app.Port)
+		if app.Port == 8080 {
+			hostPort = "0"
+		}
 		// App binds directly to host port
 		portBindings[containerPort] = []nat.PortBinding{
 			{
 				HostIP:   "0.0.0.0",
-				HostPort: strconv.Itoa(app.Port),
+				HostPort: hostPort,
 			},
 		}
 	} else {
@@ -276,6 +339,64 @@ func (c *Client) Stop(ctx context.Context, appID string, timeoutSec int) error {
 	return c.cli.ContainerStop(ctx, existing.ID, container.StopOptions{
 		Timeout: &stopTimeout,
 	})
+}
+
+// StopAll concurrently stops all running Ark app and job containers.
+func (c *Client) StopAll(ctx context.Context, timeoutSec int) (int, error) {
+	if c == nil || c.cli == nil {
+		return 0, nil
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 2
+	}
+
+	seen := make(map[string]bool)
+	var targets []string
+	for _, labelKey := range []string{AppLabelKey, JobLabelKey} {
+		list, err := c.cli.ContainerList(ctx, container.ListOptions{
+			All:     false, // only running containers
+			Filters: filters.NewArgs(filters.Arg("label", labelKey)),
+		})
+		if err != nil {
+			return 0, err
+		}
+		for _, cnt := range list {
+			if !seen[cnt.ID] {
+				seen[cnt.ID] = true
+				targets = append(targets, cnt.ID)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return 0, nil
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	stopped := 0
+
+	for _, id := range targets {
+		wg.Add(1)
+		go func(containerID string) {
+			defer wg.Done()
+			t := timeoutSec
+			if err := c.cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &t}); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			stopped++
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return stopped, firstErr
 }
 
 // Restart restarts the container associated with appID.
@@ -540,6 +661,33 @@ func (c *Client) FindContainerByAppID(ctx context.Context, appID string) (*conta
 		return nil, nil
 	}
 	return &containers[0], nil
+}
+
+// UninstallAll removes all Ark-labeled containers, their unique images, ark-qdrant volume, and ark-net.
+func (c *Client) UninstallAll(ctx context.Context) (int, error) {
+	containers, err := c.ListArkContainers(ctx)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	images := make(map[string]bool)
+	for _, cnt := range containers {
+		if cnt.Image != "" {
+			images[cnt.Image] = true
+		}
+		if err := c.cli.ContainerRemove(ctx, cnt.ID, container.RemoveOptions{
+			RemoveVolumes: true,
+			Force:         true,
+		}); err == nil {
+			removed++
+		}
+	}
+	for img := range images {
+		_, _ = c.cli.ImageRemove(ctx, img, image.RemoveOptions{Force: true, PruneChildren: true})
+	}
+	_ = c.cli.VolumeRemove(ctx, "ark-qdrant", true)
+	_ = c.cli.NetworkRemove(ctx, NetworkName)
+	return removed, nil
 }
 
 func extractContainerInfo(inspect *container.InspectResponse, appID, proxyMode string) (*ContainerInfo, error) {

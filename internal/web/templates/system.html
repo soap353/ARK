@@ -1,5 +1,5 @@
 {{ define "content" }}
-<div class="card-header">
+<div class="card-header" style="margin-bottom: 1.25rem;">
   <h1 class="page-title">System &amp; Containers</h1>
   <span class="badge {{ if .DockerOnline }}badge-success{{ else }}badge-error{{ end }}">
     {{ if .DockerOnline }}Docker Online{{ else }}Docker Offline{{ end }}
@@ -8,42 +8,197 @@
 
 <div class="card" aria-label="Live host resource usage">
   <div class="card-header" style="margin-bottom: 1rem;">
-    <h2>Live Host Telemetry</h2>
+    <h2 style="margin: 0;">Live Host Telemetry</h2>
     <span id="sse-status" class="badge badge-accent">Live (2s SSE)</span>
   </div>
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
     <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 14px;">CPU Usage</div>
-      <div id="metric-cpu" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
+      <div class="secondary-text" style="font-size: 13px;">CPU Usage</div>
+      <div id="metric-cpu" class="tabular" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
         {{ if .SystemMetrics }}{{ printf "%.1f%%" .SystemMetrics.CPUPercent }}{{ else }}0.0%{{ end }}
       </div>
     </div>
     <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 14px;">Memory Used</div>
-      <div id="metric-ram" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
+      <div class="secondary-text" style="font-size: 13px;">Memory Used</div>
+      <div id="metric-ram" class="tabular" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
         {{ if .SystemMetrics }}{{ printf "%.1f%%" .SystemMetrics.RAMPercent }}{{ else }}0.0%{{ end }}
       </div>
-      <div id="metric-ram-detail" class="secondary-text" style="font-size: 13px;">
+      <div id="metric-ram-detail" class="secondary-text tabular" style="font-size: 13px;">
         {{ if .SystemMetrics }}{{ .SystemMetrics.RAMUsedGB }} / {{ .SystemMetrics.RAMTotalGB }} GB{{ end }}
       </div>
     </div>
     <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 14px;">Disk Usage</div>
-      <div id="metric-disk" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
+      <div class="secondary-text" style="font-size: 13px;">Disk Usage</div>
+      <div id="metric-disk" class="tabular" style="font-size: 28px; font-weight: 700; margin: 4px 0;">
         {{ if .SystemMetrics }}{{ printf "%.1f%%" .SystemMetrics.DiskPercent }}{{ else }}0.0%{{ end }}
       </div>
-      <div id="metric-disk-detail" class="secondary-text" style="font-size: 13px;">
+      <div id="metric-disk-detail" class="secondary-text tabular" style="font-size: 13px;">
         {{ if .SystemMetrics }}{{ .SystemMetrics.DiskFreeGB }} GB free of {{ .SystemMetrics.DiskTotalGB }} GB{{ end }}
       </div>
     </div>
     <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 14px;">Host</div>
+      <div class="secondary-text" style="font-size: 13px;">Host</div>
       <div style="font-size: 20px; font-weight: 700; margin: 4px 0;">
         {{ if .SystemMetrics }}{{ .SystemMetrics.Hostname }} ({{ .SystemMetrics.OS }}){{ else }}localhost{{ end }}
       </div>
-      <div id="metric-uptime" class="secondary-text" style="font-size: 13px;">
+      <div id="metric-uptime" class="secondary-text tabular" style="font-size: 13px;">
         {{ if .SystemMetrics }}Uptime: {{ .SystemMetrics.UptimeText }}{{ end }}
       </div>
+    </div>
+    <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">Last Session / Offline</div>
+      <div id="metric-downtime" class="tabular" style="font-size: 20px; font-weight: 700; margin: 4px 0;">
+        {{ if .LastDowntime.HasPrevious }}{{ .LastDowntime.DowntimeHuman }}{{ else }}First Run{{ end }}
+      </div>
+      <div class="secondary-text tabular" style="font-size: 13px;">
+        {{ if .LastDowntime.HasPrevious }}Last shutdown: {{ .LastDowntime.LastShutdownAt }}{{ else }}No prior shutdown saved yet{{ end }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Storage Breakdown -->
+<section class="card" aria-label="Storage status">
+  <div class="card-header">
+    <h2 style="margin: 0;">Storage</h2>
+    <span class="secondary-text tabular">{{ .StorageUsedGB }} GB used of {{ .StorageTotalGB }} GB ({{ .StorageFreeGB }} GB free)</span>
+  </div>
+  <div class="storage-bar-wrapper">
+    <div class="storage-bar" role="progressbar" aria-valuenow="{{ .StorageUsedPercent }}" aria-valuemin="0" aria-valuemax="100">
+      {{ if gt .StorageArkPercent 0 }}
+      <div class="storage-segment segment-zim" style="width: {{ .StorageArkPercent }}%;" title="Ark Archive ({{ .ArkDataUsedText }})"></div>
+      {{ end }}
+      {{ if gt .StorageOtherPercent 0 }}
+      <div class="storage-segment segment-other" style="width: {{ .StorageOtherPercent }}%;" title="Drive Used ({{ .StorageUsedGB }} GB total)"></div>
+      {{ end }}
+    </div>
+  </div>
+  <div style="margin-top: 0.75rem; font-size: 14px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+    <span class="secondary-text">Ark Archive: <strong class="tabular">{{ .ArkDataUsedText }}</strong></span>
+    <span class="secondary-text tabular">{{ .StorageUsedPercent }}% drive utilized</span>
+  </div>
+</section>
+
+<!-- Session Jobs (Last 3 current session jobs) -->
+<section id="recent-jobs-card" class="card" aria-label="Current session download and background jobs" {{ if .HasActiveJobs }}hx-get="/system" hx-trigger="every 2s" hx-select="#recent-jobs-card" hx-target="#recent-jobs-card" hx-swap="outerHTML"{{ end }}>
+  <div class="card-header">
+    <div>
+      <h2 style="margin: 0;">Session Jobs</h2>
+      <span class="secondary-text" style="font-size: 13px;">Showing up to the last 3 jobs from the current session</span>
+    </div>
+    <button type="button" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 13px;" onclick="location.reload()">Refresh</button>
+  </div>
+
+  {{ if .Jobs }}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Target</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Jobs }}
+        <tr>
+          <td><strong>{{ .Type }}</strong></td>
+          <td>
+            <div>{{ .Target }}</div>
+            {{ if .ErrorMsg }}
+            <div style="color: var(--color-error); font-size: 12px; margin-top: 2px;">{{ .ErrorMsg }}</div>
+            {{ else if .ProgressMsg }}
+            <div class="secondary-text" style="font-size: 12px; margin-top: 2px;">{{ .ProgressMsg }}</div>
+            {{ end }}
+          </td>
+          <td>
+            {{ if eq .Status "done" }}
+            <span class="badge badge-success">Done</span>
+            {{ else if eq .Status "running" }}
+            <span class="badge badge-accent">Running</span>
+            {{ else if or (eq .Status "failed") (eq .Status "cancelled") }}
+            <span class="badge badge-error">{{ .Status }}</span>
+            {{ else }}
+            <span class="badge">{{ .Status }}</span>
+            {{ end }}
+          </td>
+          <td>
+            <div style="min-width: 120px;">
+              <div class="tabular" style="font-size: 12px; margin-bottom: 4px;">{{ printf "%.1f%%" .Progress }}</div>
+              <div class="storage-bar" style="height: 8px;">
+                <div class="storage-segment segment-zim" style="width: {{ .Progress }}%;"></div>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div style="display: flex; gap: 0.4rem; align-items: center;">
+              {{ if or (eq .Status "pending") (eq .Status "running") }}
+                <form action="/api/jobs/cancel" method="POST" style="margin: 0;">
+                  <input type="hidden" name="id" value="{{ .ID }}">
+                  <input type="hidden" name="redirect" value="/system">
+                  <button type="submit" class="btn btn-danger" style="min-height: 28px; padding: 0.1rem 0.5rem; font-size: 13px;">Cancel</button>
+                </form>
+              {{ else if or (eq .Status "failed") (eq .Status "cancelled") }}
+                <form action="/api/jobs/retry" method="POST" style="margin: 0;">
+                  <input type="hidden" name="id" value="{{ .ID }}">
+                  <input type="hidden" name="redirect" value="/system">
+                  <button type="submit" class="btn" style="min-height: 28px; padding: 0.1rem 0.5rem; font-size: 13px;">Retry</button>
+                </form>
+                <form action="/api/jobs/delete" method="POST" style="margin: 0;">
+                  <input type="hidden" name="id" value="{{ .ID }}">
+                  <input type="hidden" name="redirect" value="/system">
+                  <button type="submit" class="btn btn-danger" style="min-height: 28px; padding: 0.1rem 0.5rem; font-size: 13px;">Remove</button>
+                </form>
+              {{ else if eq .Status "done" }}
+                <span class="secondary-text">Completed</span>
+              {{ else }}
+                <span class="secondary-text">-</span>
+              {{ end }}
+            </div>
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="secondary-text" style="padding: 0.75rem 0;">No jobs recorded in this session yet. Download content from <a href="/get-content" style="color: var(--color-accent);">Get Content</a>.</p>
+  {{ end }}
+</section>
+
+<!-- System & AI Hardware Benchmark -->
+<div class="card" aria-label="Hardware and AI Benchmark">
+  <div class="card-header">
+    <div>
+      <h2 style="margin: 0;">System &amp; AI Benchmark</h2>
+      <span class="secondary-text" style="font-size: 13px;">Measures multi-core CPU hash rate, memory bandwidth, disk I/O in ArkData, and optional AI tok/s.</span>
+    </div>
+    <button type="button" id="bench-run-btn" class="btn btn-primary" onclick="runBenchmark()">Run Benchmark</button>
+  </div>
+
+  <div id="bench-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 0.85rem;">
+    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">Ark Readiness Score</div>
+      <div id="bench-score" class="tabular" style="font-size: 24px; font-weight: 700;">{{ if .LastBenchmark }}{{ .LastBenchmark.OverallScore }}{{ else }}-{{ end }}</div>
+      <div id="bench-tier" class="badge" style="margin-top: 4px;">{{ if .LastBenchmark }}{{ .LastBenchmark.Tier }}{{ else }}Not run{{ end }}</div>
+    </div>
+    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">CPU Compute</div>
+      <div id="bench-cpu" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.0f MB/s" .LastBenchmark.CPUMBs }}{{ else }}-{{ end }}</div>
+    </div>
+    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">Memory Bandwidth</div>
+      <div id="bench-ram" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.1f GB/s" .LastBenchmark.MemoryGBs }}{{ else }}-{{ end }}</div>
+    </div>
+    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">Disk I/O (W / R)</div>
+      <div id="bench-disk" class="tabular" style="font-size: 19px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.0f / %.0f MB/s" .LastBenchmark.DiskWriteMBs .LastBenchmark.DiskReadMBs }}{{ else }}-{{ end }}</div>
+    </div>
+    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
+      <div class="secondary-text" style="font-size: 13px;">AI Inference</div>
+      <div id="bench-ai" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if and .LastBenchmark (gt .LastBenchmark.AITokensPerSec 0.0) }}{{ printf "%.1f tok/s" .LastBenchmark.AITokensPerSec }}{{ else }}N/A{{ end }}</div>
     </div>
   </div>
 </div>
@@ -67,16 +222,18 @@
         {{ range .Containers }}
         <tr>
           <td><strong>{{ .Name }}</strong> <span class="secondary-text" style="font-size: 13px;">({{ .AppID }})</span></td>
-          <td class="secondary-text" style="font-size: 14px;">{{ .Image }}</td>
+          <td class="secondary-text" style="font-size: 14px;"><code>{{ .Image }}</code></td>
           <td>
             <span class="badge {{ if eq .Status "running" }}badge-success{{ else }}badge{{ end }}">{{ .Status }}</span>
           </td>
-          <td>{{ .CPUText }}</td>
-          <td>{{ .MemoryText }}</td>
+          <td class="tabular">{{ .CPUText }}</td>
+          <td class="tabular">{{ .MemoryText }}</td>
           <td>
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              {{ if eq .Status "running" }}
               <form action="/api/containers/restart" method="POST" style="margin: 0;">
                 <input type="hidden" name="id" value="{{ .AppID }}">
+                <input type="hidden" name="redirect" value="/system">
                 <button type="submit" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Restart</button>
               </form>
               <form action="/api/apps/stop" method="POST" style="margin: 0;">
@@ -84,6 +241,13 @@
                 <input type="hidden" name="redirect" value="/system">
                 <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Stop</button>
               </form>
+              {{ else }}
+              <form action="/api/apps/start" method="POST" style="margin: 0;">
+                <input type="hidden" name="id" value="{{ .AppID }}">
+                <input type="hidden" name="redirect" value="/system">
+                <button type="submit" class="btn btn-primary" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Start</button>
+              </form>
+              {{ end }}
               <button type="button" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;" onclick="loadLogs('{{ .AppID }}')">Logs</button>
             </div>
           </td>
@@ -121,6 +285,26 @@
     } catch (_) {}
   });
 })();
+
+function runBenchmark() {
+  const btn = document.getElementById('bench-run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Running (~2s)...';
+  fetch('/api/system/benchmark', { method: 'POST' })
+    .then(r => r.json())
+    .then(b => {
+      document.getElementById('bench-score').textContent = b.overall_score;
+      document.getElementById('bench-tier').textContent = b.tier;
+      document.getElementById('bench-cpu').textContent = Math.round(b.cpu_mbs) + ' MB/s';
+      document.getElementById('bench-ram').textContent = b.memory_gbs.toFixed(1) + ' GB/s';
+      document.getElementById('bench-disk').textContent = Math.round(b.disk_write_mbs) + ' / ' + Math.round(b.disk_read_mbs) + ' MB/s';
+      document.getElementById('bench-ai').textContent = b.ai_tokens_per_sec > 0 ? (b.ai_tokens_per_sec.toFixed(1) + ' tok/s') : 'Offline';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = 'Run Benchmark';
+    });
+}
 
 function loadLogs(appId) {
   const card = document.getElementById('logs-card');

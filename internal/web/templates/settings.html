@@ -1,6 +1,16 @@
 {{ define "content" }}
 <h1 class="page-title">Settings</h1>
 
+{{ if .RollbackNotice }}
+<div class="card" style="border-color: var(--color-danger, #c53030); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
+  <strong>Automatic Recovery Notice:</strong> {{ .RollbackNotice }}
+</div>
+{{ end }}
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-danger, #c53030); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
 {{ if .FlashMsg }}
 <div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
   <strong>{{ .FlashMsg }}</strong>
@@ -84,12 +94,122 @@
   </form>
 </div>
 
-<div class="card">
+<div class="card" id="usb">
   <h2>Copy to USB Drive</h2>
-  <p class="secondary-text" style="margin-bottom: 1.5rem;">
-    Export Ark binaries, Docker images, and downloaded content to an external USB drive for offline air-gapped deployment.
+  <p class="secondary-text" style="margin-bottom: 1.25rem;">
+    Export Ark binaries, Docker app images, sanitized configuration, and downloaded content to an external drive with incremental SHA-256 verification.
   </p>
-  <button type="button" class="btn btn-primary" disabled>USB Export Wizard (Phase 3)</button>
+
+  {{ if .USBProfiles }}
+  <div style="margin-bottom: 1.25rem;">
+    <span class="form-label" style="display:block; margin-bottom:0.4rem;">Saved Export Profiles</span>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+      {{ range .USBProfiles }}
+      <button type="button" class="btn" onclick='applyUSBProfile({{ .Config.IncludeDockerImages }}, {{ .Config.IncludeConfig }}, {{ range .Config.Categories }}"{{ . }}",{{ end }})'>{{ .Name }}</button>
+      {{ end }}
+    </div>
+  </div>
+  {{ end }}
+
+  <form action="/settings/usb-export" method="POST" style="max-width: 720px;">
+    <div class="form-group">
+      <label for="usb_target_path" class="form-label">Destination Drive</label>
+      <select id="usb_target_path" name="target_path" class="form-control" onchange="toggleCustomUSBPath()">
+        {{ range .USBDrives }}
+        <option value="{{ .MountPoint }}/ArkBundle" data-fat32="{{ .FAT32Warning }}">
+          {{ .MountPoint }} ({{ .FSType }} — {{ .FreeGB }} free / {{ .TotalGB }}){{ if .FAT32Warning }} [FAT32 4GB file limit]{{ end }}
+        </option>
+        {{ end }}
+        <option value="custom">Custom folder / mount path...</option>
+      </select>
+      <div id="usb-fat32-warning" class="secondary-text" style="display:none; color: var(--color-danger, #c53030); margin-top: 0.4rem; font-size: 14px;">
+        Warning: This drive uses FAT32, which cannot store single files larger than 4 GB (large ZIMs or Docker tarballs). Reformat as exFAT, NTFS, or ext4 if exporting >4 GB files.
+      </div>
+    </div>
+
+    <div class="form-group" id="usb-custom-path-wrap" style="display: {{ if .USBDrives }}none{{ else }}block{{ end }};">
+      <label for="usb_custom_path" class="form-label">Custom Target Folder</label>
+      <input type="text" id="usb_custom_path" name="custom_path" class="form-control" placeholder="D:\ArkBundle or /mnt/usb/ArkBundle">
+    </div>
+
+    <div class="form-group">
+      <span class="form-label" style="display:block; margin-bottom:0.5rem;">Content Categories</span>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem;">
+        {{ range .USBCategories }}
+        <label style="display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.75rem; border:1px solid var(--color-border); border-radius:6px; cursor:pointer;">
+          <input type="checkbox" name="categories" value="{{ .Key }}" class="usb-cat-cb" {{ if gt .FileCount 0 }}checked{{ end }}>
+          <span>
+            <strong>{{ .Label }}</strong><br>
+            <span class="secondary-text" style="font-size:13px;">{{ .FileCount }} file(s) &bull; {{ .SizeText }}</span>
+          </span>
+        </label>
+        {{ end }}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <span class="form-label" style="display:block; margin-bottom:0.5rem;">Bundle Options</span>
+      <div style="display:flex; flex-direction:column; gap:0.45rem;">
+        <label style="display:flex; align-items:center; gap:0.5rem;">
+          <input type="checkbox" id="usb_include_config" name="include_config" value="1" checked style="width:20px; height:20px;">
+          <span>Include Ark catalog &amp; settings database (credentials stripped)</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem;">
+          <input type="checkbox" id="usb_include_docker" name="include_docker" value="1" style="width:20px; height:20px;">
+          <span>Export installed Docker app images (.tar archive for air-gapped install)</span>
+        </label>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; margin-top:1rem;">
+      <button type="submit" class="btn btn-primary">Start USB Export Job</button>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+        <input type="text" name="profile_name" placeholder="Profile name (e.g. starter_pack)" class="form-control" style="max-width:220px;">
+        <button type="submit" formaction="/settings/usb-profile" class="btn">Save Profile</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card" id="updates">
+  <h2>Updates &amp; Rollback</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">
+    Current version: <strong class="tabular">v{{ .ArkVersion }}</strong>. Check GitHub Releases for new builds or install an air-gapped USB update bundle. Both paths snapshot <code>ark.db</code> automatically before swapping binaries.
+  </p>
+
+  <!-- GitHub Releases Self-Update -->
+  <div style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 1rem 1.15rem; background: var(--color-bg); margin-bottom: 1.35rem; max-width: 720px;">
+    <h3 style="margin: 0 0 0.5rem; font-size: 17px;">GitHub Releases Self-Update</h3>
+    <form action="/settings/update-github" method="POST" style="display: flex; flex-direction: column; gap: 0.75rem;">
+      <div>
+        <label for="github_repo" class="form-label">GitHub Repository (<code>owner/repo</code>)</label>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <input type="text" id="github_repo" name="github_repo" class="form-control" style="flex: 1; min-width: 220px;" value="{{ .GitHubRepo }}" placeholder="soap353/ARK">
+          <button type="button" class="btn" onclick="checkGitHubRelease()">Check Releases</button>
+        </div>
+      </div>
+      <div id="gh-release-status" class="secondary-text" style="font-size: 14px;">Click <strong>Check Releases</strong> to query the latest release tag on GitHub.</div>
+      <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
+        <button type="submit" id="gh-update-btn" class="btn btn-primary">Download &amp; Install Latest Release</button>
+        <button type="submit" formaction="/settings/restart" class="btn">Restart Ark Service</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Local / USB Bundle Update -->
+  <form action="/settings/update" method="POST" style="max-width: 600px; margin-bottom: 1.25rem;">
+    <div class="form-group">
+      <label for="update_source" class="form-label">Offline Update Bundle Directory or USB Path</label>
+      <input type="text" id="update_source" name="update_source" class="form-control" placeholder="/mnt/usb/ark-update or D:\ArkUpdate">
+    </div>
+    <button type="submit" class="btn">Verify Signature &amp; Stage Offline Update</button>
+  </form>
+
+  <form action="/settings/rollback" method="POST">
+    <button type="submit" class="btn" {{ if not .RollbackAvailable }}disabled{{ end }}>
+      {{ if .RollbackAvailable }}Rollback to Previous Version &amp; DB Snapshot{{ else }}No Previous Version Backup Available{{ end }}
+    </button>
+  </form>
 </div>
 
 <script>
@@ -147,5 +267,49 @@ function testAI() {
   })
   .catch(err => { statusEl.textContent = 'Test error: ' + err; });
 }
+function toggleCustomUSBPath() {
+  const sel = document.getElementById('usb_target_path');
+  const wrap = document.getElementById('usb-custom-path-wrap');
+  const warn = document.getElementById('usb-fat32-warning');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (wrap) wrap.style.display = sel.value === 'custom' ? 'block' : 'none';
+  if (warn) warn.style.display = (opt && opt.getAttribute('data-fat32') === 'true') ? 'block' : 'none';
+}
+
+function applyUSBProfile(includeDocker, includeConfig, ...cats) {
+  const dockerEl = document.getElementById('usb_include_docker');
+  const configEl = document.getElementById('usb_include_config');
+  if (dockerEl) dockerEl.checked = !!includeDocker;
+  if (configEl) configEl.checked = !!includeConfig;
+  const want = new Set(cats);
+  document.querySelectorAll('.usb-cat-cb').forEach(cb => {
+    cb.checked = want.has(cb.value);
+  });
+}
+
+function checkGitHubRelease() {
+  const repo = (document.getElementById('github_repo') || {}).value || '';
+  const st = document.getElementById('gh-release-status');
+  st.textContent = 'Checking github.com/' + repo + '/releases/latest...';
+  fetch('/api/update/check?repo=' + encodeURIComponent(repo))
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok || !data.release) {
+        st.textContent = data.error || 'Could not retrieve latest release.';
+        return;
+      }
+      const rel = data.release;
+      if (rel.has_update) {
+        st.innerHTML = '<strong style="color:var(--color-accent);">Update available: v' + rel.version + '</strong> (' + (rel.published_at || '') + ') &mdash; asset: <code>' + (rel.asset_name || 'pending') + '</code>. Click <strong>Download &amp; Install Latest Release</strong>.';
+      } else {
+        st.innerHTML = '<strong style="color:var(--color-success);">Up to date:</strong> Running v' + rel.current_version + ' (latest published: ' + (rel.tag_name || '-') + ').';
+      }
+    })
+    .catch(err => {
+      st.textContent = 'Release check failed: ' + err.message;
+    });
+}
+toggleCustomUSBPath();
 </script>
 {{ end }}

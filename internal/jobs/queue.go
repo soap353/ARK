@@ -76,6 +76,7 @@ func NewQueueManager(store *JobStore, cfg QueueConfig) *QueueManager {
 	qm.RegisterRunner(TypeZim, zimit)
 	qm.RegisterRunner(TypeEncode, ytdlp)
 	qm.RegisterRunner(TypeDrugLabels, NewDrugLabelsRunner())
+	qm.RegisterRunner(TypeMapExtract, NewMapExtractRunner())
 
 	return qm
 }
@@ -229,12 +230,12 @@ encodeLoop:
 		}
 	}
 
-	// 3. Fill available index / ZIM slots
+	// 3. Fill available index / ZIM / USB export slots
 indexLoop:
 	for {
 		select {
 		case qm.indexSem <- struct{}{}:
-			job, err := qm.store.AcquireNextPending(ctx, []string{TypeIndex, TypeZim})
+			job, err := qm.store.AcquireNextPending(ctx, []string{TypeIndex, TypeZim, TypeUSB})
 			if err != nil || job == nil {
 				<-qm.indexSem
 				break indexLoop

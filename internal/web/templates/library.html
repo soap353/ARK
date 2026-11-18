@@ -1,52 +1,240 @@
 {{ define "content" }}
-<div class="card-header">
-  <h1 class="page-title">Offline Library</h1>
-  <a href="/get-content" class="btn btn-primary">+ Get Content</a>
+<div class="card-header" style="margin-bottom: 1.25rem;">
+  <div>
+    <h1 class="page-title">Offline Library</h1>
+    <p class="secondary-text" style="margin: 0;">Click any item to open it, or right-click an item for Delete, Add to AI, or Open.</p>
+  </div>
+  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <button type="button" class="btn" onclick="checkZimUpdates()">Check ZIM Updates</button>
+    <a href="/kiwix" class="btn">Browse Kiwix Catalog</a>
+    <a href="/get-content" class="btn btn-primary">+ Get Content</a>
+  </div>
+</div>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
+
+<div id="lib-toast" class="card" style="display: none; border-color: var(--color-accent); padding: 0.85rem 1.25rem;"></div>
+
+<div id="zim-updates-panel" class="card" style="display: none; border-color: var(--color-accent);">
+  <div class="card-header" style="margin-bottom: 0.5rem;">
+    <h3 style="margin: 0;">ZIM Content Update Check</h3>
+    <button type="button" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem;" onclick="document.getElementById('zim-updates-panel').style.display='none'">Close</button>
+  </div>
+  <div id="zim-updates-body" class="secondary-text">Checking library.kiwix.org...</div>
 </div>
 
 <div class="card">
-  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
-    <button class="btn btn-primary" style="min-height: 40px; padding: 0.25rem 1rem;">All</button>
-    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Wikipedia & ZIM</button>
-    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Maps</button>
-    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Videos</button>
-    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Books & PDFs</button>
-    <button class="btn" style="min-height: 40px; padding: 0.25rem 1rem;">Medical</button>
+  <form action="/library" method="GET" style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+    <input type="search" name="q" value="{{ .InitialQuery }}" placeholder="Filter library by filename or title..." class="form-control" style="flex: 1; min-width: 220px;">
+    {{ if .SelectedCategory }}<input type="hidden" name="cat" value="{{ .SelectedCategory }}">{{ end }}
+    <button type="submit" class="btn btn-primary">Filter</button>
+  </form>
+
+  <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+    <a href="/library{{ if .InitialQuery }}?q={{ .InitialQuery }}{{ end }}" class="btn {{ if or (eq .SelectedCategory "") (eq .SelectedCategory "all") }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">All</a>
+    <a href="/library?cat=ZIM{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "ZIM" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">ZIM Archives</a>
+    <a href="/library?cat=Documents{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Documents" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Documents</a>
+    <a href="/library?cat=Video{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Video" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Videos</a>
+    <a href="/library?cat=Music{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Music" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Music</a>
   </div>
 
   {{ if .Items }}
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Category</th>
-            <th>Size</th>
-            <th>Date</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{ range .Items }}
-          <tr>
-            <td><strong>{{ .Title }}</strong></td>
-            <td><span class="badge">{{ .Category }}</span></td>
-            <td class="secondary-text">{{ .Size }}</td>
-            <td class="secondary-text">{{ .Date }}</td>
-            <td>
-              <a href="{{ .OpenURL }}" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;">Open</a>
-            </td>
-          </tr>
-          {{ end }}
-        </tbody>
-      </table>
+    <div class="library-grid">
+      {{ range .Items }}
+      <a
+        href="{{ .OpenURL }}"
+        class="library-tile"
+        data-title="{{ .Title }}"
+        data-file="{{ .FileName }}"
+        data-rel="{{ .RelPath }}"
+        data-open="{{ .OpenURL }}">
+        <img src="{{ .IconURL }}" alt="" class="library-tile-icon" loading="lazy">
+        <div style="min-width: 0; flex: 1;">
+          <div style="font-weight: 700; font-size: 15px; line-height: 1.3; word-break: break-word;">{{ .Title }}</div>
+          <div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.3rem;">{{ .Category }} &bull; {{ .Size }}</div>
+          <div class="secondary-text tabular" style="font-size: 11px; margin-top: 0.1rem;">{{ .Date }}</div>
+        </div>
+      </a>
+      {{ end }}
     </div>
   {{ else }}
-    <div style="text-align: center; padding: 3rem 1rem;">
+    <div style="text-align: center; padding: 2.75rem 1rem;">
       <h2>Your offline library is empty</h2>
-      <p class="secondary-text" style="margin-bottom: 1.5rem;">Download presets, Kiwix knowledge archives, or offline maps to get started.</p>
-      <a href="/get-content" class="btn btn-primary">Get Content &rarr;</a>
+      <p class="secondary-text" style="margin-bottom: 1.5rem;">Browse the Kiwix Catalog or download curated NOMAD packs to populate your offline archive.</p>
+      <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+        <a href="/kiwix" class="btn btn-primary">Browse Kiwix Catalog &rarr;</a>
+        <a href="/get-content" class="btn">Curated NOMAD Packs &rarr;</a>
+      </div>
     </div>
   {{ end }}
 </div>
+
+<!-- Right-click Context Menu for Library Items -->
+<div id="lib-context-menu" class="context-menu" role="menu" aria-label="Library item actions">
+  <a id="ctx-open" href="#" role="menuitem">Open</a>
+  <button type="button" id="ctx-add-ai" role="menuitem">Add to AI</button>
+  <button type="button" id="ctx-delete" class="ctx-danger" role="menuitem">Delete</button>
+</div>
+
+<form id="ctx-delete-form" action="/api/library/delete" method="POST" style="display: none;">
+  <input type="hidden" id="ctx-delete-rel" name="rel_path" value="">
+</form>
+
+<script>
+(function() {
+  var menu = document.getElementById('lib-context-menu');
+  var openEl = document.getElementById('ctx-open');
+  var aiBtn = document.getElementById('ctx-add-ai');
+  var delBtn = document.getElementById('ctx-delete');
+  var delRelInput = document.getElementById('ctx-delete-rel');
+  var delForm = document.getElementById('ctx-delete-form');
+  var activeTile = null;
+
+  function hideMenu() {
+    menu.style.display = 'none';
+    activeTile = null;
+  }
+
+  document.querySelectorAll('.library-tile').forEach(function(tile) {
+    tile.addEventListener('contextmenu', function(ev) {
+      ev.preventDefault();
+      activeTile = tile;
+      openEl.href = tile.getAttribute('data-open') || '#';
+      aiBtn.disabled = !tile.getAttribute('data-rel');
+      delBtn.disabled = !tile.getAttribute('data-rel');
+
+      var x = Math.min(ev.clientX, window.innerWidth - 205);
+      var y = Math.min(ev.clientY, window.innerHeight - 140);
+      menu.style.left = Math.max(8, x) + 'px';
+      menu.style.top = Math.max(8, y) + 'px';
+      menu.style.display = 'block';
+    });
+  });
+
+  document.addEventListener('click', function(ev) {
+    if (!menu.contains(ev.target)) hideMenu();
+  });
+  document.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Escape') hideMenu();
+  });
+
+  function showToast(htmlContent, isError) {
+    var toast = document.getElementById('lib-toast');
+    toast.style.display = 'block';
+    toast.style.borderColor = isError ? 'var(--color-error)' : 'var(--color-accent)';
+    toast.innerHTML = htmlContent;
+  }
+
+  function pollIndexJob(jobId, title) {
+    fetch('/api/jobs/status?id=' + encodeURIComponent(jobId))
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (!j.ok) return;
+        if (j.status === 'done') {
+          showToast('<strong>Added to AI:</strong> ' + escapeHTML(title) + ' (' + escapeHTML(j.progress_msg || 'Completed') + ') &mdash; <a href="/ask" style="font-weight:700;">Open Ask AI &rarr;</a>', false);
+          return;
+        }
+        if (j.status === 'failed' || j.status === 'cancelled') {
+          showToast('<strong>Add to AI failed:</strong> ' + escapeHTML(j.error_msg || 'Indexing job did not complete.'), true);
+          return;
+        }
+        var pct = Math.round(j.progress || 0);
+        showToast('<strong>Indexing ' + escapeHTML(title) + ':</strong> ' + escapeHTML(j.progress_msg || j.status) + (pct > 0 ? ' (' + pct + '%)' : ''), false);
+        setTimeout(function() { pollIndexJob(jobId, title); }, 700);
+      })
+      .catch(function() {});
+  }
+
+  function escapeHTML(str) {
+    return String(str || '').replace(/[&<>"']/g, function(c) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+    });
+  }
+
+  aiBtn.addEventListener('click', function() {
+    if (!activeTile) return;
+    var rel = activeTile.getAttribute('data-rel');
+    var title = activeTile.getAttribute('data-title') || activeTile.getAttribute('data-file');
+    hideMenu();
+    if (!rel) return;
+
+    showToast('<strong>Queueing ' + escapeHTML(title) + ' for AI indexing...</strong>', false);
+
+    fetch('/api/ai/index', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: 'path=' + encodeURIComponent(rel) + '&ajax=1'
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          showToast('<strong>' + escapeHTML(data.msg || ('Queued ' + title + ' for AI indexing')) + '</strong>', false);
+          if (data.job_id) {
+            setTimeout(function() { pollIndexJob(data.job_id, title); }, 600);
+          }
+        } else {
+          showToast('<strong>Error:</strong> ' + escapeHTML(data.error || 'Could not queue indexing job.'), true);
+        }
+      })
+      .catch(function(err) {
+        showToast('<strong>Error:</strong> ' + escapeHTML(err.message), true);
+      });
+  });
+
+  delBtn.addEventListener('click', function() {
+    if (!activeTile) return;
+    var rel = activeTile.getAttribute('data-rel');
+    var name = activeTile.getAttribute('data-file') || activeTile.getAttribute('data-title');
+    hideMenu();
+    if (!rel) return;
+    if (confirm('Delete "' + name + '" from disk?')) {
+      delRelInput.value = rel;
+      delForm.submit();
+    }
+  });
+})();
+
+function checkZimUpdates() {
+  var panel = document.getElementById('zim-updates-panel');
+  var body = document.getElementById('zim-updates-body');
+  panel.style.display = 'block';
+  body.textContent = 'Checking installed ZIM archives against library.kiwix.org...';
+  fetch('/api/library/updates')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var items = data.items || [];
+      if (items.length === 0) {
+        body.textContent = 'No .zim files installed in data/zim/ yet.';
+        return;
+      }
+      var html = '<div style="display:flex;flex-direction:column;gap:0.5rem;">';
+      items.forEach(function(it) {
+        if (it.has_update) {
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.5rem;border:1px solid var(--color-border);border-radius:6px;">' +
+            '<span><strong>' + it.title + '</strong> — update available (' + (it.latest_date || 'newer') + ')</span>' +
+            '<form action="/api/jobs" method="POST" style="margin:0;"><input type="hidden" name="type" value="kiwix_zim"><input type="hidden" name="target" value="' + it.latest_url + '"><button type="submit" class="btn btn-primary" style="min-height:32px;padding:0.15rem 0.7rem;font-size:13px;">Download Update</button></form></div>';
+        } else {
+          html += '<div style="font-size:14px;">&#x2713; <strong>' + it.file_name + '</strong> is up to date.</div>';
+        }
+      });
+      html += '</div>';
+      body.innerHTML = html;
+    })
+    .catch(function(err) {
+      body.textContent = 'Update check failed: ' + err.message;
+    });
+}
+</script>
 {{ end }}

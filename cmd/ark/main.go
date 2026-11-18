@@ -5,11 +5,15 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +22,9 @@ import (
 	"ark/internal/ai"
 	"ark/internal/docker"
 	"ark/internal/jobs"
+	"ark/internal/system"
+	"ark/internal/update"
+	"ark/internal/usb"
 	"ark/internal/web"
 )
 
@@ -199,18 +206,31 @@ func runServer(args []string) {
 		dataDir = absDir
 	}
 
-	log.Printf("[Ark] Initializing Command Center with data directory: %s", dataDir)
+	log.Printf("[Ark] Initializing Command Center v%s with data directory: %s", update.ArkVersion, dataDir)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("[Ark] Failed to create data directory: %v", err)
+	}
+
+	exePath, _ := os.Executable()
+	if rolledBack, err := update.MarkBootingOrRecover(exePath, dataDir); err != nil {
+		log.Printf("[Ark] Warning: update watchdog check failed: %v", err)
+	} else if rolledBack {
+		log.Printf("[Ark] Previous update crashed before confirming health; rolled back binary and DB snapshot.")
 	}
 
 	// Initialize SQLite Database
 	dbPath := filepath.Join(dataDir, "ark.db")
 	db, err := initDatabase(dbPath)
 	if err != nil {
+		if _, rbErr := update.CheckAndRecoverOnStartup(exePath, dataDir); rbErr == nil {
+			log.Printf("[Ark] DB init failed after update; rolled back to previous snapshot.")
+		}
 		log.Fatalf("[Ark] Database initialization failed: %v", err)
 	}
 	defer db.Close()
+
+	// Clear any stale 'running' flags from an ungraceful previous exit until live containers start.
+	_, _ = db.Exec(`UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE status = 'running'`)
 
 	// Initialize Web Server
 	webServer, err := web.NewServer(db, dataDir)
@@ -218,42 +238,74 @@ func runServer(args []string) {
 		log.Fatalf("[Ark] Failed to initialize web server: %v", err)
 	}
 
+	// Initialize Docker client (graceful if Docker daemon is offline)
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	restoreDone := make(chan struct{})
+	var dockerCli *docker.Client
+	if cli, err := docker.NewClient(); err == nil {
+		dockerCli = cli
+		defer dockerCli.Close()
+		webServer.SetDockerClient(dockerCli)
+		go func() {
+			defer close(restoreDone)
+			if err := dockerCli.EnsureDaemonRunning(runCtx); err != nil {
+				log.Printf("[Ark] Docker engine unavailable at startup: %v", err)
+				return
+			}
+			webServer.RestoreRunningApps(runCtx)
+		}()
+	} else {
+		close(restoreDone)
+		log.Printf("[Ark] Docker client unavailable: %v", err)
+	}
+
 	// Initialize SQLite-backed Job Queue Manager
 	_ = ai.EnsureSchema(context.Background(), db)
+	_ = ai.EnsureChatSchema(context.Background(), db)
+	if pruned, _ := ai.PruneExpiredSessions(context.Background(), db, time.Now()); pruned > 0 {
+		log.Printf("[Ark] Expired %d temporary AI chat session(s) older than 2 days", pruned)
+	}
+	if dt := system.RecordStartupAndComputeDowntime(context.Background(), db, time.Now()); dt.HasPrevious {
+		log.Printf("[Ark] Resumed from last shutdown (%s); offline for %s", dt.LastShutdownAt, dt.DowntimeHuman)
+	}
 	jobStore := jobs.NewJobStore(db)
 	_ = jobStore.ResetStaleRunning(context.Background())
 	queueMgr := jobs.NewQueueManager(jobStore, jobs.DefaultQueueConfig())
 	queueMgr.RegisterRunner(jobs.TypeIndex, &ai.IndexJobRunner{DB: db, QdrantURL: "http://127.0.0.1:6333"})
+	queueMgr.RegisterRunner(jobs.TypeOllamaPull, &ai.OllamaPullRunner{})
+	queueMgr.RegisterRunner(jobs.TypeUSB, jobs.NewUSBRunner(dataDir, func(ctx context.Context, imageNames []string, out io.Writer) error {
+		if dockerCli == nil {
+			return fmt.Errorf("docker unavailable to export images")
+		}
+		return dockerCli.ImageSave(ctx, imageNames, out)
+	}))
 	queueMgr.Start(context.Background())
-	defer queueMgr.Stop()
 	webServer.SetQueueManager(queueMgr)
-
-	// Initialize Docker client (graceful if Docker daemon is offline)
-	if dockerCli, err := docker.NewClient(); err == nil {
-		defer dockerCli.Close()
-		webServer.SetDockerClient(dockerCli)
-		go webServer.RestoreRunningApps(context.Background())
-	} else {
-		log.Printf("[Ark] Docker client unavailable: %v", err)
-	}
 
 	mux := http.NewServeMux()
 	if err := webServer.RegisterRoutes(mux); err != nil {
 		log.Fatalf("[Ark] Failed to register web routes: %v", err)
 	}
 
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		_, _ = update.CheckAndRecoverOnStartup(exePath, dataDir)
+		log.Fatalf("[Ark] Failed to listen on port %s: %v", port, err)
+	}
+	_ = update.ConfirmHealthy(dataDir)
+
 	srv := &http.Server{
-		Addr:         ":" + port,
 		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 10 * time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start server in background
 	go func() {
 		log.Printf("[Ark] Command Center listening on http://0.0.0.0:%s", port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[Ark] HTTP server error: %v", err)
 		}
 	}()
@@ -264,16 +316,45 @@ func runServer(args []string) {
 
 	sig := <-sigChan
 	log.Printf("[Ark] Received signal %v, initiating graceful shutdown...", sig)
+	runCancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer shutdownCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("[Ark] Error during HTTP server shutdown: %v", err)
-	} else {
-		log.Println("[Ark] HTTP server gracefully stopped")
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[Ark] Error during HTTP server shutdown: %v", err)
+		} else {
+			log.Println("[Ark] HTTP server gracefully stopped")
+		}
+		queueMgr.Stop()
+	}()
+
+	go func() {
+		defer wg.Done()
+		select {
+		case <-restoreDone:
+		case <-time.After(1 * time.Second):
+		}
+		if dockerCli != nil && dockerCli.IsAvailable(shutdownCtx) {
+			stopped, err := dockerCli.StopAll(shutdownCtx, 2)
+			if err != nil {
+				log.Printf("[Ark] Warning: error stopping some Docker containers: %v", err)
+			} else {
+				log.Printf("[Ark] Stopped %d Ark Docker container(s)", stopped)
+			}
+		}
+		_, _ = db.Exec(`UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE status = 'running'`)
+	}()
+
+	wg.Wait()
+	if err := system.RecordShutdownTime(context.Background(), db, time.Now()); err != nil {
+		log.Printf("[Ark] Warning: failed to record shutdown timestamp: %v", err)
 	}
-
 	log.Println("[Ark] Command Center shutdown complete")
 }
 
@@ -318,54 +399,202 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func handleUpdate(args []string) {
-	fs := flag.NewFlagSet("update", flag.ExitOnError)
-	fromFlag := fs.String("from", "", "Path to update directory or mounted USB")
-	_ = fs.Parse(args)
+func resolveDataDir(flagVal string) string {
+	dir := flagVal
+	if envDir := os.Getenv("ARK_DATA_DIR"); envDir != "" && dir == "./ArkData" {
+		dir = envDir
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
 
-	fmt.Printf("[Ark] Checking for updates (source: %s)...\n", *fromFlag)
-	fmt.Println("[Ark] Ark is up to date.")
+func handleUpdate(args []string) {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fromFlag := fs.String("from", "", "Path to update directory or mounted USB")
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to ArkData directory")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	src := strings.TrimSpace(*fromFlag)
+	if src == "" {
+		fmt.Println("[Ark] Current version:", update.ArkVersion)
+		fmt.Println("[Ark] Provide --from <path> pointing to an offline update bundle directory.")
+		return
+	}
+
+	dataDir := resolveDataDir(*dataDirFlag)
+	pubKey, err := update.DefaultPublicKey()
+	if err != nil {
+		log.Fatalf("[Ark] Update key error: %v", err)
+	}
+	m, newBin, err := update.LoadUpdateFromDir(src, pubKey)
+	if err != nil {
+		log.Fatalf("[Ark] Update verification failed: %v", err)
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("[Ark] Cannot determine current executable path: %v", err)
+	}
+	if err := update.ApplyUpdate(exePath, newBin, dataDir, update.ArkVersion, m.Version); err != nil {
+		log.Fatalf("[Ark] Failed to apply update: %v", err)
+	}
+	fmt.Printf("[Ark] Verified Ed25519 signature and staged v%s (DB snapshot saved). Restart Ark to activate.\n", m.Version)
 }
 
 func handleRollback(args []string) {
-	fmt.Println("[Ark] Rolling back to previous binary and database snapshot...")
-	fmt.Println("[Ark] Rollback completed.")
+	fs := flag.NewFlagSet("rollback", flag.ContinueOnError)
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to ArkData directory")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	dataDir := resolveDataDir(*dataDirFlag)
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("[Ark] Cannot determine current executable path: %v", err)
+	}
+	if err := update.Rollback(exePath, dataDir); err != nil {
+		log.Fatalf("[Ark] Rollback failed: %v", err)
+	}
+	fmt.Println("[Ark] Rolled back previous binary and database snapshot. Restart Ark to run the previous version.")
 }
 
 func handleUSB(args []string) {
-	fs := flag.NewFlagSet("usb", flag.ExitOnError)
-	profileFlag := fs.String("profile", "starter_pack", "Profile name to export")
-	toFlag := fs.String("to", "", "Target USB mount path")
-	_ = fs.Parse(args)
-
-	if *toFlag == "" {
-		fmt.Println("[Ark] Error: --to <target_path> is required")
-		return
+	fs := flag.NewFlagSet("usb", flag.ContinueOnError)
+	profileFlag := fs.String("profile", "", "Saved profile name to load (optional)")
+	toFlag := fs.String("to", "", "Target USB mount or bundle directory path")
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to ArkData directory")
+	catsFlag := fs.String("categories", "zim,druglabels", "Comma-separated content categories to export")
+	imagesFlag := fs.Bool("images", false, "Include installed Docker app images (.tar)")
+	configFlag := fs.Bool("config", true, "Include sanitized ark.db settings/catalog")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
 	}
-	fmt.Printf("[Ark] Exporting profile '%s' to USB drive at '%s'...\n", *profileFlag, *toFlag)
+
+	if strings.TrimSpace(*toFlag) == "" {
+		fmt.Println("[Ark] Error: --to <target_path> is required")
+		os.Exit(2)
+	}
+
+	dataDir := resolveDataDir(*dataDirFlag)
+	cfg := usb.ExportConfig{
+		TargetPath:          strings.TrimSpace(*toFlag),
+		IncludeDockerImages: *imagesFlag,
+		IncludeConfig:       *configFlag,
+	}
+	for _, c := range strings.Split(*catsFlag, ",") {
+		if trimmed := strings.TrimSpace(c); trimmed != "" {
+			cfg.Categories = append(cfg.Categories, trimmed)
+		}
+	}
+
+	dbPath := filepath.Join(dataDir, "ark.db")
+	if _, err := os.Stat(dbPath); err == nil {
+		if db, err := sql.Open("sqlite", dbPath); err == nil {
+			defer db.Close()
+			if *profileFlag != "" {
+				if prof, err := usb.GetProfile(db, *profileFlag); err == nil {
+					cfg = prof.Config
+					cfg.TargetPath = strings.TrimSpace(*toFlag)
+				} else {
+					log.Fatalf("[Ark] Profile %q not found: %v", *profileFlag, err)
+				}
+			}
+			if cfg.IncludeDockerImages && len(cfg.DockerImageNames) == 0 {
+				rows, err := db.Query(`SELECT DISTINCT image FROM app_states WHERE COALESCE(image, '') != ''`)
+				if err == nil {
+					for rows.Next() {
+						var img string
+						if rows.Scan(&img) == nil {
+							cfg.DockerImageNames = append(cfg.DockerImageNames, img)
+						}
+					}
+					rows.Close()
+				}
+			}
+		}
+	}
+
+	var saver usb.ImageSaver
+	if cfg.IncludeDockerImages && len(cfg.DockerImageNames) > 0 {
+		if dockerCli, err := docker.NewClient(); err == nil {
+			defer dockerCli.Close()
+			saver = dockerCli.ImageSave
+		}
+	}
+
+	res, err := usb.ExportToUSB(context.Background(), dataDir, cfg, saver, func(pct float64, msg string) {
+		fmt.Printf("[Ark] USB %.0f%% - %s\n", pct, msg)
+	})
+	if err != nil {
+		log.Fatalf("[Ark] USB export failed: %v", err)
+	}
+	fmt.Printf("[Ark] USB export complete: %d copied, %d unchanged skipped, manifest: %s\n",
+		res.FilesCopied, res.FilesSkipped, res.ManifestPath)
 }
 
 func handleMoveData(args []string) {
-	fs := flag.NewFlagSet("move-data", flag.ExitOnError)
+	fs := flag.NewFlagSet("move-data", flag.ContinueOnError)
 	toFlag := fs.String("to", "", "New destination directory for ArkData")
-	_ = fs.Parse(args)
-
-	if *toFlag == "" {
-		fmt.Println("[Ark] Error: --to <new_path> is required")
-		return
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Current ArkData directory")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
 	}
-	fmt.Printf("[Ark] Relocating ArkData directory to '%s'...\n", *toFlag)
+
+	if strings.TrimSpace(*toFlag) == "" {
+		fmt.Println("[Ark] Error: --to <new_path> is required")
+		os.Exit(2)
+	}
+
+	srcDir := resolveDataDir(*dataDirFlag)
+	dstDir := resolveDataDir(*toFlag)
+	files, bytes, err := usb.MoveDataDir(srcDir, dstDir)
+	if err != nil {
+		log.Fatalf("[Ark] Move data failed: %v", err)
+	}
+	if db, err := sql.Open("sqlite", filepath.Join(dstDir, "ark.db")); err == nil {
+		_, _ = db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('data_dir', ?)`, dstDir)
+		_ = db.Close()
+	}
+	fmt.Printf("[Ark] Relocated %d file(s) (%d bytes) to %s with SHA-256 verification.\n", files, bytes, dstDir)
+	fmt.Printf("[Ark] Update ARK_DATA_DIR or launch with: ark run --data-dir %s\n", dstDir)
 }
 
 func handleUninstall(args []string) {
-	fs := flag.NewFlagSet("uninstall", flag.ExitOnError)
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	allFlag := fs.Bool("all", false, "Uninstall all Ark containers, images and volumes")
 	keepDataFlag := fs.Bool("keep-data", false, "Keep ArkData content directory")
-	_ = fs.Parse(args)
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to ArkData directory")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
 
 	if !*allFlag {
 		fmt.Println("[Ark] Please specify --all to confirm uninstallation")
 		return
 	}
-	fmt.Printf("[Ark] Uninstalling Ark components (keep-data: %v)...\n", *keepDataFlag)
+
+	if dockerCli, err := docker.NewClient(); err == nil {
+		defer dockerCli.Close()
+		removed, err := dockerCli.UninstallAll(context.Background())
+		if err != nil {
+			log.Printf("[Ark] Warning during Docker cleanup: %v", err)
+		} else {
+			fmt.Printf("[Ark] Removed %d Ark container(s), images, ark-qdrant volume, and ark-net.\n", removed)
+		}
+	} else {
+		fmt.Printf("[Ark] Docker daemon unavailable (%v); skipping container cleanup.\n", err)
+	}
+
+	if !*keepDataFlag {
+		dataDir := resolveDataDir(*dataDirFlag)
+		if err := os.RemoveAll(dataDir); err != nil {
+			log.Fatalf("[Ark] Failed to remove ArkData at %s: %v", dataDir, err)
+		}
+		fmt.Printf("[Ark] Removed ArkData directory: %s\n", dataDir)
+	} else {
+		fmt.Println("[Ark] Kept ArkData content directory (--keep-data).")
+	}
 }

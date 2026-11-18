@@ -31,11 +31,14 @@ type AppManifest struct {
 	ID          string            `yaml:"id"`
 	Name        string            `yaml:"name"`
 	Category    string            `yaml:"category"`
+	Description string            `yaml:"description,omitempty"`
 	Icon        string            `yaml:"icon,omitempty"`
 	Image       string            `yaml:"image"`
 	Command     []string          `yaml:"command,omitempty"`
 	Port        int               `yaml:"port"`
 	Proxy       string            `yaml:"proxy"` // "path" (default) or "port"
+	OpenPath    string            `yaml:"open_path,omitempty"`
+	OpenURL     string            `yaml:"open_url,omitempty"`
 	Volumes     []string          `yaml:"volumes,omitempty"`
 	Env         map[string]string `yaml:"env,omitempty"`
 	Healthcheck string            `yaml:"healthcheck,omitempty"`

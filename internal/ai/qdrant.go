@@ -21,9 +21,9 @@ type QdrantClient struct {
 
 // VectorPoint represents a single embedded chunk stored in Qdrant.
 type VectorPoint struct {
-	ID         string         `json:"id"`
-	Vector     []float32      `json:"vector"`
-	Payload    map[string]any `json:"payload"`
+	ID      string         `json:"id"`
+	Vector  []float32      `json:"vector"`
+	Payload map[string]any `json:"payload"`
 }
 
 // ScoredPoint represents a matched chunk returned from vector or keyword search.

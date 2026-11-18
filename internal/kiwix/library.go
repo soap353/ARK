@@ -108,11 +108,15 @@ func (lm *LibraryManager) AddZIM(ctx context.Context, zimPath string, bookMeta *
 	}
 
 	absZimPath, _ := filepath.Abs(zimPath)
+	absLibDir, _ := filepath.Abs(filepath.Dir(lm.LibraryXMLPath))
 	cleanPath := filepath.Clean(zimPath)
+	if absZimPath != "" && absLibDir != "" && filepath.Dir(absZimPath) == absLibDir {
+		cleanPath = filepath.Base(absZimPath)
+	}
 
 	// Check if already present
 	for i, b := range lib.Books {
-		if b.Path == zimPath || b.Path == absZimPath || b.Path == cleanPath || (bookMeta != nil && b.ID == bookMeta.ID) {
+		if b.Path == zimPath || b.Path == absZimPath || b.Path == cleanPath || filepath.Base(b.Path) == filepath.Base(cleanPath) || (bookMeta != nil && b.ID == bookMeta.ID) {
 			if bookMeta != nil {
 				lib.Books[i] = *bookMeta
 				lib.Books[i].Path = cleanPath

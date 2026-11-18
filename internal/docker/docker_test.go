@@ -3,10 +3,15 @@ package docker
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -117,4 +122,51 @@ func TestDockerClientGraceful(t *testing.T) {
 
 	available := client.IsAvailable(ctx)
 	t.Logf("Docker daemon available in this environment: %v", available)
+}
+
+func TestStopAllStopsLabeledContainersConcurrently(t *testing.T) {
+	var mu sync.Mutex
+	stoppedIDs := make(map[string]bool)
+
+	mockDocker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			w.Header().Set("Content-Type", "application/json")
+			filtersQ := r.URL.Query().Get("filters")
+			if strings.Contains(filtersQ, AppLabelKey) {
+				_, _ = w.Write([]byte(`[{"Id":"cnt-1","Names":["/ark-kiwix"],"Labels":{"ark.app":"kiwix"},"State":"running"},{"Id":"cnt-2","Names":["/ark-ollama"],"Labels":{"ark.app":"ollama"},"State":"running"}]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[]`))
+		case strings.Contains(r.URL.Path, "/containers/") && strings.HasSuffix(r.URL.Path, "/stop"):
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			for i, p := range parts {
+				if p == "containers" && i+1 < len(parts) {
+					mu.Lock()
+					stoppedIDs[parts[i+1]] = true
+					mu.Unlock()
+					break
+				}
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer mockDocker.Close()
+
+	rawCli, err := client.NewClientWithOpts(client.WithHost(mockDocker.URL), client.WithVersion("1.41"))
+	if err != nil {
+		t.Fatalf("create mock docker client: %v", err)
+	}
+	defer rawCli.Close()
+
+	c := &Client{cli: rawCli}
+	n, err := c.StopAll(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("StopAll failed: %v", err)
+	}
+	if n != 2 || !stoppedIDs["cnt-1"] || !stoppedIDs["cnt-2"] {
+		t.Errorf("expected 2 containers stopped (cnt-1, cnt-2), got count=%d stopped=%v", n, stoppedIDs)
+	}
 }

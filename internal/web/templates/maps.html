@@ -1,0 +1,167 @@
+{{ define "content" }}
+<div class="card-header" style="margin-bottom: 1.25rem;">
+  <div>
+    <h1 class="page-title">Offline Maps &amp; Waypoints</h1>
+    <p class="secondary-text" style="margin: 0;">Protomaps (<code>.pmtiles</code>) server powered by <code>go-pmtiles</code>, country/world extractor, and offline pin manager.</p>
+  </div>
+  <span class="badge {{ if .MapsRunning }}badge-success{{ else }}badge-accent{{ end }}">
+    {{ if .MapsRunning }}Maps Tile Server Running{{ else }}Start Maps in Apps to serve tiles{{ end }}
+  </span>
+</div>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
+
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin: 0;">Installed Map Archives</h2>
+    <a href="/get-content" class="btn">US Regional Packs &rarr;</a>
+  </div>
+
+  {{ if .MapArchives }}
+  <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+    {{ range .MapArchives }}
+    <div style="border:1px solid var(--color-border); border-radius:6px; padding:1rem; background: var(--color-bg);">
+      <div style="font-weight:600; margin-bottom:0.25rem;">{{ .FileName }}</div>
+      <div class="secondary-text tabular" style="font-size:14px; margin-bottom:0.75rem;">{{ .SizeText }}</div>
+      <button type="button" class="btn btn-primary" style="min-height: 36px; padding: 0.2rem 0.85rem;" onclick="inspectTileJSON('{{ .Name }}')">Inspect TileJSON</button>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <div style="padding:1rem; border:1px dashed var(--color-border); border-radius:6px; margin-bottom:1rem;">
+    <strong>No <code>.pmtiles</code> map files found yet.</strong>
+    <p class="secondary-text" style="margin:0.5rem 0 0;">
+      Download US regions in <a href="/get-content" style="color: var(--color-accent);">Get Content</a> or extract the World Basemap / any country below.
+    </p>
+  </div>
+  {{ end }}
+
+  <div id="tilejson-panel" style="display:none; margin-top:1rem;">
+    <h3 style="margin-bottom:0.5rem;">TileJSON Metadata</h3>
+    <pre id="tilejson-output" style="background:var(--color-bg); padding:1rem; border-radius:6px; border:1px solid var(--color-border); overflow-x:auto; font-size:13px;"></pre>
+  </div>
+</div>
+
+<section class="card" aria-label="Extract World or Country Map">
+  <h2>World &amp; Country Extracts (Protomaps)</h2>
+  <p class="secondary-text" style="margin-bottom: 1rem;">
+    Extracts targeted <code>.pmtiles</code> regions from the latest Protomaps build directly into <code>data/maps/</code> using <code>go-pmtiles</code>.
+  </p>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem;">
+    {{ range .CountryMaps }}
+    <div style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem;">
+      <div>
+        <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
+          <strong>{{ .Name }}</strong>
+          <span class="badge" style="font-size: 11px;">{{ .Region }}</span>
+        </div>
+        <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; {{ .MaxZoom }} &bull; {{ .SizeEstimate }}</div>
+      </div>
+      <form action="/api/maps/extract" method="POST" style="margin: 0;">
+        <input type="hidden" name="slug" value="{{ .Slug }}">
+        <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 14px;">Extract .pmtiles</button>
+      </form>
+    </div>
+    {{ end }}
+  </div>
+</section>
+
+<section class="card" aria-label="Saved Offline Map Pins">
+  <h2>Saved Map Pins &amp; Waypoints</h2>
+  <form action="/api/maps/pins" method="POST" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; align-items: end; margin-bottom: 1.25rem;">
+    <div>
+      <label for="pin_title" class="form-label">Location Name</label>
+      <input type="text" id="pin_title" name="title" class="form-control" placeholder="e.g. Rally Point Alpha" required>
+    </div>
+    <div>
+      <label for="pin_lat" class="form-label">Latitude</label>
+      <input type="number" step="any" id="pin_lat" name="lat" class="form-control" placeholder="45.5231" required>
+    </div>
+    <div>
+      <label for="pin_lng" class="form-label">Longitude</label>
+      <input type="number" step="any" id="pin_lng" name="lng" class="form-control" placeholder="-122.6765" required>
+    </div>
+    <div>
+      <label for="pin_cat" class="form-label">Category</label>
+      <select id="pin_cat" name="category" class="form-control">
+        <option value="waypoint">Waypoint</option>
+        <option value="water">Water Source</option>
+        <option value="shelter">Shelter</option>
+        <option value="medical">Medical</option>
+        <option value="supply">Supply Cache</option>
+      </select>
+    </div>
+    <div>
+      <label for="pin_note" class="form-label">Notes</label>
+      <input type="text" id="pin_note" name="note" class="form-control" placeholder="Access notes...">
+    </div>
+    <div>
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Save Pin</button>
+    </div>
+  </form>
+
+  {{ if .MapPins }}
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Location</th>
+          <th>Coordinates</th>
+          <th>Category</th>
+          <th>Notes</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .MapPins }}
+        <tr>
+          <td><strong>{{ .Title }}</strong></td>
+          <td class="tabular"><code>{{ printf "%.4f, %.4f" .Lat .Lng }}</code></td>
+          <td><span class="badge">{{ .Category }}</span></td>
+          <td class="secondary-text">{{ .Note }}</td>
+          <td>
+            <form action="/api/maps/pins" method="POST" style="margin: 0;">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="id" value="{{ .ID }}">
+              <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 13px;">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="secondary-text">No offline waypoints saved yet.</p>
+  {{ end }}
+</section>
+
+<script>
+function inspectTileJSON(name) {
+  const panel = document.getElementById('tilejson-panel');
+  const out = document.getElementById('tilejson-output');
+  panel.style.display = 'block';
+  out.textContent = 'Fetching /a/maps/' + name + '.json...';
+  fetch('/a/maps/' + encodeURIComponent(name) + '.json')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' (make sure the Maps app is Running)');
+      return r.json();
+    })
+    .then(data => {
+      out.textContent = JSON.stringify(data, null, 2);
+    })
+    .catch(err => {
+      out.textContent = 'Could not inspect archive: ' + err.message;
+    });
+}
+</script>
+{{ end }}

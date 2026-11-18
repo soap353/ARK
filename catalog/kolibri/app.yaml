@@ -2,11 +2,12 @@ version: 1
 id: kolibri
 name: Kolibri
 category: education
+description: Interactive K-12 courses, Khan Academy lessons, and quizzes.
 icon: book-open.svg
-image: ark/kolibri:latest
+image: learningequality/kolibri:latest
 port: 8080
-proxy: path
+proxy: port
 volumes:
-  - "kolibri:/root/.kolibri:rw"
+  - "kolibri:/kolibri:rw"
 healthcheck: /
 lan: read

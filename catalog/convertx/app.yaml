@@ -1,10 +1,15 @@
 version: 1
 id: convertx
-name: Convert
+name: ConvertX
 category: tools
+description: Convert documents, images, audio, and video offline.
 icon: refresh-cw.svg
-image: ghcr.io/c4illin/convertx:latest
+image: c4illin/convertx:latest
 port: 3000
-proxy: path
+proxy: port
+env:
+  ALLOW_UNAUTHENTICATED: "true"
+  HTTP_ALLOWED: "true"
+  JWT_SECRET: "ark-local-convertx-secret"
 healthcheck: /
 lan: read

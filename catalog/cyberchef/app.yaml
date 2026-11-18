@@ -1,10 +1,11 @@
 version: 1
 id: cyberchef
-name: Tools
+name: Data Chef
 category: tools
+description: Decode, hash, encrypt, and transform text or files.
 icon: tool.svg
 image: ghcr.io/gchq/cyberchef:latest
-port: 80
+port: 8080
 proxy: path
 healthcheck: /
 lan: read

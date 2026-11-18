@@ -179,6 +179,31 @@ func TestPresets(t *testing.T) {
 	if found == nil || found.Name != "WikiMed (Medical Encyclopedia)" {
 		t.Errorf("Expected to find wikimed-en preset, got %v", found)
 	}
+
+	if opts := GetWikipediaOptions(); len(opts) != 5 {
+		t.Errorf("Expected 5 Wikipedia options, got %d", len(opts))
+	}
+	if cols := GetNomadCollections(); len(cols) != 6 {
+		t.Errorf("Expected 6 NOMAD collections, got %d", len(cols))
+	} else {
+		for _, c := range cols {
+			if len(c.Tiers) != 3 {
+				t.Errorf("Expected 3 tiers for collection %s, got %d", c.Slug, len(c.Tiers))
+			}
+		}
+	}
+	if regs := GetNomadMapRegions(); len(regs) != 9 {
+		t.Errorf("Expected 9 NOMAD map regions, got %d", len(regs))
+	}
+
+	medStd := ResolvePresetResources("medicine-standard")
+	if len(medStd) < 5 {
+		t.Errorf("Expected medicine-standard to include inherited essential items (>=5), got %d", len(medStd))
+	}
+	pacific := ResolvePresetResources("map-pacific")
+	if len(pacific) != 5 || pacific[0].Kind != "pmtiles" {
+		t.Errorf("Expected 5 pmtiles items for map-pacific, got %+v", pacific)
+	}
 }
 
 func TestLibraryManager(t *testing.T) {

@@ -12,6 +12,9 @@ const (
 	TypeZim        = "zim"
 	TypePreset     = "preset"
 	TypeDrugLabels = "druglabels"
+	TypeUSB        = "usb"
+	TypeMapExtract = "map_extract"
+	TypeOllamaPull = "ollama_pull"
 )
 
 // Standard Job Statuses

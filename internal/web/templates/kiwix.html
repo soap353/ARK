@@ -1,0 +1,194 @@
+{{ define "content" }}
+<div class="card-header" style="margin-bottom: 1.25rem;">
+  <div>
+    <h1 class="page-title">Kiwix Library Catalog</h1>
+    <p class="secondary-text" style="margin: 0;">Browse, search, and download any ZIM archive directly from <code>library.kiwix.org</code> or a custom OPDS feed.</p>
+  </div>
+  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <a href="/library" class="btn">Installed Library</a>
+    <a href="/read/zim/" class="btn btn-primary">Open Local ZIM Reader &rarr;</a>
+  </div>
+</div>
+
+<section class="card" aria-label="OPDS Catalog Filters">
+  <form id="kiwix-full-form" onsubmit="event.preventDefault(); resetAndFetchKiwix();" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; align-items: end;">
+    <div style="grid-column: span 2;">
+      <label for="kx-q" class="form-label">Search Catalog</label>
+      <input type="text" id="kx-q" class="form-control" value="{{ .InitialQuery }}" placeholder="Search anything: wikipedia, medical, python, gutenberg, wikihow...">
+    </div>
+    <div>
+      <label for="kx-cat" class="form-label">Category</label>
+      <select id="kx-cat" class="form-control">
+        <option value="all">All Categories</option>
+        <option value="wikipedia">Wikipedia</option>
+        <option value="stack_exchange">Stack Exchange</option>
+        <option value="gutenberg">Project Gutenberg</option>
+        <option value="iFixit">iFixit</option>
+        <option value="wikibooks">Wikibooks</option>
+        <option value="wikiversity">Wikiversity</option>
+        <option value="wiktionary">Wiktionary</option>
+        <option value="wikivoyage">Wikivoyage</option>
+        <option value="wikisource">Wikisource</option>
+        <option value="ted">TED Talks</option>
+        <option value="phet">PhET Simulations</option>
+        <option value="mooc">MOOC / Courses</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div>
+      <label for="kx-lang" class="form-label">Language</label>
+      <select id="kx-lang" class="form-control">
+        <option value="eng">English (eng)</option>
+        <option value="all">All Languages</option>
+        <option value="spa">Spanish (spa)</option>
+        <option value="fra">French (fra)</option>
+        <option value="deu">German (deu)</option>
+        <option value="por">Portuguese (por)</option>
+        <option value="ara">Arabic (ara)</option>
+        <option value="zho">Chinese (zho)</option>
+      </select>
+    </div>
+    <div>
+      <label for="kx-flavour" class="form-label">Flavour</label>
+      <select id="kx-flavour" class="form-control">
+        <option value="all">All Flavours</option>
+        <option value="maxi">Full (maxi)</option>
+        <option value="nopic">No Pictures (nopic)</option>
+        <option value="mini">Lead Only (mini)</option>
+        <option value="nodet">Summary (nodet)</option>
+      </select>
+    </div>
+    <div style="grid-column: span 2;">
+      <label for="kx-feed" class="form-label">Custom OPDS Feed URL (optional mirror)</label>
+      <input type="url" id="kx-feed" class="form-control" value="{{ .CustomOPDS }}" placeholder="https://library.kiwix.org/catalog/v2/entries">
+    </div>
+    <div>
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Search Kiwix Catalog</button>
+    </div>
+  </form>
+</section>
+
+<section class="card" aria-label="Catalog Results">
+  <div class="card-header" style="margin-bottom: 0.75rem;">
+    <span id="kx-status" class="secondary-text">Loading Kiwix catalog...</span>
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+      <button type="button" id="kx-prev" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;" onclick="pageKiwix(-1)" disabled>&larr; Prev</button>
+      <span id="kx-page-label" class="secondary-text tabular" style="font-size: 14px;">Page 1</span>
+      <button type="button" id="kx-next" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem;" onclick="pageKiwix(1)" disabled>Next &rarr;</button>
+    </div>
+  </div>
+
+  <div id="kx-table-wrap" class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Archive</th>
+          <th>Metadata</th>
+          <th>Size</th>
+          <th>Updated</th>
+          <th>Install</th>
+        </tr>
+      </thead>
+      <tbody id="kx-tbody">
+        <tr><td colspan="5" class="secondary-text" style="text-align:center; padding: 2rem;">Querying library.kiwix.org...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+var kxOffset = 0;
+var kxLimit = 25;
+
+function escHTML(s) {
+  var d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function resetAndFetchKiwix() {
+  kxOffset = 0;
+  fetchKiwixPage();
+}
+
+function pageKiwix(dir) {
+  kxOffset = Math.max(0, kxOffset + dir * kxLimit);
+  fetchKiwixPage();
+}
+
+function fetchKiwixPage() {
+  var q = document.getElementById('kx-q').value.trim();
+  var cat = document.getElementById('kx-cat').value;
+  var lang = document.getElementById('kx-lang').value;
+  var flavour = document.getElementById('kx-flavour').value;
+  var feedURL = document.getElementById('kx-feed').value.trim();
+
+  var statusEl = document.getElementById('kx-status');
+  var tbodyEl = document.getElementById('kx-tbody');
+  var prevBtn = document.getElementById('kx-prev');
+  var nextBtn = document.getElementById('kx-next');
+  var pageLbl = document.getElementById('kx-page-label');
+
+  statusEl.textContent = 'Querying OPDS catalog...';
+  var url = '/api/kiwix/catalog?q=' + encodeURIComponent(q) +
+    '&category=' + encodeURIComponent(cat) +
+    '&lang=' + encodeURIComponent(lang) +
+    '&flavour=' + encodeURIComponent(flavour) +
+    '&offset=' + kxOffset +
+    '&count=' + kxLimit;
+  if (feedURL) {
+    url += '&feed_url=' + encodeURIComponent(feedURL);
+  }
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        statusEl.textContent = data.error;
+        tbodyEl.innerHTML = '<tr><td colspan="5" style="color:var(--color-error);padding:1.5rem;">' + escHTML(data.error) + '</td></tr>';
+        return;
+      }
+      var items = data.items || [];
+      var pageNum = Math.floor(kxOffset / kxLimit) + 1;
+      pageLbl.textContent = 'Page ' + pageNum;
+      prevBtn.disabled = (kxOffset <= 0);
+      nextBtn.disabled = !data.has_more;
+
+      if (items.length === 0) {
+        statusEl.textContent = 'No archives matched your filters.';
+        tbodyEl.innerHTML = '<tr><td colspan="5" class="secondary-text" style="text-align:center;padding:2rem;">No ZIM archives found for this query.</td></tr>';
+        return;
+      }
+      statusEl.textContent = 'Showing ' + (kxOffset + 1) + '–' + (kxOffset + items.length) + (data.total ? ' of ' + data.total : '') + ' archives';
+      tbodyEl.innerHTML = items.map(function(item) {
+        var langRaw = (item.language || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        var langShort = langRaw.length > 3 ? (langRaw.slice(0, 3).join(', ') + ' +' + (langRaw.length - 3)) : langRaw.join(', ');
+        var badges = '<div style="display:flex;gap:0.25rem;flex-wrap:wrap;max-width:210px;">' +
+          '<span class="badge">' + escHTML(item.category || 'other') + '</span>' +
+          (langShort ? '<span class="badge" title="' + escHTML(item.language) + '">' + escHTML(langShort) + '</span>' : '') +
+          (item.flavour ? '<span class="badge">' + escHTML(item.flavour) + '</span>' : '') +
+          '</div>';
+        var inst = item.installed ? ' <span class="badge badge-success">Installed</span>' : '';
+        var btnCls = item.installed ? 'btn' : 'btn btn-primary';
+        var btnTxt = item.installed ? 'Re-download' : 'Download ZIM';
+        return '<tr>' +
+          '<td style="min-width:240px;"><strong>' + escHTML(item.title) + '</strong>' + inst + '<div class="secondary-text" style="font-size:13px;margin-top:2px;">' + escHTML(item.summary) + '</div></td>' +
+          '<td>' + badges + '</td>' +
+          '<td class="tabular" style="white-space:nowrap;">' + escHTML(item.size_text) + '</td>' +
+          '<td class="secondary-text tabular" style="white-space:nowrap;">' + escHTML(item.updated || '-') + '</td>' +
+          '<td><form action="/api/jobs" method="POST" style="margin:0;">' +
+            '<input type="hidden" name="type" value="kiwix_zim">' +
+            '<input type="hidden" name="target" value="' + escHTML(item.download_url) + '">' +
+            '<button type="submit" class="' + btnCls + '" style="min-height:36px;padding:0.25rem 0.85rem;font-size:13px;white-space:nowrap;">' + btnTxt + '</button>' +
+          '</form></td>' +
+        '</tr>';
+      }).join('');
+    })
+    .catch(function(err) {
+      statusEl.textContent = 'Catalog request failed: ' + err.message;
+    });
+}
+
+document.addEventListener('DOMContentLoaded', fetchKiwixPage);
+</script>
+{{ end }}

@@ -25,10 +25,37 @@ type Conn struct {
 	HTTPClient *http.Client
 }
 
-// Msg represents a chat message in OpenAI format.
+// ImageURL carries a base64 data URI or URL for vision-capable chat models.
+type ImageURL struct {
+	URL string `json:"url"`
+}
+
+// ContentPart represents a text or image_url segment in multimodal OpenAI chat messages.
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// Msg represents a chat message in OpenAI format (string content or multimodal parts).
 type Msg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string        `json:"role"`
+	Content string        `json:"-"`
+	Parts   []ContentPart `json:"-"`
+}
+
+// MarshalJSON encodes string content for text-only messages and array content when Parts is populated.
+func (m Msg) MarshalJSON() ([]byte, error) {
+	if len(m.Parts) > 0 {
+		return json.Marshal(struct {
+			Role    string        `json:"role"`
+			Content []ContentPart `json:"content"`
+		}{Role: m.Role, Content: m.Parts})
+	}
+	return json.Marshal(struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{Role: m.Role, Content: m.Content})
 }
 
 // DetectedServer describes a local AI server discovered via port probing.
