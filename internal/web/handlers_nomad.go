@@ -273,6 +273,7 @@ func (s *Server) stopAllContainersForLifecycle(ctx context.Context) {
 	}
 	if s.db != nil {
 		_, _ = s.db.Exec(`UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE status = 'running'`)
+		_, _ = s.db.Exec(`DELETE FROM jobs WHERE status = 'done'`)
 		_ = system.RecordShutdownTime(ctx, s.db, time.Now())
 	}
 }
@@ -294,6 +295,27 @@ func (s *Server) handleSettingsRestart(w http.ResponseWriter, r *http.Request) {
 			_ = p.Signal(syscall.SIGTERM)
 		}
 		time.Sleep(4500 * time.Millisecond)
+		os.Exit(0)
+	}()
+}
+
+func (s *Server) handleSettingsShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.stopAllContainersForLifecycle(r.Context())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte("<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem;background:#F5F2EB;color:#1C1F1D'><h2>Ark Service Stopped</h2><p>All Ark containers have been stopped cleanly and the background service has shut down. You may close this tab.</p></body></html>"))
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(syscall.SIGTERM)
+		}
+		time.Sleep(3500 * time.Millisecond)
 		os.Exit(0)
 	}()
 }

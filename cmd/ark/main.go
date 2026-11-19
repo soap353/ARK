@@ -10,8 +10,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -183,35 +185,84 @@ Options for 'run':
   -port string
         HTTP service port (default "8080")
   -data-dir string
-        Path to ArkData directory (default "./ArkData")
+        Path to Ark data directory (auto-detects ./data or ./ArkData)
+  -no-browser
+        Do not automatically open the homepage in the default browser
+  -foreground
+        Keep running attached to the terminal window instead of detaching on Windows
+  -no-container
+        Run Ark web UI natively on host instead of inside the ark-core Docker container
 `)
 }
 
 func runServer(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	portFlag := fs.String("port", "8080", "HTTP server port")
-	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to ArkData directory")
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to Ark data directory")
+	noBrowserFlag := fs.Bool("no-browser", false, "Do not automatically open the homepage in the default browser")
+	foregroundFlag := fs.Bool("foreground", false, "Keep running attached to the terminal window")
+	noContainerFlag := fs.Bool("no-container", false, "Run natively on host instead of launching ark-core container")
+	backgroundChildFlag := fs.Bool("background-child", false, "Internal flag for detached background service")
 	_ = fs.Parse(args)
+
+	dataDirExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "data-dir" {
+			dataDirExplicit = true
+		}
+	})
+
+	exePath, _ := os.Executable()
+	if exePath != "" {
+		exeDir := filepath.Dir(exePath)
+		if _, err := os.Stat("catalog"); err != nil {
+			if _, err2 := os.Stat(filepath.Join(exeDir, "catalog")); err2 == nil {
+				_ = os.Chdir(exeDir)
+			}
+		}
+	}
 
 	port := *portFlag
 	if envPort := os.Getenv("ARK_PORT"); envPort != "" {
 		port = envPort
 	}
 
-	dataDir := *dataDirFlag
-	if envDir := os.Getenv("ARK_DATA_DIR"); envDir != "" {
-		dataDir = envDir
+	openUI := !*noBrowserFlag
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("ARK_NO_BROWSER"))); v == "1" || v == "true" || v == "yes" {
+		openUI = false
 	}
-	if absDir, err := filepath.Abs(dataDir); err == nil {
-		dataDir = absDir
+
+	fg := *foregroundFlag || *backgroundChildFlag
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("ARK_FOREGROUND"))); v == "1" || v == "true" || v == "yes" {
+		fg = true
 	}
+	if !fg && maybeDetachBackground(port, args, openUI) {
+		return
+	}
+
+	dataDir := resolveDefaultDataDir(exePath, *dataDirFlag, dataDirExplicit)
 
 	log.Printf("[Ark] Initializing Command Center v%s with data directory: %s", update.ArkVersion, dataDir)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("[Ark] Failed to create data directory: %v", err)
 	}
 
-	exePath, _ := os.Executable()
+	if *backgroundChildFlag {
+		if logFile, lerr := os.OpenFile(filepath.Join(dataDir, "ark.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); lerr == nil {
+			log.SetOutput(logFile)
+			defer logFile.Close()
+		}
+	}
+
+	inContainer := os.Getenv("ARK_IN_CONTAINER") == "1"
+	useContainerHost := !inContainer && !*noContainerFlag && os.Getenv("ARK_NO_CONTAINER") != "1"
+	if useContainerHost {
+		if runContainerizedHost(port, dataDir, openUI) {
+			return
+		}
+		log.Printf("[Ark] Falling back to native host web server mode")
+	}
+
 	if rolledBack, err := update.MarkBootingOrRecover(exePath, dataDir); err != nil {
 		log.Printf("[Ark] Warning: update watchdog check failed: %v", err)
 	} else if rolledBack {
@@ -271,6 +322,7 @@ func runServer(args []string) {
 	}
 	jobStore := jobs.NewJobStore(db)
 	_ = jobStore.ResetStaleRunning(context.Background())
+	_ = jobStore.ClearCompleted(context.Background())
 	queueMgr := jobs.NewQueueManager(jobStore, jobs.DefaultQueueConfig())
 	queueMgr.RegisterRunner(jobs.TypeIndex, &ai.IndexJobRunner{DB: db, QdrantURL: "http://127.0.0.1:6333"})
 	queueMgr.RegisterRunner(jobs.TypeOllamaPull, &ai.OllamaPullRunner{})
@@ -310,11 +362,31 @@ func runServer(args []string) {
 		}
 	}()
 
-	// Graceful shutdown handling
-	sigChan := make(chan os.Signal, 1)
+	if openUI {
+		homeURL := fmt.Sprintf("http://localhost:%s/", port)
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			log.Printf("[Ark] Opening %s in your default browser...", homeURL)
+			openBrowser(homeURL)
+		}()
+	}
+
+	// Graceful shutdown handling (signals + Windows console close 'X' button + System Tray)
+	sigChan := make(chan os.Signal, 2)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	shutdownDone := make(chan struct{})
+	triggerStop := func() {
+		select {
+		case sigChan <- syscall.SIGTERM:
+		default:
+		}
+	}
+	registerConsoleCloseHandler(triggerStop, shutdownDone)
+	stopTray := startTrayIcon(port, triggerStop)
+	defer stopTray()
 
 	sig := <-sigChan
+	stopTray()
 	log.Printf("[Ark] Received signal %v, initiating graceful shutdown...", sig)
 	runCancel()
 
@@ -338,7 +410,13 @@ func runServer(args []string) {
 		defer wg.Done()
 		select {
 		case <-restoreDone:
-		case <-time.After(1 * time.Second):
+		case <-time.After(500 * time.Millisecond):
+		}
+		if dockerCli == nil {
+			if cli, err := docker.NewClient(); err == nil {
+				dockerCli = cli
+				defer dockerCli.Close()
+			}
 		}
 		if dockerCli != nil && dockerCli.IsAvailable(shutdownCtx) {
 			stopped, err := dockerCli.StopAll(shutdownCtx, 2)
@@ -352,10 +430,182 @@ func runServer(args []string) {
 	}()
 
 	wg.Wait()
+	_ = jobStore.ClearCompleted(context.Background())
 	if err := system.RecordShutdownTime(context.Background(), db, time.Now()); err != nil {
 		log.Printf("[Ark] Warning: failed to record shutdown timestamp: %v", err)
 	}
 	log.Println("[Ark] Command Center shutdown complete")
+	close(shutdownDone)
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("[Ark] Could not open browser automatically: %v (open %s manually)", err, url)
+	}
+}
+
+func resolveDefaultDataDir(exePath string, flagVal string, flagExplicit bool) string {
+	if flagExplicit && strings.TrimSpace(flagVal) != "" {
+		if abs, err := filepath.Abs(flagVal); err == nil {
+			return abs
+		}
+		return flagVal
+	}
+	if envDir := strings.TrimSpace(os.Getenv("ARK_DATA_DIR")); envDir != "" {
+		if abs, err := filepath.Abs(envDir); err == nil {
+			return abs
+		}
+		return envDir
+	}
+
+	var candidates []string
+	if exePath != "" {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "data"),
+			filepath.Join(exeDir, "ArkData"),
+		)
+	}
+	candidates = append(candidates, "./data", "./ArkData")
+
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(c, "ark.db")); err == nil {
+			if abs, err := filepath.Abs(c); err == nil {
+				return abs
+			}
+			return c
+		}
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			if abs, err := filepath.Abs(c); err == nil {
+				return abs
+			}
+			return c
+		}
+	}
+
+	if abs, err := filepath.Abs(flagVal); err == nil {
+		return abs
+	}
+	return flagVal
+}
+
+// runContainerizedHost starts Docker (if offline), launches the containerized ark-core
+// web server (which restores all installed app containers), opens the homepage in the browser,
+// and keeps a System Tray supervisor alive to stop all containers on shutdown.
+// Returns false only if Docker cannot be initialized so the caller can fall back to native host mode.
+func runContainerizedHost(port, dataDir string, openUI bool) bool {
+	cli, err := docker.NewClient()
+	if err != nil {
+		log.Printf("[Ark] Docker client unavailable: %v", err)
+		return false
+	}
+	defer cli.Close()
+
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer bootCancel()
+
+	log.Printf("[Ark] Ensuring Docker daemon is running...")
+	if err := cli.EnsureDaemonRunning(bootCtx); err != nil {
+		log.Printf("[Ark] Failed to start Docker daemon: %v", err)
+		return false
+	}
+
+	log.Printf("[Ark] Starting containerized Ark Command Center (%s)...", docker.CoreContainerName)
+	if err := cli.EnsureCoreContainer(bootCtx, port, dataDir); err != nil {
+		log.Printf("[Ark] Failed to start %s container: %v", docker.CoreContainerName, err)
+		return false
+	}
+
+	// Wait until ark-core responds on /healthz before opening the browser
+	healthClient := &http.Client{Timeout: 800 * time.Millisecond}
+	healthURL := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
+	healthy := false
+	for i := 0; i < 60; i++ {
+		if resp, err := healthClient.Get(healthURL); err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				healthy = true
+				break
+			}
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	if !healthy {
+		log.Printf("[Ark] Timed out waiting for %s HTTP healthz on :%s", docker.CoreContainerName, port)
+		return false
+	}
+
+	if openUI {
+		homeURL := fmt.Sprintf("http://localhost:%s/", port)
+		log.Printf("[Ark] Opening %s in your default browser...", homeURL)
+		openBrowser(homeURL)
+	}
+
+	sigChan := make(chan os.Signal, 2)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	shutdownDone := make(chan struct{})
+	triggerStop := func() {
+		select {
+		case sigChan <- syscall.SIGTERM:
+		default:
+		}
+	}
+	registerConsoleCloseHandler(triggerStop, shutdownDone)
+	stopTray := startTrayIcon(port, triggerStop)
+	defer stopTray()
+
+	// Also watch if user triggered Shut Down Ark inside the web UI (ark-core stopped itself cleanly)
+	coreExitCh := make(chan struct{}, 1)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-shutdownDone:
+				return
+			case <-ticker.C:
+				checkCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+				up := cli.IsCoreRunning(checkCtx)
+				cancel()
+				if !up {
+					select {
+					case coreExitCh <- struct{}{}:
+					default:
+					}
+					return
+				}
+			}
+		}
+	}()
+
+	select {
+	case sig := <-sigChan:
+		log.Printf("[Ark] Received shutdown signal (%v); stopping all Ark containers...", sig)
+	case <-coreExitCh:
+		log.Printf("[Ark] %s container exited; ensuring all Ark containers are stopped...", docker.CoreContainerName)
+	}
+
+	stopTray()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer stopCancel()
+	if stopped, err := cli.StopAll(stopCtx, 3); err != nil {
+		log.Printf("[Ark] Warning: error stopping containers: %v", err)
+	} else {
+		log.Printf("[Ark] Stopped %d Ark container(s)", stopped)
+	}
+	close(shutdownDone)
+	return true
 }
 
 func initDatabase(dbPath string) (*sql.DB, error) {

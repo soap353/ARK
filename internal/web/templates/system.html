@@ -1,9 +1,14 @@
 {{ define "content" }}
 <div class="card-header" style="margin-bottom: 1.25rem;">
   <h1 class="page-title">System &amp; Containers</h1>
-  <span class="badge {{ if .DockerOnline }}badge-success{{ else }}badge-error{{ end }}">
-    {{ if .DockerOnline }}Docker Online{{ else }}Docker Offline{{ end }}
-  </span>
+  <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+    <span class="badge {{ if .DockerOnline }}badge-success{{ else }}badge-error{{ end }}">
+      {{ if .DockerOnline }}Docker Online{{ else }}Docker Offline{{ end }}
+    </span>
+    <form action="/settings/shutdown" method="POST" style="margin: 0;" onsubmit="return confirm('Shut down Ark and stop all running containers?');">
+      <button type="submit" class="btn btn-danger" style="min-height: 34px; padding: 0.25rem 0.85rem; font-size: 13px;">Shut Down Ark</button>
+    </form>
+  </div>
 </div>
 
 <div class="card" aria-label="Live host resource usage">
@@ -79,12 +84,12 @@
   </div>
 </section>
 
-<!-- Session Jobs (Last 3 current session jobs) -->
+<!-- Session Jobs (All active jobs + up to 5 completed jobs from current session) -->
 <section id="recent-jobs-card" class="card" aria-label="Current session download and background jobs" {{ if .HasActiveJobs }}hx-get="/system" hx-trigger="every 2s" hx-select="#recent-jobs-card" hx-target="#recent-jobs-card" hx-swap="outerHTML"{{ end }}>
   <div class="card-header">
     <div>
       <h2 style="margin: 0;">Session Jobs</h2>
-      <span class="secondary-text" style="font-size: 13px;">Showing up to the last 3 jobs from the current session</span>
+      <span class="secondary-text" style="font-size: 13px;">Showing all active jobs and up to 5 completed jobs from the current session</span>
     </div>
     <button type="button" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 13px;" onclick="location.reload()">Refresh</button>
   </div>

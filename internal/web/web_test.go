@@ -575,9 +575,9 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 		t.Fatalf("RegisterRoutes failed: %v", err)
 	}
 
-	// Submit 4 jobs in current session -> only latest 3 should appear on /system
-	targets := []string{"session-job-1", "session-job-2", "session-job-3", "session-job-4"}
-	for _, tgt := range targets {
+	// Submit 6 active jobs in current session -> all 6 active jobs must appear on /system (unlimited active jobs)
+	activeTargets := []string{"session-job-1", "session-job-2", "session-job-3", "session-job-4", "session-job-5", "session-job-6"}
+	for _, tgt := range activeTargets {
 		form := url.Values{"type": {"preset"}, "target": {tgt}}
 		req := httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -588,19 +588,36 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 		}
 	}
 
+	// Insert 6 completed ('done') jobs in current session -> only the 5 most recent completed jobs may appear
+	doneTargets := []string{"done-job-1", "done-job-2", "done-job-3", "done-job-4", "done-job-5", "done-job-6"}
+	for i, tgt := range doneTargets {
+		_, err := db.Exec(`
+			INSERT INTO jobs (id, type, target, status, progress, progress_msg, created_at, updated_at, completed_at)
+			VALUES (?, 'download', ?, 'done', 100.0, 'Complete', datetime('now', '+' || ? || ' seconds'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, tgt, tgt, i+1)
+		if err != nil {
+			t.Fatalf("insert done job %s: %v", tgt, err)
+		}
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/system", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body := w.Body.String()
 	if strings.Contains(body, "old-session-target") {
-		t.Errorf("expected previous session job to be excluded from /system")
+		t.Errorf("expected previous session completed job to be excluded from /system")
 	}
-	if strings.Contains(body, "session-job-1") {
-		t.Errorf("expected only last 3 session jobs on /system, oldest session-job-1 should be excluded")
+	for _, act := range activeTargets {
+		if !strings.Contains(body, act) {
+			t.Errorf("expected /system to show all 6 active jobs, missing %q", act)
+		}
 	}
-	for _, recent := range []string{"session-job-2", "session-job-3", "session-job-4"} {
-		if !strings.Contains(body, recent) {
-			t.Errorf("expected /system to include recent session job %q", recent)
+	if strings.Contains(body, "done-job-1") {
+		t.Errorf("expected at most 5 completed jobs on /system, oldest completed job done-job-1 should be excluded")
+	}
+	for _, recentDone := range doneTargets[1:] {
+		if !strings.Contains(body, recentDone) {
+			t.Errorf("expected /system to include recent completed job %q", recentDone)
 		}
 	}
 
@@ -748,8 +765,8 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	sysOut := w.Body.String()
-	if !strings.Contains(sysOut, "Ark Archive:") || !strings.Contains(sysOut, "Session Jobs") {
-		t.Errorf("expected /system to host Storage (Ark Archive) and Session Jobs panels")
+	if !strings.Contains(sysOut, "Ark Archive:") || !strings.Contains(sysOut, "Session Jobs") || !strings.Contains(sysOut, `action="/settings/shutdown"`) {
+		t.Errorf("expected /system to host Storage (Ark Archive), Session Jobs, and Shut Down Ark controls")
 	}
 
 	// Verify /library card grid, origin icon endpoint, and AJAX Add to AI
@@ -927,12 +944,13 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 		t.Fatalf("RegisterRoutes failed: %v", err)
 	}
 
-	// 1. /library opens local ZIMs via /read/zim/<stem>/ instead of /a/kiwix/
+	// 1. /library opens local ZIMs via /read/zim/<stem>/ in a new tab instead of /a/kiwix/
 	req := httptest.NewRequest(http.MethodGet, "/library", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if !strings.Contains(w.Body.String(), `href="/read/zim/mini_wiki/"`) {
-		t.Errorf("expected /library ZIM card to link to /read/zim/mini_wiki/")
+	libBody := w.Body.String()
+	if !strings.Contains(libBody, `href="/read/zim/mini_wiki/"`) || !strings.Contains(libBody, `target="_blank"`) {
+		t.Errorf("expected /library ZIM card to link to /read/zim/mini_wiki/ with target=\"_blank\"")
 	}
 
 	// 2. /a/kiwix/ redirects cleanly to /read/zim/ when Kiwix Docker app is absent and local ZIM exists
@@ -943,13 +961,12 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 		t.Errorf("expected /a/kiwix/ with local ZIMs to redirect 303 -> /read/zim/, got %d -> %s", w.Code, w.Header().Get("Location"))
 	}
 
-	// 3. /read/zim/mini_wiki/ serves Wikipedia-style Start Screen and __main__ redirects to MainPage
+	// 3. /read/zim/mini_wiki/ opens the ZIM archive's built-in front page directly (302 -> /read/zim/mini_wiki/C/Main_Page)
 	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	startOut := w.Body.String()
-	if w.Code != http.StatusOK || !strings.Contains(startOut, `id="ark-zim-home"`) || !strings.Contains(startOut, `id="ark-theme-sel"`) {
-		t.Fatalf("expected 200 Wikipedia-style start screen with theme selector, got %d: %s", w.Code, startOut)
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "/read/zim/mini_wiki/C/Main_Page" {
+		t.Fatalf("expected /read/zim/mini_wiki/ to redirect 302 -> /read/zim/mini_wiki/C/Main_Page, got %d -> %s", w.Code, w.Header().Get("Location"))
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/__main__", nil)
@@ -963,10 +980,20 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	pageOut := w.Body.String()
-	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
+	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-page-pager"`, `id="ark-prev-page"`, `id="ark-next-page"`, `id="ark-current-page-label"`, `/read/zim/mini_wiki/C/Solar_Cell`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
 		if w.Code != http.StatusOK || !strings.Contains(pageOut, want) {
+			if want == `id="ark-prev-page"` {
+				continue // Main_Page may be first in sequence
+			}
 			t.Errorf("expected rendered ZIM article to contain %q, got %d", want, w.Code)
 		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/C/Solar_Cell", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="ark-prev-page"`) || !strings.Contains(w.Body.String(), `/read/zim/mini_wiki/C/Main_Page`) {
+		t.Errorf("expected Solar_Cell bottom pager to link back to Main_Page, got %d", w.Code)
 	}
 
 	// 4. In-ZIM title search (/read/zim/mini_wiki/?q=solar) finds Solar Cell

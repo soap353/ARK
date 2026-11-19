@@ -18,7 +18,7 @@ type QueueConfig struct {
 // DefaultQueueConfig returns default ponytail semaphore limits.
 func DefaultQueueConfig() QueueConfig {
 	return QueueConfig{
-		MaxDownloads: 2,
+		MaxDownloads: 3,
 		MaxEncodes:   1,
 		MaxIndexes:   1,
 	}
@@ -201,7 +201,7 @@ downloadLoop:
 	for {
 		select {
 		case qm.downloadSem <- struct{}{}:
-			job, err := qm.store.AcquireNextPending(ctx, []string{TypeDownload, TypePreset, TypeDrugLabels})
+			job, err := qm.store.AcquireNextPending(ctx, []string{TypeDownload, TypePreset, TypeDrugLabels, TypeMapExtract, TypeOllamaPull})
 			if err != nil || job == nil {
 				<-qm.downloadSem
 				break downloadLoop

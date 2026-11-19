@@ -3,16 +3,19 @@ package jobs
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +37,7 @@ type Runner interface {
 type JobMetadata struct {
 	OutputDir   string `json:"output_dir,omitempty"`
 	FileName    string `json:"file_name,omitempty"`
-	Format      string `json:"format,omitempty"`       // for yt-dlp: "balanced", "av1", "mp4", "music"
+	Format      string `json:"format,omitempty"`        // for yt-dlp: "balanced", "av1", "mp4", "music"
 	MaxRateKbps int    `json:"max_rate_kbps,omitempty"` // bandwidth limit
 }
 
@@ -65,14 +68,23 @@ func NewAria2cRunner(binPath string) *Aria2cRunner {
 		}
 	}
 	transport := &http.Transport{
-		MaxIdleConns:        32,
-		MaxIdleConnsPerHost: 16,
-		MaxConnsPerHost:     16,
-		ReadBufferSize:      256 * 1024,
-		WriteBufferSize:     256 * 1024,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  true,
-		ForceAttemptHTTP2:   true,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32,
+		MaxConnsPerHost:       32,
+		ReadBufferSize:        512 * 1024,
+		WriteBufferSize:       512 * 1024,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true,
+		// Disable HTTP/2 single-connection multiplexing so concurrent Range workers
+		// open independent parallel TCP connections across hosts/mirrors.
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 	}
 	return &Aria2cRunner{
 		Aria2cBin: binPath,
@@ -319,9 +331,11 @@ func (r *Aria2cRunner) runAria2c(ctx context.Context, job *Job, meta JobMetadata
 	args := []string{
 		"-c", // continue partial downloads
 		"--summary-interval=1",
-		"--max-connection-per-server=8",
-		"--split=8",
+		"--max-connection-per-server=16",
+		"--split=16",
 		"--min-split-size=1M",
+		"--file-allocation=none",
+		"--disk-cache=64M",
 		"-d", outputDir,
 	}
 	if meta.FileName != "" {
@@ -393,10 +407,11 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 		existingBytes = fi.Size()
 	}
 
-	// Fast path: when starting fresh on servers supporting Accept-Ranges >= 2 MB, split across 6 concurrent HTTP streams.
+	// Fast path: when starting fresh on servers supporting Byte-Range requests >= 1 MB,
+	// resolve Metalink (.meta4) mirrors + direct post-redirect URLs and split across 12 parallel TCP workers.
 	if existingBytes == 0 && meta.MaxRateKbps == 0 {
-		if totalLen, supportsRange := r.probeRangeSupport(ctx, job.Target); supportsRange && totalLen >= 2*1024*1024 {
-			if err := r.downloadSegmentedHTTP(ctx, job.Target, fileName, tempPath, targetPath, totalLen, 6, progress); err == nil {
+		if totalLen, mirrors, supportsRange := r.resolveMirrorsAndRange(ctx, job.Target); supportsRange && totalLen >= 1024*1024 {
+			if err := r.downloadSegmentedHTTP(ctx, mirrors, fileName, tempPath, targetPath, totalLen, 12, progress); err == nil {
 				return nil
 			}
 		}
@@ -507,26 +522,213 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 }
 
 func (r *Aria2cRunner) probeRangeSupport(ctx context.Context, rawURL string) (int64, bool) {
-	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	totalLen, _, ok := r.probeSingleMirrorRange(ctx, rawURL, 8*time.Second)
+	return totalLen, ok
+}
+
+func (r *Aria2cRunner) probeSingleMirrorRange(ctx context.Context, rawURL string, timeout time.Duration) (int64, string, bool) {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	// 1. Try HEAD first
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodHead, rawURL, nil)
+	if err == nil {
+		req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+		if resp, err := r.HTTPClient.Do(req); err == nil {
+			finalURL := rawURL
+			if resp.Request != nil && resp.Request.URL != nil {
+				finalURL = resp.Request.URL.String()
+			}
+			cl := resp.ContentLength
+			acceptRanges := strings.ToLower(resp.Header.Get("Accept-Ranges"))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && cl > 0 && strings.Contains(acceptRanges, "bytes") {
+				return cl, finalURL, true
+			}
+		}
+	}
+
+	// 2. Fallback: Try 1-byte Range GET (many mirrors/CDNs omit Accept-Ranges on HEAD or block HEAD)
+	reqGet, err := http.NewRequestWithContext(probeCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return 0, false
+		return 0, rawURL, false
+	}
+	reqGet.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+	reqGet.Header.Set("Range", "bytes=0-0")
+	resp, err := r.HTTPClient.Do(reqGet)
+	if err != nil {
+		return 0, rawURL, false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64))
+
+	finalURL := rawURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	if resp.StatusCode == http.StatusPartialContent {
+		if cr := resp.Header.Get("Content-Range"); cr != "" {
+			if slash := strings.LastIndex(cr, "/"); slash != -1 {
+				if total, err := strconv.ParseInt(strings.TrimSpace(cr[slash+1:]), 10, 64); err == nil && total > 0 {
+					return total, finalURL, true
+				}
+			}
+		}
+	}
+	return 0, finalURL, false
+}
+
+func (r *Aria2cRunner) fetchMeta4Mirrors(ctx context.Context, rawURL string) ([]string, int64) {
+	lower := strings.ToLower(rawURL)
+	if !strings.HasSuffix(lower, ".zim") && !strings.Contains(lower, "kiwix.org") {
+		return nil, 0
+	}
+	metaURL := rawURL
+	if !strings.HasSuffix(lower, ".meta4") {
+		metaURL = rawURL + ".meta4"
+	}
+
+	mCtx, cancel := context.WithTimeout(ctx, 3500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(mCtx, http.MethodGet, metaURL, nil)
+	if err != nil {
+		return nil, 0
 	}
 	req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
 	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
-		return 0, false
+		return nil, 0
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.ContentLength <= 0 {
-		return 0, false
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0
 	}
-	acceptRanges := strings.ToLower(resp.Header.Get("Accept-Ranges"))
-	return resp.ContentLength, strings.Contains(acceptRanges, "bytes")
+
+	var ml struct {
+		Files []struct {
+			Size int64 `xml:"size"`
+			URLs []struct {
+				Priority int    `xml:"priority,attr"`
+				URL      string `xml:",chardata"`
+			} `xml:"url"`
+		} `xml:"file"`
+	}
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 512*1024)).Decode(&ml); err != nil || len(ml.Files) == 0 {
+		return nil, 0
+	}
+	f := ml.Files[0]
+	sort.SliceStable(f.URLs, func(i, j int) bool {
+		pi, pj := f.URLs[i].Priority, f.URLs[j].Priority
+		if pi <= 0 {
+			pi = 999
+		}
+		if pj <= 0 {
+			pj = 999
+		}
+		return pi < pj
+	})
+	var urls []string
+	seen := make(map[string]bool)
+	for _, u := range f.URLs {
+		clean := strings.TrimSpace(u.URL)
+		if (strings.HasPrefix(clean, "https://") || strings.HasPrefix(clean, "http://")) && !seen[clean] {
+			seen[clean] = true
+			urls = append(urls, clean)
+			if len(urls) >= 6 {
+				break
+			}
+		}
+	}
+	return urls, f.Size
 }
 
-func (r *Aria2cRunner) downloadSegmentedHTTP(ctx context.Context, rawURL, fileName, tempPath, targetPath string, totalBytes int64, workers int, progress ProgressFunc) error {
+func (r *Aria2cRunner) resolveMirrorsAndRange(ctx context.Context, rawURL string) (int64, []string, bool) {
+	metaMirrors, _ := r.fetchMeta4Mirrors(ctx, rawURL)
+	candidates := make([]string, 0, len(metaMirrors)+1)
+	seen := make(map[string]bool)
+	for _, m := range metaMirrors {
+		if !seen[m] {
+			seen[m] = true
+			candidates = append(candidates, m)
+		}
+	}
+	if !seen[rawURL] {
+		candidates = append(candidates, rawURL)
+	}
+
+	if len(candidates) == 1 {
+		total, finalURL, ok := r.probeSingleMirrorRange(ctx, rawURL, 8*time.Second)
+		if !ok {
+			return 0, nil, false
+		}
+		return total, []string{finalURL}, true
+	}
+
+	type mirrorResult struct {
+		url     string
+		size    int64
+		latency time.Duration
+	}
+	var mu sync.Mutex
+	var results []mirrorResult
+	var wg sync.WaitGroup
+
+	for _, cand := range candidates {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			t0 := time.Now()
+			sz, finalURL, ok := r.probeSingleMirrorRange(ctx, u, 3*time.Second)
+			if !ok || sz <= 0 {
+				return
+			}
+			mu.Lock()
+			results = append(results, mirrorResult{
+				url:     finalURL,
+				size:    sz,
+				latency: time.Since(t0),
+			})
+			mu.Unlock()
+		}(cand)
+	}
+	wg.Wait()
+
+	if len(results) == 0 {
+		total, finalURL, ok := r.probeSingleMirrorRange(ctx, rawURL, 8*time.Second)
+		if !ok {
+			return 0, nil, false
+		}
+		return total, []string{finalURL}, true
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].latency < results[j].latency
+	})
+	primarySize := results[0].size
+	var fastest []string
+	seenFinal := make(map[string]bool)
+	for _, res := range results {
+		if res.size == primarySize && !seenFinal[res.url] {
+			seenFinal[res.url] = true
+			fastest = append(fastest, res.url)
+			if len(fastest) >= 4 {
+				break
+			}
+		}
+	}
+	return primarySize, fastest, len(fastest) > 0
+}
+
+type byteChunk struct {
+	index int
+	start int64
+	end   int64
+}
+
+func (r *Aria2cRunner) downloadSegmentedHTTP(ctx context.Context, mirrors []string, fileName, tempPath, targetPath string, totalBytes int64, workers int, progress ProgressFunc) error {
+	if len(mirrors) == 0 {
+		return fmt.Errorf("no download mirrors available")
+	}
 	if workers < 2 {
 		workers = 4
 	}
@@ -539,86 +741,139 @@ func (r *Aria2cRunner) downloadSegmentedHTTP(ctx context.Context, rawURL, fileNa
 		return err
 	}
 
+	// Build dynamic work-stealing chunks (8 MB target chunk size, or totalBytes/workers for smaller files)
+	const targetChunkBytes = int64(8 * 1024 * 1024)
+	const minChunkBytes = int64(256 * 1024)
+	chunkSize := targetChunkBytes
+	if totalBytes/int64(workers) < chunkSize {
+		chunkSize = totalBytes / int64(workers)
+		if chunkSize < minChunkBytes {
+			chunkSize = minChunkBytes
+		}
+	}
+
+	var chunks []byteChunk
+	var idx int
+	for pos := int64(0); pos < totalBytes; pos += chunkSize {
+		end := pos + chunkSize - 1
+		if end >= totalBytes {
+			end = totalBytes - 1
+		}
+		chunks = append(chunks, byteChunk{index: idx, start: pos, end: end})
+		idx++
+	}
+	if workers > len(chunks) {
+		workers = len(chunks)
+	}
+
 	segCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var nextChunk atomic.Int64
 	var downloaded atomic.Int64
 	var errMu sync.Mutex
 	var firstErr error
-	chunkSize := totalBytes / int64(workers)
 
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		start := int64(w) * chunkSize
-		end := start + chunkSize - 1
-		if w == workers-1 {
-			end = totalBytes - 1
-		}
-		wg.Add(1)
-		go func(s, e int64) {
-			defer wg.Done()
-			req, err := http.NewRequestWithContext(segCtx, http.MethodGet, rawURL, nil)
+	downloadOneChunk := func(ch byteChunk) error {
+		expectedLen := ch.end - ch.start + 1
+		var lastErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if segCtx.Err() != nil {
+				return segCtx.Err()
+			}
+			mirrorURL := mirrors[(ch.index+attempt)%len(mirrors)]
+			req, err := http.NewRequestWithContext(segCtx, http.MethodGet, mirrorURL, nil)
 			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				errMu.Unlock()
-				cancel()
-				return
+				lastErr = err
+				continue
 			}
 			req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
-			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", s, e))
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", ch.start, ch.end))
 			resp, err := r.HTTPClient.Do(req)
-			if err != nil || resp.StatusCode != http.StatusPartialContent {
-				if resp != nil {
-					resp.Body.Close()
-				}
-				errMu.Lock()
-				if firstErr == nil {
-					if err != nil {
-						firstErr = err
-					} else {
-						firstErr = fmt.Errorf("expected 206 Partial Content, got %d", resp.StatusCode)
-					}
-				}
-				errMu.Unlock()
-				cancel()
-				return
+			if err != nil {
+				lastErr = err
+				continue
 			}
-			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusPartialContent {
+				resp.Body.Close()
+				lastErr = fmt.Errorf("expected 206 Partial Content, got %d", resp.StatusCode)
+				continue
+			}
 
-			buf := make([]byte, 512*1024)
-			offset := s
+			readBuf := make([]byte, 1024*1024)       // 1 MB read buffer
+			writeBuf := make([]byte, 0, 2*1024*1024) // 2 MB batched disk write buffer
+			writeStart := ch.start
+			var chunkRead int64
+			var rwErr error
+
 			for {
-				n, rErr := resp.Body.Read(buf)
+				n, rErr := resp.Body.Read(readBuf)
 				if n > 0 {
-					if _, wErr := outFile.WriteAt(buf[:n], offset); wErr != nil {
-						errMu.Lock()
-						if firstErr == nil {
-							firstErr = wErr
-						}
-						errMu.Unlock()
-						cancel()
-						return
-					}
-					offset += int64(n)
+					writeBuf = append(writeBuf, readBuf[:n]...)
+					chunkRead += int64(n)
 					downloaded.Add(int64(n))
+
+					if len(writeBuf) >= 2*1024*1024 {
+						if _, wErr := outFile.WriteAt(writeBuf, writeStart); wErr != nil {
+							rwErr = wErr
+							break
+						}
+						writeStart += int64(len(writeBuf))
+						writeBuf = writeBuf[:0]
+					}
 				}
 				if rErr != nil {
 					if rErr == io.EOF {
 						break
 					}
+					rwErr = rErr
+					break
+				}
+			}
+			resp.Body.Close()
+
+			if rwErr == nil && len(writeBuf) > 0 {
+				if _, wErr := outFile.WriteAt(writeBuf, writeStart); wErr != nil {
+					rwErr = wErr
+				}
+			}
+			if rwErr == nil && chunkRead == expectedLen {
+				return nil
+			}
+			// Roll back partial progress before retrying chunk
+			if chunkRead > 0 {
+				downloaded.Add(-chunkRead)
+			}
+			if rwErr != nil {
+				lastErr = rwErr
+			} else {
+				lastErr = fmt.Errorf("short chunk read: got %d of %d bytes", chunkRead, expectedLen)
+			}
+		}
+		return lastErr
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(nextChunk.Add(1) - 1)
+				if i >= len(chunks) {
+					return
+				}
+				if err := downloadOneChunk(chunks[i]); err != nil {
 					errMu.Lock()
 					if firstErr == nil {
-						firstErr = rErr
+						firstErr = err
 					}
 					errMu.Unlock()
 					cancel()
 					return
 				}
 			}
-		}(start, end)
+		}()
 	}
 
 	// Progress reporter until workers finish
@@ -629,7 +884,7 @@ func (r *Aria2cRunner) downloadSegmentedHTTP(ctx context.Context, rawURL, fileNa
 	}()
 
 	startTime := time.Now()
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(400 * time.Millisecond)
 	defer ticker.Stop()
 
 loop:
@@ -640,6 +895,9 @@ loop:
 		case <-ticker.C:
 			if progress != nil {
 				dl := downloaded.Load()
+				if dl > totalBytes {
+					dl = totalBytes
+				}
 				pct := (float64(dl) / float64(totalBytes)) * 100.0
 				elapsed := time.Since(startTime).Seconds()
 				var rateMBs float64
@@ -651,7 +909,7 @@ loop:
 						eta = int(float64(totalBytes-dl) / rate)
 					}
 				}
-				progress(pct, fmt.Sprintf("%s (6x parallel): %.1f / %.1f MB (%.1f MB/s)", fileName, float64(dl)/(1024*1024), float64(totalBytes)/(1024*1024), rateMBs), dl, totalBytes, eta)
+				progress(pct, fmt.Sprintf("%s (%dx turbo, %d mirror(s)): %.1f / %.1f MB (%.1f MB/s)", fileName, workers, len(mirrors), float64(dl)/(1024*1024), float64(totalBytes)/(1024*1024), rateMBs), dl, totalBytes, eta)
 			}
 		}
 	}

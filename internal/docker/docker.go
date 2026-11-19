@@ -30,6 +30,12 @@ import (
 const (
 	// AppLabelKey is the Docker label applied to all Ark app containers.
 	AppLabelKey = "ark.app"
+	// CoreLabelKey identifies Ark's own Command Center web container.
+	CoreLabelKey = "ark.core"
+	// CoreContainerName is the fixed Docker container name for Ark's main web UI.
+	CoreContainerName = "ark-core"
+	// CoreImageName is the Docker image hosting Ark's main web pages and APIs.
+	CoreImageName = "ark/command-center:latest"
 	// NetworkName is the Docker network dedicated to Ark services.
 	NetworkName = "ark-net"
 	// JobLabelKey identifies ephemeral job containers.
@@ -125,7 +131,7 @@ func (c *Client) EnsureDaemonRunning(ctx context.Context) error {
 		}
 	}
 
-	waitDeadline := time.NewTimer(25 * time.Second)
+	waitDeadline := time.NewTimer(90 * time.Second)
 	defer waitDeadline.Stop()
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -288,8 +294,9 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 	hostConfig := &container.HostConfig{
 		Binds:        binds,
 		PortBindings: portBindings,
+		ExtraHosts:   []string{"host.docker.internal:host-gateway"},
 		RestartPolicy: container.RestartPolicy{
-			Name: "unless-stopped",
+			Name: "no",
 		},
 	}
 
@@ -341,7 +348,7 @@ func (c *Client) Stop(ctx context.Context, appID string, timeoutSec int) error {
 	})
 }
 
-// StopAll concurrently stops all running Ark app and job containers.
+// StopAll concurrently stops all active Ark app and job containers.
 func (c *Client) StopAll(ctx context.Context, timeoutSec int) (int, error) {
 	if c == nil || c.cli == nil {
 		return 0, nil
@@ -352,15 +359,40 @@ func (c *Client) StopAll(ctx context.Context, timeoutSec int) (int, error) {
 
 	seen := make(map[string]bool)
 	var targets []string
-	for _, labelKey := range []string{AppLabelKey, JobLabelKey} {
+	queries := []filters.Args{
+		filters.NewArgs(filters.Arg("label", AppLabelKey)),
+		filters.NewArgs(filters.Arg("label", JobLabelKey)),
+		filters.NewArgs(filters.Arg("name", "ark-")),
+	}
+	skipSelfCore := os.Getenv("ARK_IN_CONTAINER") == "1"
+	for _, f := range queries {
 		list, err := c.cli.ContainerList(ctx, container.ListOptions{
-			All:     false, // only running containers
-			Filters: filters.NewArgs(filters.Arg("label", labelKey)),
+			All:     true,
+			Filters: f,
 		})
 		if err != nil {
 			return 0, err
 		}
 		for _, cnt := range list {
+			state := strings.ToLower(strings.TrimSpace(cnt.State))
+			if state != "" && state != "running" && state != "restarting" && state != "paused" {
+				continue
+			}
+			if skipSelfCore {
+				if cnt.Labels != nil && cnt.Labels[CoreLabelKey] == "true" {
+					continue
+				}
+				isCoreName := false
+				for _, n := range cnt.Names {
+					if strings.TrimPrefix(n, "/") == CoreContainerName {
+						isCoreName = true
+						break
+					}
+				}
+				if isCoreName {
+					continue
+				}
+			}
 			if !seen[cnt.ID] {
 				seen[cnt.ID] = true
 				targets = append(targets, cnt.ID)
@@ -419,10 +451,135 @@ func (c *Client) Restart(ctx context.Context, appID string, timeoutSec int) erro
 	})
 }
 
+// EnsureCoreContainer builds (if missing) and starts the containerized Ark Command Center web UI (ark-core).
+func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string) error {
+	if c == nil || c.cli == nil {
+		return errors.New("docker client is nil")
+	}
+	if err := c.EnsureNetwork(ctx); err != nil {
+		return err
+	}
+	absDataDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		absDataDir = dataDir
+	}
+	_ = os.MkdirAll(absDataDir, 0755)
+
+	// Build ark/command-center:latest if not yet present in Docker
+	if _, _, err := c.cli.ImageInspectWithRaw(ctx, CoreImageName); err != nil {
+		if buildErr := buildLocalArkImage(ctx, CoreImageName); buildErr != nil {
+			return fmt.Errorf("failed to build core image %s: %w", CoreImageName, buildErr)
+		}
+	}
+
+	// Remove any stopped/stale ark-core container so mounts and port match current invocation cleanly
+	if existingList, err := c.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("name", CoreContainerName)),
+	}); err == nil {
+		for _, cnt := range existingList {
+			for _, n := range cnt.Names {
+				if strings.TrimPrefix(n, "/") == CoreContainerName {
+					if strings.EqualFold(cnt.State, "running") {
+						return nil
+					}
+					_ = c.cli.ContainerRemove(ctx, cnt.ID, container.RemoveOptions{Force: true})
+					break
+				}
+			}
+		}
+	}
+
+	containerPort := nat.Port("8080/tcp")
+	portBindings := nat.PortMap{
+		containerPort: []nat.PortBinding{
+			{
+				HostIP:   "0.0.0.0",
+				HostPort: port,
+			},
+		},
+	}
+
+	containerConfig := &container.Config{
+		Image:        CoreImageName,
+		ExposedPorts: nat.PortSet{containerPort: struct{}{}},
+		Env: []string{
+			"ARK_IN_CONTAINER=1",
+			"ARK_HOST_DATA_DIR=" + absDataDir,
+			"ARK_DATA_DIR=/data",
+			"ARK_PORT=8080",
+		},
+		Labels: map[string]string{
+			CoreLabelKey: "true",
+		},
+	}
+
+	hostConfig := &container.HostConfig{
+		Binds: []string{
+			absDataDir + ":/data:rw",
+			"/var/run/docker.sock:/var/run/docker.sock",
+		},
+		PortBindings: portBindings,
+		ExtraHosts:   []string{"host.docker.internal:host-gateway"},
+		RestartPolicy: container.RestartPolicy{
+			Name: "no",
+		},
+	}
+
+	netConfig := &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{
+			NetworkName: {},
+		},
+	}
+
+	created, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, nil, CoreContainerName)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", CoreContainerName, err)
+	}
+	if err := c.cli.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("start %s: %w", CoreContainerName, err)
+	}
+	return nil
+}
+
+// IsCoreRunning returns true when the ark-core container is currently in the running state.
+func (c *Client) IsCoreRunning(ctx context.Context) bool {
+	if c == nil || c.cli == nil {
+		return false
+	}
+	list, err := c.cli.ContainerList(ctx, container.ListOptions{
+		All:     false,
+		Filters: filters.NewArgs(filters.Arg("name", CoreContainerName)),
+	})
+	if err != nil {
+		return false
+	}
+	for _, cnt := range list {
+		for _, n := range cnt.Names {
+			if strings.TrimPrefix(n, "/") == CoreContainerName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func buildLocalArkImage(ctx context.Context, imageName string) error {
 	short := strings.TrimPrefix(imageName, "ark/")
 	if idx := strings.Index(short, ":"); idx != -1 {
 		short = short[:idx]
+	}
+	if short == "command-center" {
+		for _, rel := range []string{".", filepath.Join("..", "..")} {
+			df := filepath.Join(rel, "images", short, "Dockerfile")
+			if fi, err := os.Stat(df); err == nil && !fi.IsDir() {
+				cmd := exec.CommandContext(ctx, "docker", "build", "-f", df, "-t", imageName, rel)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+				}
+				return nil
+			}
+		}
 	}
 	candidates := []string{
 		filepath.Join("images", short),

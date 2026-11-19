@@ -166,6 +166,7 @@ func (m *AppManifest) Validate() error {
 
 // ResolveBinds converts volume specs (e.g. "zim:/data/zim:ro") into host absolute paths relative to dataDir.
 func (m *AppManifest) ResolveBinds(dataDir string) []string {
+	hostBase := strings.TrimSpace(os.Getenv("ARK_HOST_DATA_DIR"))
 	binds := make([]string, 0, len(m.Volumes))
 	for _, v := range m.Volumes {
 		parts := strings.Split(v, ":")
@@ -187,17 +188,30 @@ func (m *AppManifest) ResolveBinds(dataDir string) []string {
 			// Named docker volume like ark-qdrant
 			resolvedHost = hostPart
 		} else {
-			// Subfolder inside ArkData (must be absolute for Docker bind mounts)
-			joined := filepath.Join(dataDir, hostPart)
-			if abs, err := filepath.Abs(joined); err == nil {
-				resolvedHost = abs
+			// Ensure subfolder exists inside the accessible dataDir
+			_ = os.MkdirAll(filepath.Join(dataDir, hostPart), 0755)
+			if hostBase != "" {
+				resolvedHost = joinHostBindPath(hostBase, hostPart)
 			} else {
-				resolvedHost = joined
+				joined := filepath.Join(dataDir, hostPart)
+				if abs, err := filepath.Abs(joined); err == nil {
+					resolvedHost = abs
+				} else {
+					resolvedHost = joined
+				}
 			}
-			_ = os.MkdirAll(resolvedHost, 0755)
 		}
 
 		binds = append(binds, fmt.Sprintf("%s:%s:%s", resolvedHost, containerPart, mode))
 	}
 	return binds
+}
+
+func joinHostBindPath(base, sub string) string {
+	// Handle Windows drive paths (e.g. C:\Users\...) even when Ark runs inside a Linux container.
+	if len(base) >= 2 && base[1] == ':' {
+		cleanSub := strings.ReplaceAll(strings.Trim(sub, `\/`), `/`, `\`)
+		return strings.TrimRight(base, `\/`) + `\` + cleanSub
+	}
+	return strings.TrimRight(base, `/`) + `/` + strings.TrimPrefix(filepath.ToSlash(sub), `/`)
 }

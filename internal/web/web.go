@@ -281,6 +281,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/settings/update-github", s.handleSettingsUpdateGitHub)
 	mux.HandleFunc("/settings/rollback", s.handleSettingsRollback)
 	mux.HandleFunc("/settings/restart", s.handleSettingsRestart)
+	mux.HandleFunc("/settings/shutdown", s.handleSettingsShutdown)
 	mux.HandleFunc("/maps", s.handleMapsViewer)
 	mux.HandleFunc("/read/zim", s.handleZIMReader)
 	mux.HandleFunc("/read/zim/", s.handleZIMReader)
@@ -916,11 +917,18 @@ func (s *Server) startAppContainer(ctx context.Context, appID string) error {
 	if err != nil {
 		return fmt.Errorf("ensure running: %w", err)
 	}
-	if s.proxy != nil && info.HostPort > 0 {
-		target, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", info.HostPort))
-		if err == nil {
-			stripPrefix := m.ID != "kiwix"
-			s.proxy.Register(m.ID, target, stripPrefix)
+	if s.proxy != nil {
+		var proxyTarget string
+		if os.Getenv("ARK_IN_CONTAINER") == "1" && m.Proxy == "path" {
+			proxyTarget = fmt.Sprintf("http://ark-%s:%d", appID, m.Port)
+		} else if info.HostPort > 0 {
+			proxyTarget = fmt.Sprintf("http://127.0.0.1:%d", info.HostPort)
+		}
+		if proxyTarget != "" {
+			if target, err := url.Parse(proxyTarget); err == nil {
+				stripPrefix := m.ID != "kiwix"
+				s.proxy.Register(m.ID, target, stripPrefix)
+			}
 		}
 	}
 	if s.db != nil {
@@ -1114,10 +1122,18 @@ func (s *Server) fetchApps() ([]AppView, []AppView) {
 				if c.HostPort > 0 {
 					effectivePort = c.HostPort
 				}
-				if s.proxy != nil && effectivePort > 0 {
+				if s.proxy != nil {
 					if _, has := s.proxy.GetRoute(m.ID); !has {
-						if target, perr := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", effectivePort)); perr == nil {
-							s.proxy.Register(m.ID, target, m.ID != "kiwix")
+						var proxyTarget string
+						if os.Getenv("ARK_IN_CONTAINER") == "1" && m.Proxy == "path" {
+							proxyTarget = fmt.Sprintf("http://ark-%s:%d", m.ID, m.Port)
+						} else if effectivePort > 0 {
+							proxyTarget = fmt.Sprintf("http://127.0.0.1:%d", effectivePort)
+						}
+						if proxyTarget != "" {
+							if target, perr := url.Parse(proxyTarget); perr == nil {
+								s.proxy.Register(m.ID, target, m.ID != "kiwix")
+							}
 						}
 					}
 				}
@@ -1237,34 +1253,47 @@ func renderAppIconSVG(appID string) template.HTML {
 		body = `<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>`
 	case "ollama":
 		body = `<path d="M12 2a4 4 0 0 1 4 4v1a3 3 0 0 1 2.5 3 3 3 0 0 1-1 5.2V18a2 2 0 0 1-2 2H8.5a2 2 0 0 1-2-2v-2.8A3 3 0 0 1 5.5 10 3 3 0 0 1 8 7V6a4 4 0 0 1 4-4z"/><circle cx="9.5" cy="10.5" r="1"/><circle cx="14.5" cy="10.5" r="1"/>`
+	case "libretranslate":
+		body = `<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>`
 	default:
 		body = `<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>`
 	}
 	return template.HTML(`<svg class="tile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` + body + `</svg>`)
 }
 
-func (s *Server) fetchRecentSessionJobs(limit int) []JobView {
+func (s *Server) fetchRecentSessionJobs(maxCompleted int) []JobView {
 	if s.db == nil {
 		return nil
+	}
+	if maxCompleted <= 0 {
+		maxCompleted = 5
 	}
 
 	since := s.sessionStart.UTC().Format("2006-01-02 15:04:05")
 	rows, err := s.db.Query(`
 		SELECT id, type, target, status, progress, COALESCE(progress_msg, ''), COALESCE(error_msg, '')
 		FROM jobs
-		WHERE datetime(created_at) >= datetime(?)
-		ORDER BY created_at DESC, rowid DESC
-		LIMIT ?
-	`, since, limit)
+		WHERE (status != 'done' AND datetime(created_at) >= datetime(?))
+		   OR status IN ('running', 'pending')
+		   OR (status = 'done' AND datetime(COALESCE(completed_at, updated_at, created_at)) >= datetime(?))
+		ORDER BY CASE WHEN status IN ('running', 'pending') THEN 0 ELSE 1 END, created_at DESC, rowid DESC
+	`, since, since)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 
 	var jobsList []JobView
+	completedCount := 0
 	for rows.Next() {
 		var j JobView
 		if err := rows.Scan(&j.ID, &j.Type, &j.Target, &j.Status, &j.Progress, &j.ProgressMsg, &j.ErrorMsg); err == nil {
+			if j.Status == "done" {
+				if completedCount >= maxCompleted {
+					continue
+				}
+				completedCount++
+			}
 			jobsList = append(jobsList, j)
 		}
 	}

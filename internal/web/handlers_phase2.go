@@ -158,7 +158,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	jobsList := s.fetchRecentSessionJobs(3)
+	jobsList := s.fetchRecentSessionJobs(5)
 	freeGB, totalGB, usedGB, pct, arkPct, otherPct, arkUsedText := s.getStorageBreakdown(r.Context())
 
 	data := PageData{

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,10 @@ func NormalizeBaseURL(raw string) string {
 	}
 	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 		u = "http://" + u
+	}
+	if os.Getenv("ARK_IN_CONTAINER") == "1" {
+		u = strings.ReplaceAll(u, "://127.0.0.1", "://host.docker.internal")
+		u = strings.ReplaceAll(u, "://localhost", "://host.docker.internal")
 	}
 	u = strings.TrimRight(u, "/")
 	if !strings.HasSuffix(u, "/v1") {
@@ -315,7 +320,11 @@ func (c Conn) ChatStream(ctx context.Context, msgs []Msg, onToken func(string)) 
 func DetectServers(ctx context.Context, host string) []DetectedServer {
 	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "127.0.0.1"
+		if os.Getenv("ARK_IN_CONTAINER") == "1" {
+			host = "host.docker.internal"
+		} else {
+			host = "127.0.0.1"
+		}
 	}
 	host = strings.TrimPrefix(host, "http://")
 	host = strings.TrimPrefix(host, "https://")

@@ -342,6 +342,12 @@ func (s *JobStore) ResetStaleRunning(ctx context.Context) error {
 	return err
 }
 
+// ClearCompleted removes all completed ('done') jobs so completed job history resets across service restarts.
+func (s *JobStore) ClearCompleted(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM jobs WHERE status = 'done'`)
+	return err
+}
+
 // CountByStatus returns a map of count by job status.
 func (s *JobStore) CountByStatus(ctx context.Context) (map[string]int, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM jobs GROUP BY status`)

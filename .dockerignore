@@ -1,0 +1,11 @@
+data/
+ArkData/
+.git/
+.github/
+.agents/
+*.exe
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.test

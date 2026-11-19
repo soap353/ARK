@@ -55,7 +55,6 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 			}
 		}
 
-
 		// Forwarding headers
 		if req.TLS != nil {
 			req.Header.Set("X-Forwarded-Proto", "https")

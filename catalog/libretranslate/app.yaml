@@ -1,0 +1,17 @@
+version: 1
+id: libretranslate
+name: LibreTranslate
+category: tools
+description: Self-hosted offline machine translation for text and documents across languages.
+icon: globe.svg
+image: libretranslate/libretranslate:latest
+port: 5000
+proxy: port
+volumes:
+  - "ark-libretranslate-data:/home/libretranslate/.local:rw"
+env:
+  LT_HOST: "0.0.0.0"
+  LT_PORT: "5000"
+  LT_DISABLE_FILES_TRANSLATION: "false"
+healthcheck: /
+lan: read

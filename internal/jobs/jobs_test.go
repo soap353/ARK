@@ -289,3 +289,80 @@ func TestAria2cRunnerParallelRangeDownload(t *testing.T) {
 		t.Fatalf("parallel range file SHA-256 mismatch (got %d bytes, want %d)", len(gotBytes), len(payload))
 	}
 }
+
+func TestAria2cRunnerMultiMirrorMeta4AndClearCompleted(t *testing.T) {
+	payload := bytes.Repeat([]byte("ARK-MULTI-MIRROR-TURBO-CHUNK-01!"), (3*1024*1024)/32)
+	wantHash := sha256.Sum256(payload)
+
+	var m1Reqs, m2Reqs atomic.Int32
+	mirror1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			m1Reqs.Add(1)
+		}
+		http.ServeContent(w, r, "wiki.zim", time.Now(), bytes.NewReader(payload))
+	}))
+	defer mirror1.Close()
+
+	mirror2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			m2Reqs.Add(1)
+		}
+		http.ServeContent(w, r, "wiki.zim", time.Now(), bytes.NewReader(payload))
+	}))
+	defer mirror2.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/wiki.zim.meta4" {
+			w.Header().Set("Content-Type", "application/metalink4+xml")
+			_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?>
+<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <file name="wiki.zim">
+    <size>%d</size>
+    <url priority="1">%s/wiki.zim</url>
+    <url priority="2">%s/wiki.zim</url>
+  </file>
+</metalink>`, len(payload), mirror1.URL, mirror2.URL)
+			return
+		}
+		http.ServeContent(w, r, "wiki.zim", time.Now(), bytes.NewReader(payload))
+	}))
+	defer origin.Close()
+
+	tempDir := t.TempDir()
+	runner := NewAria2cRunner("non-existent-binary-path")
+	job := &Job{
+		ID:       "test-meta4-turbo",
+		Type:     TypeDownload,
+		Target:   origin.URL + "/wiki.zim",
+		Metadata: fmt.Sprintf(`{"output_dir":"%s","file_name":"wiki.zim"}`, filepath.ToSlash(tempDir)),
+	}
+	if err := runner.Run(context.Background(), job, nil); err != nil {
+		t.Fatalf("multi-mirror meta4 download failed: %v", err)
+	}
+	if m1Reqs.Load() == 0 || m2Reqs.Load() == 0 {
+		t.Errorf("expected both mirrors to serve parallel chunks (m1=%d, m2=%d)", m1Reqs.Load(), m2Reqs.Load())
+	}
+	gotBytes, err := os.ReadFile(filepath.Join(tempDir, "wiki.zim"))
+	if err != nil {
+		t.Fatalf("read wiki.zim: %v", err)
+	}
+	if sha256.Sum256(gotBytes) != wantHash {
+		t.Fatalf("multi-mirror file SHA-256 mismatch")
+	}
+
+	// Verify ClearCompleted removes only 'done' jobs while preserving 'pending'/'running'
+	ctx := context.Background()
+	db, _ := sql.Open("sqlite", ":memory:")
+	defer db.Close()
+	store := NewJobStore(db)
+	_ = store.EnsureTable(ctx)
+	_ = store.Create(ctx, &Job{ID: "d1", Type: TypeDownload, Status: StatusDone})
+	_ = store.Create(ctx, &Job{ID: "p1", Type: TypeDownload, Status: StatusPending})
+	if err := store.ClearCompleted(ctx); err != nil {
+		t.Fatalf("ClearCompleted: %v", err)
+	}
+	counts, _ := store.CountByStatus(ctx)
+	if counts[StatusDone] != 0 || counts[StatusPending] != 1 {
+		t.Errorf("expected done=0 and pending=1 after ClearCompleted, got %+v", counts)
+	}
+}

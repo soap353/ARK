@@ -6,6 +6,8 @@
 *.dylib
 bin/
 /ark
+images/command-center/ark-linux
+*.log
 
 # Runtime data & databases
 data/

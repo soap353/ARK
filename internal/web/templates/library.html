@@ -52,6 +52,8 @@
       {{ range .Items }}
       <a
         href="{{ .OpenURL }}"
+        target="_blank"
+        rel="noopener noreferrer"
         class="library-tile"
         data-title="{{ .Title }}"
         data-file="{{ .FileName }}"
@@ -80,7 +82,7 @@
 
 <!-- Right-click Context Menu for Library Items -->
 <div id="lib-context-menu" class="context-menu" role="menu" aria-label="Library item actions">
-  <a id="ctx-open" href="#" role="menuitem">Open</a>
+  <a id="ctx-open" href="#" target="_blank" rel="noopener noreferrer" role="menuitem">Open</a>
   <button type="button" id="ctx-add-ai" role="menuitem">Add to AI</button>
   <button type="button" id="ctx-delete" class="ctx-danger" role="menuitem">Delete</button>
 </div>

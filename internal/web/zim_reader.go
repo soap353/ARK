@@ -207,8 +207,13 @@ func (a *zimArchive) readEntryAtOffset(f *os.File, pos uint64) (zimResolvedEntry
 }
 
 func (a *zimArchive) findEntry(f *os.File, ns byte, urlPath string) (zimResolvedEntry, bool) {
+	_, e, ok := a.findEntryWithIndex(f, ns, urlPath)
+	return e, ok
+}
+
+func (a *zimArchive) findEntryWithIndex(f *os.File, ns byte, urlPath string) (int, zimResolvedEntry, bool) {
 	if a.hdr.ArticleCount == 0 {
-		return zimResolvedEntry{}, false
+		return -1, zimResolvedEntry{}, false
 	}
 	n := int(a.hdr.ArticleCount)
 	idx := sort.Search(n, func(i int) bool {
@@ -222,13 +227,48 @@ func (a *zimArchive) findEntry(f *os.File, ns byte, urlPath string) (zimResolved
 		return e.url >= urlPath
 	})
 	if idx >= n {
-		return zimResolvedEntry{}, false
+		return -1, zimResolvedEntry{}, false
 	}
 	e, err := a.readEntryAt(f, uint32(idx))
 	if err != nil || e.ns != ns || e.url != urlPath {
-		return zimResolvedEntry{}, false
+		return -1, zimResolvedEntry{}, false
 	}
-	return e, true
+	return idx, e, true
+}
+
+func (a *zimArchive) adjacentHTMLPages(f *os.File, idx int, ns byte) (prev *zimTitleRecord, next *zimTitleRecord) {
+	if idx < 0 || uint32(idx) >= a.hdr.ArticleCount {
+		return nil, nil
+	}
+	const maxScan = 25000
+	for i := idx - 1; i >= 0 && idx-i <= maxScan; i-- {
+		e, err := a.readEntryAt(f, uint32(i))
+		if err != nil {
+			continue
+		}
+		if e.ns != ns {
+			break
+		}
+		if e.mimeID < 0xfffd && int(e.mimeID) < len(a.mimes) && strings.HasPrefix(strings.ToLower(a.mimes[e.mimeID]), "text/html") {
+			prev = &zimTitleRecord{ns: e.ns, url: e.url, title: e.title}
+			break
+		}
+	}
+	n := int(a.hdr.ArticleCount)
+	for i := idx + 1; i < n && i-idx <= maxScan; i++ {
+		e, err := a.readEntryAt(f, uint32(i))
+		if err != nil {
+			continue
+		}
+		if e.ns != ns {
+			break
+		}
+		if e.mimeID < 0xfffd && int(e.mimeID) < len(a.mimes) && strings.HasPrefix(strings.ToLower(a.mimes[e.mimeID]), "text/html") {
+			next = &zimTitleRecord{ns: e.ns, url: e.url, title: e.title}
+			break
+		}
+	}
+	return prev, next
 }
 
 func (a *zimArchive) followRedirects(f *os.File, e zimResolvedEntry) (zimResolvedEntry, error) {
@@ -396,7 +436,53 @@ func (a *zimArchive) searchTitles(query string, limit int) []zimTitleRecord {
 	return out
 }
 
+func (a *zimArchive) resolveFrontPageEntry(f *os.File) (zimResolvedEntry, bool) {
+	if a.hdr.ArticleCount == 0 {
+		return zimResolvedEntry{}, false
+	}
+	if a.hdr.MainPage != 0xffffffff && a.hdr.MainPage < a.hdr.ArticleCount {
+		if entry, err := a.readEntryAt(f, a.hdr.MainPage); err == nil {
+			if resolved, rerr := a.followRedirects(f, entry); rerr == nil && resolved.mimeID < 0xfffd {
+				return resolved, true
+			}
+		}
+	}
+	for _, cand := range []string{"mainPage", "W/mainPage", "Main_Page", "index", "index.html", "index.htm", "Home", "Welcome"} {
+		if entry, ok := a.findEntryFlex(f, cand); ok {
+			if resolved, rerr := a.followRedirects(f, entry); rerr == nil && resolved.mimeID < 0xfffd {
+				return resolved, true
+			}
+		}
+	}
+	limit := a.hdr.ArticleCount
+	if limit > 64 {
+		limit = 64
+	}
+	for idx := uint32(0); idx < limit; idx++ {
+		e, err := a.readEntryAt(f, idx)
+		if err != nil {
+			continue
+		}
+		if e.mimeID == 0xffff {
+			if resolved, rerr := a.followRedirects(f, e); rerr == nil {
+				e = resolved
+			}
+		}
+		if e.mimeID < 0xfffd && (e.ns == 'C' || e.ns == 'A') && int(e.mimeID) < len(a.mimes) {
+			if strings.HasPrefix(strings.ToLower(a.mimes[e.mimeID]), "text/html") {
+				return e, true
+			}
+		}
+	}
+	return zimResolvedEntry{}, false
+}
+
 func (a *zimArchive) findEntryFlex(f *os.File, subPath string) (zimResolvedEntry, bool) {
+	_, e, ok := a.findEntryFlexWithIndex(f, subPath)
+	return e, ok
+}
+
+func (a *zimArchive) findEntryFlexWithIndex(f *os.File, subPath string) (int, zimResolvedEntry, bool) {
 	candidates := []string{subPath}
 	if strings.Contains(subPath, " ") {
 		candidates = append(candidates, strings.ReplaceAll(subPath, " ", "_"))
@@ -406,21 +492,21 @@ func (a *zimArchive) findEntryFlex(f *os.File, subPath string) (zimResolvedEntry
 		if len(cand) >= 2 && cand[1] == '/' {
 			ns := cand[0]
 			rest := cand[2:]
-			if e, ok := a.findEntry(f, ns, rest); ok {
-				return e, true
+			if idx, e, ok := a.findEntryWithIndex(f, ns, rest); ok {
+				return idx, e, true
 			}
 			// ZIM v6 places -/... and I/... under namespace 'C'
-			if e, ok := a.findEntry(f, 'C', cand); ok {
-				return e, true
+			if idx, e, ok := a.findEntryWithIndex(f, 'C', cand); ok {
+				return idx, e, true
 			}
 		}
 		for _, tryNS := range []byte{'C', 'A', '-', 'I', 'W'} {
-			if e, ok := a.findEntry(f, tryNS, cand); ok {
-				return e, true
+			if idx, e, ok := a.findEntryWithIndex(f, tryNS, cand); ok {
+				return idx, e, true
 			}
 		}
 	}
-	return zimResolvedEntry{}, false
+	return -1, zimResolvedEntry{}, false
 }
 
 // resolveZIMArticleURL verifies whether stemHint/articleHint resolves to a real entry
@@ -638,11 +724,6 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 	}
 	subPath = strings.TrimPrefix(subPath, "/")
 
-	if subPath == "" {
-		s.renderZIMStartPage(w, stem, zimPath, arc)
-		return
-	}
-
 	f, err := os.Open(arc.path)
 	if err != nil {
 		http.NotFound(w, r)
@@ -650,28 +731,28 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	if subPath == "__main__" {
+	if subPath == "" || subPath == "__main__" {
 		arc.mu.Lock()
-		mainIdx := arc.hdr.MainPage
-		if mainIdx == 0xffffffff || mainIdx >= arc.hdr.ArticleCount {
-			mainIdx = 0
-		}
-		mainEntry, err := arc.readEntryAt(f, mainIdx)
-		if err == nil {
-			mainEntry, err = arc.followRedirects(f, mainEntry)
-		}
+		mainEntry, ok := arc.resolveFrontPageEntry(f)
 		arc.mu.Unlock()
-		if err != nil {
-			http.Error(w, "Could not load ZIM main page: "+err.Error(), http.StatusInternalServerError)
+		if !ok {
+			s.renderZIMStartPage(w, stem, zimPath, arc)
 			return
 		}
-		target := fmt.Sprintf("/read/zim/%s/%c/%s", url.PathEscape(stem), mainEntry.ns, mainEntry.url)
+		targetPath, targetFrag, hasFrag := strings.Cut(mainEntry.url, "#")
+		target := fmt.Sprintf("/read/zim/%s/%c/%s", url.PathEscape(stem), mainEntry.ns, targetPath)
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		if hasFrag && targetFrag != "" {
+			target += "#" + targetFrag
+		}
 		http.Redirect(w, r, target, http.StatusFound)
 		return
 	}
 
 	arc.mu.Lock()
-	entry, found := arc.findEntryFlex(f, subPath)
+	entryIdx, entry, found := arc.findEntryFlexWithIndex(f, subPath)
 	if !found {
 		arc.mu.Unlock()
 		http.NotFound(w, r)
@@ -708,20 +789,28 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 	if int(entry.mimeID) < len(arc.mimes) && arc.mimes[entry.mimeID] != "" {
 		mimeType = arc.mimes[entry.mimeID]
 	}
+	isHTML := strings.Contains(strings.ToLower(mimeType), "text/html")
+	var prevPage, nextPage *zimTitleRecord
+	if isHTML && berr == nil {
+		prevPage, nextPage = arc.adjacentHTMLPages(f, entryIdx, entry.ns)
+	}
 	arc.mu.Unlock()
 	if berr != nil {
 		http.Error(w, "Failed to read ZIM content: "+berr.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if strings.Contains(strings.ToLower(mimeType), "text/html") {
+	if isHTML {
 		if r.URL.RawQuery != "" {
 			blob = preserveQueryInMetaRefresh(blob, r.URL.RawQuery)
 		}
-		blob = injectZIMReaderNav(blob, stem, s.isZIMIndexed(zimPath))
+		curLabel := formatSubpageLabel(stem, entry, blob)
+		blob = injectZIMReaderNav(blob, stem, s.isZIMIndexed(zimPath), prevPage, nextPage, curLabel)
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 	}
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = w.Write(blob)
 }
 
@@ -729,6 +818,15 @@ func arkThemeHeadTag() string {
 	return `<meta charset="utf-8"><style id="ark-reader-base">
 .ark-ai-highlight { background: #FDE047 !important; color: #1B2E26 !important; padding: 1px 4px; border-radius: 3px; outline: 2px solid #C25E28; }
 .ark-ai-highlight-block { background: rgba(253, 224, 71, 0.25) !important; border-left: 4px solid #C25E28 !important; padding: 4px 8px !important; border-radius: 4px; }
+html { scroll-padding-top: 54px !important; }
+html body { padding-top: 46px !important; }
+#container { top: 46px !important; height: calc(100% - 46px) !important; }
+.item figcaption, .item figcaption * { color: #FFFFFF !important; text-shadow: 0 1px 3px rgba(0,0,0,0.85) !important; }
+#ark-proxy-nav { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; width: 100% !important; height: 46px !important; min-height: 46px !important; max-height: 46px !important; flex: none !important; align-self: flex-start !important; box-sizing: border-box !important; z-index: 2147483647 !important; }
+#ark-page-pager { position: relative !important; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important; overflow: visible !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; gap: 8px !important; width: 100% !important; margin: 2rem auto 2.5rem !important; padding: 0.75rem 1rem !important; box-sizing: border-box !important; clear: both !important; visibility: visible !important; opacity: 1 !important; }
+#ark-page-pager a, #ark-page-pager a * { color: #F5F2EB !important; }
+#ark-proxy-nav input, #ark-proxy-nav select { background-color: #12201A !important; color: #F5F2EB !important; caret-color: #F5F2EB !important; border-color: #436153 !important; -webkit-text-fill-color: #F5F2EB !important; }
+#ark-proxy-nav input::placeholder { color: #A9BEB3 !important; opacity: 1 !important; -webkit-text-fill-color: #A9BEB3 !important; }
 </style>`
 }
 
@@ -774,13 +872,20 @@ func themeRule(bg, surface, fg, link, border string, isDark bool) string {
 			"html,body,#content,.mw-body,.mw-page-container,.mw-body-content,main,article{background:%s!important;color:%s!important;}"+
 			"body :not(#ark-proxy-nav):not(#ark-proxy-nav *){color:%s;}"+
 			"h1,h2,h3,h4,h5,h6,.mw-heading,.mw-heading *{background:transparent!important;color:%s!important;}"+
-			"a:not(#ark-proxy-nav a){color:%s!important;}"+
-			"#ark-proxy-nav a{color:#F5F2EB!important;}"+
+			"a:not(#ark-proxy-nav a):not(#ark-page-pager a){color:%s!important;}"+
+			"#ark-proxy-nav a,#ark-page-pager a{color:#F5F2EB!important;}"+
+			"#ark-proxy-nav input,#ark-proxy-nav select{background-color:#12201A!important;color:#F5F2EB!important;caret-color:#F5F2EB!important;border-color:#436153!important;-webkit-text-fill-color:#F5F2EB!important;}"+
+			"#ark-proxy-nav input::placeholder{color:#A9BEB3!important;opacity:1!important;-webkit-text-fill-color:#A9BEB3!important;}"+
+			"html body input:not(#ark-proxy-nav input),html body select:not(#ark-proxy-nav select),html body textarea:not(#ark-proxy-nav textarea),html body .form-control{background-color:%s!important;color:%s!important;caret-color:%s!important;border-color:%s!important;-webkit-text-fill-color:%s!important;}"+
+			"html body input:not(#ark-proxy-nav input)::placeholder,html body textarea:not(#ark-proxy-nav textarea)::placeholder{color:%s!important;opacity:0.72!important;-webkit-text-fill-color:%s!important;}"+
 			"html body table,html body .infobox,html body .infobox *,html body .sidebar,html body .sidebar *,html body .navbox,html body .navbox-title,html body .sidebar-title,html body .sidebar-list-title,html body .hatnote,html body div.hatnote,html body .toc,html body th,html body td,html body caption,html body pre,html body code{background-color:%s!important;color:%s!important;border-color:%s!important;}"+
 			"html body .sidebar a,html body .infobox a,html body .hatnote a{color:%s!important;}"+
+			"html body .item figcaption,html body .item figcaption *{color:#FFFFFF!important;text-shadow:0 1px 3px rgba(0,0,0,0.85)!important;}"+
 			"%s",
 		scheme, bg, bg, surface, surface, surface, surface, fg, fg, fg, link, link, border, border,
-		bg, fg, fg, fg, link, surface, fg, border, link, mathRule,
+		bg, fg, fg, fg, link,
+		surface, fg, fg, border, fg, fg, fg,
+		surface, fg, border, link, mathRule,
 	)
 }
 
@@ -788,7 +893,7 @@ func arkThemeScriptTag() string {
 	return `<style id="ark-reader-theme"></style><script>
 (function() {
   var THEMES = {
-    default: '#ark-proxy-nav a{color:#F5F2EB!important;}',
+    default: '#ark-proxy-nav a{color:#F5F2EB!important;}#ark-proxy-nav input,#ark-proxy-nav select{background-color:#12201A!important;color:#F5F2EB!important;caret-color:#F5F2EB!important;border-color:#436153!important;-webkit-text-fill-color:#F5F2EB!important;}#ark-proxy-nav input::placeholder{color:#A9BEB3!important;opacity:1!important;-webkit-text-fill-color:#A9BEB3!important;}',
     light: ` + fmt.Sprintf("%q", themeRule("#FFFFFF", "#F6F8FA", "#1F2328", "#0969DA", "#D0D7DE", false)) + `,
     sepia: ` + fmt.Sprintf("%q", themeRule("#F5EFE2", "#ECE3D2", "#3D3022", "#9E471C", "#CFC3AC", false)) + `,
     forest: ` + fmt.Sprintf("%q", themeRule("#F2F5F1", "#E6ECE4", "#1B2E26", "#C25E28", "#C5D1C2", false)) + `,
@@ -875,6 +980,11 @@ func arkThemeScriptTag() string {
   } else {
     highlightAIQuote();
   }
+  var ctn = document.getElementById('container');
+  var pgr = document.getElementById('ark-page-pager');
+  if (ctn && pgr && ctn !== pgr.parentElement) {
+    ctn.appendChild(pgr);
+  }
 })();
 </script>`
 }
@@ -885,11 +995,11 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 	if !hideAddToAI {
 		addBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);fetch('/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Add to AI</button>`
 	}
-	return `<nav id="ark-proxy-nav" style="position:sticky;top:0;left:0;width:100%;height:auto;box-sizing:border-box;flex:none;align-self:stretch;grid-column:1 / -1;order:-9999;z-index:99999;background:#1B2E26;border-bottom:1px solid #2A4338;padding:8px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:12px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
+	return `<nav id="ark-proxy-nav" style="position:fixed;top:0;left:0;right:0;width:100%;height:46px;max-height:46px;box-sizing:border-box;flex:none;align-self:flex-start;z-index:2147483647;background:#1B2E26;border-bottom:1px solid #2A4338;padding:6px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:12px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
 		`<a href="/" style="color:#F5F2EB;font-weight:700;text-decoration:none;font-size:14px;white-space:nowrap;">&#8592; Ark Home</a>` +
 		`<span style="color:#436153;">|</span>` +
 		`<a href="/library" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Library</a>` +
-		`<a href="/read/zim/` + escStem + `/" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Start Page</a>` +
+		`<a href="/read/zim/` + escStem + `/" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Main Page</a>` +
 		`<a href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
 		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
 		`<form action="/read/zim/` + escStem + `/" method="GET" style="display:flex;gap:6px;margin:0;">` +
@@ -900,10 +1010,102 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`</nav>`
 }
 
-func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool) []byte {
+var (
+	htmlTitleTagRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	htmlH1TagRe    = regexp.MustCompile(`(?is)<h1[^>]*>(.*?)</h1>`)
+	stripTagRe     = regexp.MustCompile(`(?s)<[^>]+>`)
+)
+
+func isSiteWideTitle(stem, candidate string) bool {
+	c := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(candidate)), " ", "")
+	s := strings.ToLower(strings.TrimSpace(stem))
+	return c != "" && len(c) >= 4 && strings.Contains(s, c)
+}
+
+func formatSubpageLabel(stem string, entry zimResolvedEntry, htmlBytes []byte) string {
+	if m := htmlH1TagRe.FindSubmatch(htmlBytes); len(m) > 1 {
+		h1 := stripTagRe.ReplaceAllString(string(m[1]), " ")
+		h1 = strings.Join(strings.Fields(html.UnescapeString(h1)), " ")
+		if h1 != "" && !isSiteWideTitle(stem, h1) {
+			return h1
+		}
+	}
+	t := strings.TrimSpace(entry.title)
+	if t != "" && t != entry.url && !strings.Contains(t, "/") && !isSiteWideTitle(stem, t) {
+		return t
+	}
+	if m := htmlTitleTagRe.FindSubmatch(htmlBytes); len(m) > 1 {
+		ht := stripTagRe.ReplaceAllString(string(m[1]), " ")
+		ht = strings.Join(strings.Fields(html.UnescapeString(ht)), " ")
+		if ht != "" && !strings.Contains(ht, "/") && !isSiteWideTitle(stem, ht) {
+			return ht
+		}
+	}
+	u := strings.TrimSuffix(strings.TrimSpace(entry.url), "/")
+	if idx := strings.IndexAny(u, "?#"); idx != -1 {
+		u = u[:idx]
+	}
+	parts := strings.Split(u, "/")
+	seg := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		p := strings.TrimSpace(parts[i])
+		if p == "" {
+			continue
+		}
+		low := strings.ToLower(p)
+		if (low == "index.html" || low == "index.htm" || low == "index.php" || low == "index") && i > 0 {
+			continue
+		}
+		seg = p
+		break
+	}
+	if seg == "" {
+		seg = u
+	}
+	for _, ext := range []string{".html", ".htm", ".php", ".xhtml"} {
+		if strings.HasSuffix(strings.ToLower(seg), ext) {
+			seg = seg[:len(seg)-len(ext)]
+			break
+		}
+	}
+	if unesc, err := url.PathUnescape(seg); err == nil && unesc != "" {
+		seg = unesc
+	}
+	seg = strings.ReplaceAll(seg, "_", " ")
+	return strings.TrimSpace(seg)
+}
+
+func buildReaderPagerHTML(stem string, prev, next *zimTitleRecord, currentLabel string) string {
+	escStem := url.PathEscape(stem)
+	btnStyle := "display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;border:1px solid #436153;background:#1B2E26;color:#F5F2EB;font-size:20px;font-weight:700;text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,0.14);"
+	disabledStyle := "display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;border:1px solid #2A4338;background:#1B2E26;color:#6E8579;font-size:20px;font-weight:700;opacity:0.4;cursor:default;"
+	prevHTML := `<span aria-disabled="true" style="` + disabledStyle + `">&#8592;</span>`
+	if prev != nil {
+		href := fmt.Sprintf("/read/zim/%s/%c/%s", escStem, prev.ns, prev.url)
+		prevHTML = fmt.Sprintf(`<a id="ark-prev-page" href="%s" aria-label="Previous page" style="%s">&#8592;</a>`,
+			html.EscapeString(href), btnStyle)
+	}
+	nextHTML := `<span aria-disabled="true" style="` + disabledStyle + `">&#8594;</span>`
+	if next != nil {
+		href := fmt.Sprintf("/read/zim/%s/%c/%s", escStem, next.ns, next.url)
+		nextHTML = fmt.Sprintf(`<a id="ark-next-page" href="%s" aria-label="Next page" style="%s">&#8594;</a>`,
+			html.EscapeString(href), btnStyle)
+	}
+	labelHTML := ""
+	if strings.TrimSpace(currentLabel) != "" {
+		labelHTML = fmt.Sprintf(`<div id="ark-current-page-label" style="font-size:13px;font-weight:600;opacity:0.8;text-align:center;max-width:90vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">%s</div>`, html.EscapeString(currentLabel))
+	}
+	return `<div id="ark-page-pager" role="navigation" aria-label="Page sequence navigation" style="position:relative;left:auto;overflow:visible;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:100%;margin:2rem auto 2.5rem;padding:0.75rem 1rem;box-sizing:border-box;clear:both;">` +
+		`<div style="display:flex;align-items:center;justify-content:center;gap:20px;">` + prevHTML + nextHTML + `</div>` +
+		labelHTML +
+		`</div>`
+}
+
+func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool, prev, next *zimTitleRecord, currentLabel string) []byte {
 	headSnippet := arkThemeHeadTag()
 	navSnippet := buildReaderNavHTML(stem, archiveIndexed)
-	tailSnippet := arkThemeScriptTag()
+	pagerSnippet := buildReaderPagerHTML(stem, prev, next, currentLabel)
+	tailSnippet := pagerSnippet + arkThemeScriptTag()
 
 	out := make([]byte, 0, len(htmlBytes)+len(headSnippet)+len(navSnippet)+len(tailSnippet))
 	lower := bytes.ToLower(htmlBytes)
@@ -926,8 +1128,15 @@ func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool) []by
 			insertAt := bodyOpen + closeIdx + 1
 			out = append(out, htmlBytes[pos:insertAt]...)
 			out = append(out, []byte(navSnippet)...)
-			out = append(out, htmlBytes[insertAt:]...)
-			out = append(out, []byte(tailSnippet)...)
+			rest := htmlBytes[insertAt:]
+			if bodyClose := bytes.LastIndex(bytes.ToLower(rest), []byte("</body>")); bodyClose != -1 {
+				out = append(out, rest[:bodyClose]...)
+				out = append(out, []byte(tailSnippet)...)
+				out = append(out, rest[bodyClose:]...)
+			} else {
+				out = append(out, rest...)
+				out = append(out, []byte(tailSnippet)...)
+			}
 			return out
 		}
 	}
