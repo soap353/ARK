@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,9 +19,17 @@ import (
 
 // MapArchiveView represents a .pmtiles archive on disk in ArkData/maps.
 type MapArchiveView struct {
-	Name     string
-	FileName string
-	SizeText string
+	Name       string     `json:"name"`
+	Title      string     `json:"title"`
+	FileName   string     `json:"file_name"`
+	FileURL    string     `json:"file_url"`
+	SizeText   string     `json:"size_text"`
+	TileType   string     `json:"tile_type"`
+	MinZoom    int        `json:"min_zoom"`
+	MaxZoom    int        `json:"max_zoom"`
+	Bounds     [4]float64 `json:"bounds"`
+	Center     [3]float64 `json:"center"`
+	HasGeoMeta bool       `json:"has_geo_meta"`
 }
 
 // USBDriveView formats a mounted drive for the Settings USB wizard.
@@ -262,11 +271,25 @@ func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {
 			sizeText = formatHumanBytes(info.Size())
 		}
 		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		archives = append(archives, MapArchiveView{
+		item := MapArchiveView{
 			Name:     name,
+			Title:    formatMapArchiveTitle(name),
 			FileName: e.Name(),
+			FileURL:  "/maps/files/" + e.Name(),
 			SizeText: sizeText,
-		})
+			TileType: "mvt",
+			MinZoom:  0,
+			MaxZoom:  15,
+		}
+		if meta, err := ParsePMTilesMeta(filepath.Join(mapsDir, e.Name())); err == nil {
+			item.MinZoom = meta.MinZoom
+			item.MaxZoom = meta.MaxZoom
+			item.TileType = meta.TileType
+			item.Bounds = meta.Bounds
+			item.Center = meta.Center
+			item.HasGeoMeta = meta.Bounds != [4]float64{}
+		}
+		archives = append(archives, item)
 	}
 
 	mapsRunning := false
@@ -277,15 +300,36 @@ func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	selectedMap := strings.TrimSpace(r.URL.Query().Get("place"))
+	if selectedMap == "" {
+		selectedMap = strings.TrimSpace(r.URL.Query().Get("map"))
+	}
+	selectedMap = strings.TrimSuffix(selectedMap, ".pmtiles")
+	if selectedMap == "" && len(archives) > 0 {
+		selectedMap = archives[0].Name
+	}
+	pins := s.listMapPins()
+	if archives == nil {
+		archives = []MapArchiveView{}
+	}
+	if pins == nil {
+		pins = []MapPinView{}
+	}
+	archivesJSON, _ := json.Marshal(archives)
+	pinsJSON, _ := json.Marshal(pins)
+
 	data := PageData{
-		Title:       "Offline Maps",
-		ActiveNav:   "maps",
-		MapArchives: archives,
-		MapsRunning: mapsRunning,
-		CountryMaps: kiwix.GetCountryMapOptions(),
-		MapPins:     s.listMapPins(),
-		FlashMsg:    strings.TrimSpace(r.URL.Query().Get("msg")),
-		FlashErr:    strings.TrimSpace(r.URL.Query().Get("err")),
+		Title:           "Offline Maps",
+		ActiveNav:       "maps",
+		MapArchives:     archives,
+		MapArchivesJSON: template.JS(archivesJSON),
+		SelectedMap:     selectedMap,
+		MapsRunning:     mapsRunning,
+		CountryMaps:     kiwix.GetCountryMapOptions(),
+		MapPins:         pins,
+		MapPinsJSON:     template.JS(pinsJSON),
+		FlashMsg:        strings.TrimSpace(r.URL.Query().Get("msg")),
+		FlashErr:        strings.TrimSpace(r.URL.Query().Get("err")),
 	}
 	s.render(w, "maps.html", data)
 }

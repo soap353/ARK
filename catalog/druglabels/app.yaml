@@ -11,3 +11,4 @@ volumes:
   - "druglabels:/data:rw"
 healthcheck: /
 lan: read
+memory_mb: 256

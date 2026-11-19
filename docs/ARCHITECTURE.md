@@ -342,8 +342,13 @@ Ark is a self-hosted "internet-in-a-box" and offline knowledge archive designed 
 
 ### `internal/web/handlers_phase2.go`
 - **Purpose**: Handlers for general settings, telemetry views, container logs, and the Ask AI interface.
-- **How It Works**: Streams structured LLM chat responses with Markdown/KaTeX citation repair, tests AI server connections, handles RAG indexing requests, and displays container logs.
-- **Interactions**: Extends `Server` in `web.go`; coordinates `internal/ai`, `internal/docker`, `internal/system`.
+- **How It Works**: Streams structured LLM chat responses via live SSE tokens with Markdown/KaTeX citation repair, enforces Strict Sources Only / Protocol / Triage modes and scope filtering, tests AI server connections, handles RAG indexing requests, and displays container logs.
+- **Interactions**: Extends `Server` in `web.go`; coordinates `ask_federated.go`, `internal/ai`, `internal/docker`, `internal/system`.
+
+### `internal/web/ask_federated.go`
+- **Purpose**: Federated offline retrieval, map waypoint context, auto-indexing, deterministic unit/dosage/radio calculator, and context token ratio estimation for Ask AI.
+- **How It Works**: Queries local `.zim` archives on-the-fly, `internal/fieldguide` Remedy data, `data/druglabels/druglabels.db` FTS5, `map_markers` with Haversine distance, and lazily syncs changed files in `data/notes/` and `data/media/docs/`.
+- **Interactions**: Called by `handlers_phase2.go` (`/api/ai/chat`) and `web.go` (`/ask`).
 
 ### `internal/web/handlers_phase3.go`
 - **Purpose**: Handlers for USB export profiles, offline update deployment, and PMTiles map viewing.
@@ -354,6 +359,16 @@ Ark is a self-hosted "internet-in-a-box" and offline knowledge archive designed 
 - **Purpose**: In-process offline ZIM archive viewer and asset server (`/zim/*`).
 - **How It Works**: Directly parses local `.zim` archives, extracting articles, styles, images, and search indexes without requiring external containers, and rewrites internal URLs for local viewing.
 - **Interactions**: Serves articles linked from the Library and Ask AI citations.
+
+### `internal/web/pmtiles_meta.go`
+- **Purpose**: Native PMTiles v3 binary header/metadata parser and HTTP Range file server (`/maps/files/*`, `/api/maps/tilejson`).
+- **How It Works**: Reads 127-byte PMTiles v3 headers and gzipped JSON metadata (bounds, center, min/max zoom, vector layers) directly from disk and serves `.pmtiles` archives via `http.ServeContent` (`206 Partial Content`) so interactive vector maps render offline without requiring Docker.
+- **Interactions**: Used by `handlers_phase3.go` (`/maps`), `handlers_nomad.go` (`/library`), and `templates/maps.html`.
+
+### `internal/web/pmtiles_tile.go`
+- **Purpose**: Unified, memory-efficient multi-archive PMTiles v3 tile server (`/maps/tiles/{z}/{x}/{y}.mvt`).
+- **How It Works**: Caches only bounded root-directory headers (up to 64 archives), filters archives by WGS84 tile bounding-box intersection, looks up Hilbert `tileID`s with `os.File.ReadAt`, streams single-archive tiles verbatim (`Content-Encoding: gzip`), and merges overlapping border/overview MVT protobuf payloads cleanly.
+- **Interactions**: Registered in `web.go` and consumed by MapLibre GL in `templates/maps.html`.
 
 ### `internal/web/web_test.go`
 - **Purpose**: Integration tests for HTTP routes, template rendering, and WCAG palette compliance.
@@ -366,9 +381,9 @@ Ark is a self-hosted "internet-in-a-box" and offline knowledge archive designed 
 - **Interactions**: Embedded in `web.go` and served at `/static/ark.css`.
 
 ### `internal/web/static/htmx.min.js` & `internal/web/static/vendor/*`
-- **Purpose**: Vendored frontend libraries (HTMX, KaTeX, Marked) enabling zero-CDN, fully offline interactive UI components.
-- **How It Works**: Embedded via Go `embed.FS` and served locally.
-- **Interactions**: Loaded by `templates/layout.html` and `templates/ask.html`.
+- **Purpose**: Vendored frontend libraries (HTMX, KaTeX, Marked, MapLibre GL JS, PMTiles, Protomaps themes, Noto Sans PBF glyphs) enabling zero-CDN, fully offline interactive UI components and vector maps.
+- **How It Works**: Embedded via Go `embed.FS` and served locally (with empty-protobuf fallback for unbundled Unicode glyph ranges).
+- **Interactions**: Loaded by `templates/layout.html`, `templates/ask.html`, and `templates/maps.html`.
 
 ### `internal/web/templates/*.html`
 - **Purpose**: Go HTML templates for all Ark views (`layout.html`, `home.html`, `library.html`, `apps.html`, `get_content.html`, `ask.html`, `kiwix.html`, `field_guide.html`, `maps.html`, `system.html`, `settings.html`).

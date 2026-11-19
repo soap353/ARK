@@ -1,11 +1,4 @@
 {{ define "content" }}
-<div class="card-header" style="margin-bottom: 1.25rem;">
-  <div>
-    <h1 class="page-title">Modular App Catalog</h1>
-    <p class="secondary-text" style="margin: 0;">Click any app name to configure, launch, update, inspect logs, or uninstall.</p>
-  </div>
-</div>
-
 {{ if .FlashErr }}
 <div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
   <strong>Error:</strong> {{ .FlashErr }}

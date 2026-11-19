@@ -1,10 +1,38 @@
 {{ define "content" }}
-<div class="card-header" style="margin-bottom: 1.25rem;">
-  <div>
-    <h1 class="page-title">Field Medical &amp; Remedies Guide</h1>
-    <p class="secondary-text" style="margin: 0;">Embedded 100% offline reference covering {{ len .GuideConditions }} conditions and {{ len .GuideRemedies }} matching home &amp; natural remedies.</p>
-  </div>
-</div>
+<style>
+  .remedy-details {
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: var(--color-bg);
+    padding: 0.5rem 0.75rem;
+  }
+  .remedy-details > summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--color-accent);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .remedy-details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .remedy-details > summary::after {
+    content: "+";
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .remedy-details[open] > summary::after {
+    content: "\2212";
+  }
+  .remedy-details[open] > summary {
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+</style>
 
 {{ if .FlashErr }}
 <div class="card" style="border-color: var(--color-error);">
@@ -12,7 +40,7 @@
 </div>
 {{ end }}
 
-<section class="card" aria-label="Search Field Guide">
+<section class="card" aria-label="Search Remedy">
   <form action="/field-guide" method="GET" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; align-items: end;">
     <div style="grid-column: span 2;">
       <label for="fg-q" class="form-label">Search Symptoms, Remedies, or Ingredients</label>
@@ -49,24 +77,25 @@
 </section>
 
 {{ if .GuideRemedies }}
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem;">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; align-items: start;">
   {{ range .GuideRemedies }}
-  <article class="card" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 0.75rem;">
+  <article class="card" style="margin-bottom: 0; display: flex; flex-direction: column; gap: 0.65rem;">
     <div>
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.4rem;">
-        <h2 style="margin: 0; font-size: 19px;">{{ .Name }}</h2>
-        <span class="badge {{ if eq .Kind "Home Remedy" }}badge-accent{{ else }}badge-success{{ end }}">{{ .Kind }}</span>
-      </div>
+      <h2 style="margin: 0 0 0.25rem; font-size: 19px;">{{ .Name }}</h2>
       {{ if .CommonNames }}
-      <div class="secondary-text" style="font-size: 13px; margin-bottom: 0.5rem;">Also known as: {{ range $i, $n := .CommonNames }}{{ if $i }}, {{ end }}{{ $n }}{{ end }}</div>
+      <div class="secondary-text" style="font-size: 13px;">Also known as: {{ range $i, $n := .CommonNames }}{{ if $i }}, {{ end }}{{ $n }}{{ end }}</div>
       {{ end }}
+    </div>
+
+    <details class="remedy-details">
+      <summary>View Description &amp; Instructions</summary>
 
       <div style="margin-bottom: 0.6rem;">
         <strong style="font-size: 14px;">Uses:</strong>
         <p style="font-size: 14px; margin: 0.15rem 0 0;">{{ .Uses }}</p>
       </div>
 
-      <div style="background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.65rem 0.75rem; margin-bottom: 0.6rem;">
+      <div style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.65rem 0.75rem; margin-bottom: 0.6rem;">
         <strong style="font-size: 13px;">Preparation &amp; Application:</strong>
         <p style="font-size: 13px; margin: 0.15rem 0 0;">{{ .How }}</p>
       </div>
@@ -80,10 +109,10 @@
         <strong>Cautions:</strong> {{ .Cautions }}
       </div>
       {{ end }}
-    </div>
+    </details>
 
     {{ if .Conditions }}
-    <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
+    <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; padding-top: 0.35rem; border-top: 1px solid var(--color-border);">
       {{ range .Conditions }}
       <a href="/field-guide?condition={{ . }}" class="badge" style="text-decoration: none; font-size: 12px;">{{ . }}</a>
       {{ end }}

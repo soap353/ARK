@@ -1,6 +1,4 @@
 {{ define "content" }}
-<h1 class="page-title">Settings</h1>
-
 {{ if .RollbackNotice }}
 <div class="card" style="border-color: var(--color-danger, #c53030); padding: 0.85rem 1.25rem; margin-bottom: 1rem;">
   <strong>Automatic Recovery Notice:</strong> {{ .RollbackNotice }}
@@ -58,7 +56,34 @@
     </div>
     <div class="form-group">
       <label for="ai_chat_model" class="form-label">Chat Model</label>
-      <input type="text" id="ai_chat_model" name="ai_chat_model" list="ai-models-list" class="form-control" value="{{ index .Settings "ai_chat_model" }}" placeholder="llama3.2:3b">
+      {{ $chatModel := index .Settings "ai_chat_model" }}
+      <select id="ai_chat_model" name="ai_chat_model" class="form-control" data-saved="{{ $chatModel }}" onchange="refreshAIProperties()">
+        {{ if $chatModel }}
+        <option value="{{ $chatModel }}" selected>{{ $chatModel }}</option>
+        {{ else }}
+        <option value="" selected>-- Select an installed model --</option>
+        {{ end }}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="ai_context_length" class="form-label">Context Length (Tokens)</label>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        {{ $ctx := index .Settings "ai_context_length" }}
+        <select id="ai_context_length" name="ai_context_length" class="form-control" data-saved="{{ $ctx }}" style="flex: 1; min-width: 190px;" onchange="toggleCustomAIContext()">
+          <option value="0" {{ if or (eq $ctx "") (eq $ctx "0") }}selected{{ end }}>Auto (Model / Loaded Default)</option>
+          <option value="2048" {{ if eq $ctx "2048" }}selected{{ end }}>2,048 (Low RAM)</option>
+          <option value="4096" {{ if eq $ctx "4096" }}selected{{ end }}>4,096</option>
+          <option value="8192" {{ if eq $ctx "8192" }}selected{{ end }}>8,192</option>
+          <option value="16384" {{ if eq $ctx "16384" }}selected{{ end }}>16,384</option>
+          <option value="32768" {{ if eq $ctx "32768" }}selected{{ end }}>32,768</option>
+          <option value="65536" {{ if eq $ctx "65536" }}selected{{ end }}>65,536</option>
+          <option value="131072" {{ if eq $ctx "131072" }}selected{{ end }}>131,072 (128k)</option>
+          <option value="262144" {{ if eq $ctx "262144" }}selected{{ end }}>262,144 (256k)</option>
+          <option value="custom">Custom...</option>
+        </select>
+        <input type="number" id="ai_context_length_custom" name="ai_context_length_custom" min="512" step="512" class="form-control tabular" style="width: 140px; display: none;" value="{{ $ctx }}" placeholder="e.g. 12288">
+      </div>
+      <div id="ai-model-props" class="secondary-text" style="font-size: 13px; margin-top: 0.35rem;">Checking model capabilities &amp; loaded state...</div>
     </div>
     <div class="form-group">
       <label for="ai_embed_model" class="form-label">Embedding Model</label>
@@ -213,14 +238,70 @@
 </div>
 
 <script>
-function populateModels(models) {
-  const dl = document.getElementById('ai-models-list');
-  dl.innerHTML = '';
+function populateModels(models, loadedModel) {
+  const unique = [];
+  const seen = new Set();
   (models || []).forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m;
-    dl.appendChild(opt);
+    const id = (m || '').trim();
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      unique.push(id);
+    }
   });
+
+  const dl = document.getElementById('ai-models-list');
+  if (dl) {
+    dl.innerHTML = '';
+    unique.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      dl.appendChild(opt);
+    });
+  }
+
+  const chatSel = document.getElementById('ai_chat_model');
+  if (chatSel) {
+    const prev = (chatSel.value || chatSel.getAttribute('data-saved') || '').trim();
+    const target = prev || (loadedModel || '').trim();
+    chatSel.innerHTML = '';
+
+    if (unique.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = prev;
+      opt.textContent = prev || '-- No installed models found --';
+      opt.selected = true;
+      chatSel.appendChild(opt);
+      return;
+    }
+
+    if (!target) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = '-- Select an installed model --';
+      ph.selected = true;
+      chatSel.appendChild(ph);
+    }
+
+    let matched = false;
+    unique.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = (loadedModel && m === loadedModel) ? (m + ' (loaded)') : m;
+      if (target && m === target) {
+        opt.selected = true;
+        matched = true;
+      }
+      chatSel.appendChild(opt);
+    });
+
+    if (target && !matched) {
+      const opt = document.createElement('option');
+      opt.value = target;
+      opt.textContent = target + ' (saved)';
+      opt.selected = true;
+      chatSel.appendChild(opt);
+    }
+  }
 }
 
 function detectAI() {
@@ -241,7 +322,8 @@ function detectAI() {
     const first = data.servers[0];
     document.getElementById('ai_server_url').value = first.url;
     populateModels(first.models);
-    statusEl.textContent = 'Detected ' + first.name + ' at ' + first.url + ' (' + (first.models ? first.models.length : 0) + ' models loaded). Click Save AI Settings.';
+    statusEl.textContent = 'Detected ' + first.name + ' at ' + first.url + ' (' + (first.models ? first.models.length : 0) + ' model(s) listed). Click Save AI Settings.';
+    refreshAIProperties();
   })
   .catch(err => { statusEl.textContent = 'Detect error: ' + err; });
 }
@@ -264,9 +346,94 @@ function testAI() {
     }
     populateModels(data.models);
     statusEl.textContent = 'Connected! Found ' + (data.models ? data.models.length : 0) + ' model(s): ' + (data.models || []).slice(0, 6).join(', ');
+    refreshAIProperties();
   })
   .catch(err => { statusEl.textContent = 'Test error: ' + err; });
 }
+
+var _aiPropTimer = null;
+function refreshAIPropertiesDebounced() {
+  clearTimeout(_aiPropTimer);
+  _aiPropTimer = setTimeout(refreshAIProperties, 350);
+}
+
+function toggleCustomAIContext() {
+  const sel = document.getElementById('ai_context_length');
+  const cust = document.getElementById('ai_context_length_custom');
+  if (!sel || !cust) return;
+  cust.style.display = sel.value === 'custom' ? 'block' : 'none';
+}
+
+function initAIContextSelect() {
+  const sel = document.getElementById('ai_context_length');
+  const cust = document.getElementById('ai_context_length_custom');
+  if (!sel) return;
+  const saved = (sel.getAttribute('data-saved') || '').trim();
+  if (saved && saved !== '0') {
+    const hasOpt = Array.from(sel.options).some(o => o.value === saved);
+    if (!hasOpt) {
+      sel.value = 'custom';
+      if (cust) cust.value = saved;
+    }
+  }
+  toggleCustomAIContext();
+}
+
+function refreshAIProperties() {
+  const propsEl = document.getElementById('ai-model-props');
+  const sel = document.getElementById('ai_context_length');
+  const urlVal = (document.getElementById('ai_server_url') || {}).value || '';
+  const modelVal = (document.getElementById('ai_chat_model') || {}).value || '';
+  if (!propsEl || !urlVal.trim()) {
+    if (propsEl) propsEl.textContent = 'Enter a Server Address to inspect model limits and load status.';
+    return;
+  }
+  fetch('/api/ai/status?url=' + encodeURIComponent(urlVal.trim()) + '&model=' + encodeURIComponent(modelVal.trim()))
+    .then(r => r.json())
+    .then(st => {
+      if (st.models && st.models.length > 0) {
+        populateModels(st.models.map(m => m.id), st.loaded_model || '');
+      } else {
+        populateModels([], '');
+      }
+      const curModel = ((document.getElementById('ai_chat_model') || {}).value || modelVal || '').trim();
+      if (!st.server_online) {
+        propsEl.textContent = 'AI server offline or unreachable.';
+        return;
+      }
+      const match = (st.models || []).find(m => m.id === curModel) || (st.models || []).find(m => m.id === st.loaded_model) || null;
+      const maxCtx = (match && match.max_context_length) || st.max_context_length || 0;
+      const loadedCtx = (match && match.loaded_context_length) || (st.model_loaded ? st.context_length : 0);
+      const isLoaded = match ? (match.state === 'loaded' || (st.model_loaded && st.loaded_model === match.id)) : st.model_loaded;
+      const vision = match ? !!match.supports_vision : !!st.supports_vision;
+      const tools = match ? !!match.supports_tools : !!st.supports_tools;
+      const quant = (match && match.quantization) || st.quantization || '';
+
+      if (sel) {
+        Array.from(sel.options).forEach(opt => {
+          const n = parseInt(opt.value, 10);
+          if (!isNaN(n) && n > 0 && maxCtx > 0) {
+            const over = n > maxCtx;
+            opt.disabled = over;
+            opt.textContent = opt.textContent.replace(/ \(exceeds model max.*\)$/, '') + (over ? ' (exceeds model max ' + maxCtx + ')' : '');
+          }
+        });
+      }
+
+      const parts = [];
+      parts.push(isLoaded ? 'State: Loaded in memory' : 'State: Not loaded');
+      if (loadedCtx > 0 && isLoaded) parts.push('Active Context: ' + loadedCtx.toLocaleString());
+      if (maxCtx > 0) parts.push('Max Supported: ' + maxCtx.toLocaleString());
+      if (quant) parts.push(quant);
+      parts.push(vision ? 'Vision: Yes' : 'Text-only');
+      if (tools) parts.push('Tools');
+      propsEl.textContent = parts.join(' \u2022 ');
+    })
+    .catch(() => {});
+}
+
+initAIContextSelect();
+refreshAIProperties();
 function toggleCustomUSBPath() {
   const sel = document.getElementById('usb_target_path');
   const wrap = document.getElementById('usb-custom-path-wrap');

@@ -632,6 +632,12 @@ dialog.app-modal::backdrop {
   color: var(--color-accent-hover);
 }
 
+.badge-warning {
+  background-color: #FEF3C7;
+  border-color: #F59E0B;
+  color: #92400E;
+}
+
 /* Storage Bar */
 .storage-bar-wrapper {
   margin: 1rem 0;

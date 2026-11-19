@@ -13,3 +13,4 @@ env:
   JWT_SECRET: "ark-local-convertx-secret"
 healthcheck: /
 lan: read
+memory_mb: 512

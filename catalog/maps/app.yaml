@@ -9,6 +9,7 @@ command:
   - "serve"
   - "/data/maps"
   - "--cors=*"
+  - "--public-url=/a/maps"
 port: 8080
 proxy: path
 open_url: /maps
@@ -16,3 +17,4 @@ volumes:
   - "maps:/data/maps:ro"
 healthcheck: /
 lan: read
+memory_mb: 256

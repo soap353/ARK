@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,7 +121,7 @@ func ExtractFile(ctx context.Context, filePath string) ([]ExtractedDoc, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".txt", ".md", ".csv", ".log", ".json", ".yaml", ".yml", ".xml":
-		b, err := os.ReadFile(filePath)
+		b, err := readCapped(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +131,7 @@ func ExtractFile(ctx context.Context, filePath string) ([]ExtractedDoc, error) {
 			Text:  strings.TrimSpace(string(b)),
 		}}, nil
 	case ".html", ".htm", ".xhtml":
-		b, err := os.ReadFile(filePath)
+		b, err := readCapped(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +150,7 @@ func ExtractFile(ctx context.Context, filePath string) ([]ExtractedDoc, error) {
 	case ".png", ".jpg", ".jpeg", ".webp", ".tiff":
 		return extractViaDockerIndexer(ctx, filePath)
 	default:
-		b, err := os.ReadFile(filePath)
+		b, err := readCapped(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -648,10 +649,12 @@ var ftsStopWords = map[string]bool{
 }
 
 func buildFTSQueries(raw string) (andQuery, orQuery string) {
+	return BuildFTSQueries(raw)
+}
+
+// SignificantTerms extracts lowercase non-stopword alphanumeric terms from raw text.
+func SignificantTerms(raw string) []string {
 	tokens := ftsTokenRe.FindAllString(strings.ToLower(raw), 16)
-	if len(tokens) == 0 {
-		return "", ""
-	}
 	seen := make(map[string]bool, len(tokens))
 	var out, fallback []string
 	for _, t := range tokens {
@@ -659,19 +662,36 @@ func buildFTSQueries(raw string) (andQuery, orQuery string) {
 			continue
 		}
 		seen[t] = true
-		quoted := `"` + t + `"`
-		fallback = append(fallback, quoted)
+		fallback = append(fallback, t)
 		if !ftsStopWords[t] {
-			out = append(out, quoted)
+			out = append(out, t)
 		}
 	}
 	if len(out) == 0 {
-		out = fallback
+		return fallback
 	}
-	if len(out) >= 2 && len(out) <= 5 {
-		andQuery = strings.Join(out, " ")
+	return out
+}
+
+// BuildFTSQueries constructs FTS5 AND and OR match queries from a raw user query.
+func BuildFTSQueries(raw string) (andQuery, orQuery string) {
+	terms := SignificantTerms(raw)
+	if len(terms) == 0 {
+		return "", ""
 	}
-	return andQuery, strings.Join(out, " OR ")
+	quoted := make([]string, len(terms))
+	for i, t := range terms {
+		quoted[i] = `"` + t + `"`
+	}
+	if len(quoted) >= 2 && len(quoted) <= 5 {
+		andQuery = strings.Join(quoted, " ")
+	}
+	return andQuery, strings.Join(quoted, " OR ")
+}
+
+// HTMLToPlainText strips script/style tags and HTML markup to produce clean text.
+func HTMLToPlainText(rawHTML, fallbackTitle string, maxRunes int) (title, plain string) {
+	return htmlToPlainText(rawHTML, fallbackTitle, maxRunes)
 }
 
 // LoadConnFromDB reads AI connection settings from SQLite settings table.
@@ -680,7 +700,7 @@ func LoadConnFromDB(ctx context.Context, db *sql.DB) Conn {
 	if db == nil {
 		return c
 	}
-	rows, err := db.QueryContext(ctx, `SELECT key, value FROM settings WHERE key IN ('ai_server_url', 'ai_api_key', 'ai_chat_model', 'ai_embed_model')`)
+	rows, err := db.QueryContext(ctx, `SELECT key, value FROM settings WHERE key IN ('ai_server_url', 'ai_api_key', 'ai_chat_model', 'ai_embed_model', 'ai_context_length')`)
 	if err != nil {
 		return c
 	}
@@ -697,6 +717,11 @@ func LoadConnFromDB(ctx context.Context, db *sql.DB) Conn {
 				c.ChatModel = v
 			case "ai_embed_model":
 				c.EmbedModel = v
+			case "ai_context_length":
+				var n int
+				if _, _ = fmt.Sscanf(strings.TrimSpace(v), "%d", &n); n > 0 {
+					c.ContextLength = n
+				}
 			}
 		}
 	}
@@ -731,4 +756,17 @@ func (r *IndexJobRunner) Run(ctx context.Context, job *jobs.Job, progress jobs.P
 	defer cancel()
 	_, err := IndexSource(ctxTimeout, r.DB, conn, qdrant, DefaultCollection, sourceType, job.Target, title, cb)
 	return err
+}
+
+// maxPlainTextBytes bounds how much of one plain-text/HTML file is loaded for indexing.
+const maxPlainTextBytes = 16 << 20
+
+// readCapped reads at most maxPlainTextBytes of a file so huge logs/exports can't exhaust RAM.
+func readCapped(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, maxPlainTextBytes))
 }

@@ -170,7 +170,7 @@ func (s *Server) handleFieldGuidePage(w http.ResponseWriter, r *http.Request) {
 	remedies := guide.Search(q, condSlug, kind)
 
 	data := PageData{
-		Title:             "Field Medical & Remedies Guide",
+		Title:             "Remedy",
 		ActiveNav:         "field-guide",
 		FlashErr:          flashErr,
 		GuideConditions:   guide.Conditions,
@@ -545,6 +545,39 @@ func (s *Server) handleAPISystemBenchmark(w http.ResponseWriter, r *http.Request
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+var onlineTimeProbeURL = "https://www.google.com/generate_204"
+
+func (s *Server) handleAPISystemTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	now := time.Now()
+	source := "device"
+	if onlineTimeProbeURL != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+		defer cancel()
+		if req, err := http.NewRequestWithContext(ctx, http.MethodHead, onlineTimeProbeURL, nil); err == nil {
+			client := &http.Client{Timeout: 1500 * time.Millisecond}
+			if resp, err := client.Do(req); err == nil {
+				_ = resp.Body.Close()
+				if dateHdr := resp.Header.Get("Date"); dateHdr != "" {
+					if parsed, err := http.ParseTime(dateHdr); err == nil {
+						now = parsed.In(time.Local)
+						source = "online"
+					}
+				}
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"unix_ms": now.UnixMilli(),
+		"iso":     now.Format(time.RFC3339),
+		"source":  source,
+	})
+}
+
 func (s *Server) loadLastBenchmark() *system.BenchmarkResult {
 	raw := s.fetchSettings()["last_benchmark_json"]
 	if raw == "" {
@@ -630,6 +663,7 @@ func (s *Server) handleAPIMapsExtract(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 	s.ensureMapMarkersTable()
+	wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json") || r.FormValue("format") == "json"
 	switch r.Method {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json")
@@ -641,6 +675,10 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 			if s.db != nil && id != "" {
 				_, _ = s.db.Exec(`DELETE FROM map_markers WHERE id = ?`, id)
 			}
+			if wantsJSON {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pins": s.listMapPins()})
+				return
+			}
 			http.Redirect(w, r, "/maps?msg="+url.QueryEscape("Removed map pin"), http.StatusSeeOther)
 			return
 		}
@@ -648,6 +686,10 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 		lat, err1 := strconv.ParseFloat(strings.TrimSpace(r.FormValue("lat")), 64)
 		lng, err2 := strconv.ParseFloat(strings.TrimSpace(r.FormValue("lng")), 64)
 		if title == "" || err1 != nil || err2 != nil {
+			if wantsJSON {
+				writeJSONError(w, http.StatusBadRequest, "Valid title, latitude, and longitude are required.")
+				return
+			}
 			http.Redirect(w, r, "/maps?err="+url.QueryEscape("Valid title, latitude, and longitude are required."), http.StatusSeeOther)
 			return
 		}
@@ -659,6 +701,10 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 		if s.db != nil {
 			_, _ = s.db.Exec(`INSERT INTO map_markers (id, title, lat, lng, category, note) VALUES (?, ?, ?, ?, ?, ?)`,
 				fmt.Sprintf("pin-%d", time.Now().UnixNano()), title, lat, lng, cat, note)
+		}
+		if wantsJSON {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pins": s.listMapPins()})
+			return
 		}
 		http.Redirect(w, r, "/maps?msg="+url.QueryEscape("Saved offline map pin: "+title), http.StatusSeeOther)
 	default:

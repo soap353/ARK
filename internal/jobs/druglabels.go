@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -148,12 +147,8 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 			}
 			continue
 		}
-		zipBytes, err := io.ReadAll(pResp.Body)
+		zr, zipPath, err := spoolZip(pResp.Body)
 		pResp.Body.Close()
-		if err != nil {
-			continue
-		}
-		zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
 		if err != nil {
 			continue
 		}
@@ -223,6 +218,8 @@ func (r *DrugLabelsRunner) Run(ctx context.Context, job *Job, progress ProgressF
 			stmt.Close()
 			_ = tx.Commit()
 		}
+		_ = zr.Close()
+		_ = os.Remove(zipPath)
 	}
 
 	if progress != nil {
@@ -312,4 +309,27 @@ func joinUniqueTrimmed(lists ...[]string) string {
 		s = s[:500]
 	}
 	return s
+}
+
+// spoolZip streams a ZIP download to a temp file so large partitions never sit in RAM.
+func spoolZip(body io.Reader) (*zip.ReadCloser, string, error) {
+	f, err := os.CreateTemp("", "ark-druglabels-*.zip")
+	if err != nil {
+		return nil, "", err
+	}
+	path := f.Name()
+	_, err = io.Copy(f, body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, "", err
+	}
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, "", err
+	}
+	return zr, path, nil
 }

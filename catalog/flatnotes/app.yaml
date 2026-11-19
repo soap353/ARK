@@ -14,3 +14,4 @@ env:
   FLATNOTES_AUTH_TYPE: none
 healthcheck: /
 lan: admin
+memory_mb: 256

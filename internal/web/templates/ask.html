@@ -3,7 +3,6 @@
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/katex.min.js"></script>
 <script src="/static/vendor/auto-render.min.js"></script>
-<h1 class="page-title" style="margin-bottom: 1rem;">Ask Local AI</h1>
 
 {{ if .FlashErr }}
 <div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
@@ -32,7 +31,18 @@
     <div class="card-header" style="margin-bottom: 0.75rem; gap: 0.65rem; flex-wrap: wrap;">
       <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
         <h2 style="margin: 0;">Offline RAG Chat</h2>
-        <span class="badge badge-success">{{ $m := index .Settings "ai_chat_model" }}{{ if $m }}Connected ({{ $m }}){{ else }}Connected{{ end }}</span>
+        <span id="ark-ai-status-badge" class="badge {{ if .AIStatus.ModelLoaded }}badge-success{{ else if and .AIStatus.ServerOnline (ne .AIStatus.ConfiguredModel "") }}badge-warning{{ else }}badge-error{{ end }}">
+          {{- if .AIStatus.ModelLoaded -}}{{ .AIStatus.LoadedModel }}
+          {{- else if and .AIStatus.ServerOnline (ne .AIStatus.ConfiguredModel "") -}}{{ .AIStatus.ConfiguredModel }}
+          {{- else -}}No Model Available{{- end -}}
+        </span>
+        <span id="ark-ctx-gauge" title="Context window used / available" style="display:{{ if .AIStatus.ModelLoaded }}inline-flex{{ else }}none{{ end }};align-items:center;gap:5px;padding:2px 8px;border:1px solid var(--color-border);border-radius:999px;background:var(--color-bg);font-size:12px;color:var(--color-text-secondary);">
+          <svg viewBox="0 0 24 24" width="18" height="18" style="transform:rotate(-90deg);flex-shrink:0;" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="var(--color-border)" stroke-width="3"></circle>
+            <circle id="ark-ctx-arc" cx="12" cy="12" r="9" fill="none" stroke="var(--color-accent)" stroke-width="3" stroke-linecap="round" stroke-dasharray="56.55" stroke-dashoffset="56.55" style="transition:stroke-dashoffset 0.45s ease,stroke 0.3s ease;"></circle>
+          </svg>
+          <span id="ark-ctx-ratio" class="tabular">0/{{ .AIContextMax }}</span>
+        </span>
       </div>
       <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-left: auto;">
         <select id="ask-session-select" class="form-control" aria-label="Chat history sessions" style="min-height: 34px; padding: 0.25rem 0.6rem; font-size: 13px; min-width: 190px; width: auto;" onchange="switchAskSession(this.value)">
@@ -43,14 +53,46 @@
         <button type="button" id="ask-del-btn" class="btn btn-danger" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="deleteCurrentSession()">Delete</button>
       </div>
     </div>
-    <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 0.9rem; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
+    <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 0.75rem; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
       <div class="ai-msg-open">
         <div class="ai-msg-role">Ark AI</div>
         <div class="ai-markdown">Ready. Ask a question across your indexed library, or attach a temporary file or image below.</div>
       </div>
     </div>
 
-    <div id="ask-attachments" style="display: none; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.5rem;"></div>
+    <div id="ask-zim-chip-wrap" style="display:none;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.4rem;"></div>
+    <div id="ask-attachments" style="display: none; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.4rem;"></div>
+
+    <!-- #11 Collapsible Symptom / Pill Triage mini-bar (hidden until toggled) -->
+    <div id="ask-triage-bar" style="display:none;gap:0.45rem;flex-wrap:wrap;align-items:center;padding:0.45rem 0.6rem;margin-bottom:0.45rem;border:1px solid var(--color-border);border-radius:var(--border-radius);background:var(--color-bg);">
+      <select id="triage-kind" class="form-control" style="width:auto;min-height:32px;padding:0.2rem 0.5rem;font-size:12px;">
+        <option value="symptom">Symptom Check</option>
+        <option value="pill">Pill ID / Imprint</option>
+      </select>
+      <input type="text" id="triage-input" class="form-control" style="flex:1;min-width:180px;min-height:32px;padding:0.2rem 0.6rem;font-size:13px;" placeholder="e.g. fever + stiff neck, or imprint L484 white oval...">
+      <button type="button" class="btn btn-primary" style="min-height:32px;padding:0.2rem 0.7rem;font-size:12px;" onclick="runTriageQuery()">Run Triage</button>
+    </div>
+
+    <!-- #13 Scope filter pills + #8 Sources Only + #9 Protocol Mode + #11 Triage trigger -->
+    <div id="ask-mode-bar" style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.45rem;font-size:12px;">
+      <button type="button" class="btn btn-primary ask-scope-pill" data-scope="all" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('all',this)">All</button>
+      <button type="button" class="btn ask-scope-pill" data-scope="zim" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('zim',this)">ZIMs</button>
+      <button type="button" class="btn ask-scope-pill" data-scope="remedy" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('remedy',this)">Remedy</button>
+      <button type="button" class="btn ask-scope-pill" data-scope="druglabels" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('druglabels',this)">Drug Labels</button>
+      <button type="button" class="btn ask-scope-pill" data-scope="notes" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('notes',this)">My Notes</button>
+      <button type="button" class="btn ask-scope-pill" data-scope="attached" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="setAskScope('attached',this)">Attachment Only</button>
+      <span style="flex:1;"></span>
+      <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:2px 7px;border:1px solid var(--color-border);border-radius:999px;background:var(--color-bg);color:var(--color-text-secondary);white-space:nowrap;">
+        <input type="checkbox" id="ask-sources-only" style="margin:0;">
+        <span>Sources Only</span>
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:2px 7px;border:1px solid var(--color-border);border-radius:999px;background:var(--color-bg);color:var(--color-text-secondary);white-space:nowrap;">
+        <input type="checkbox" id="ask-protocol-mode" style="margin:0;">
+        <span>Protocol</span>
+      </label>
+      <button type="button" id="ask-triage-toggle" class="btn" style="min-height:26px;padding:0.1rem 0.55rem;font-size:12px;border-radius:999px;" onclick="toggleTriageBar()">Triage</button>
+    </div>
+
     <form id="ask-form" onsubmit="return sendAsk(event)" style="display: flex; gap: 0.55rem; align-items: center;">
       <input type="file" id="ask-files" multiple accept="image/*,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.htm,.pdf,.epub" style="display: none;" onchange="handleAskFilesSelected(this.files)">
       <button type="button" id="ask-attach-btn" class="btn" title="Attach temporary files or images" style="min-height: 42px; padding: 0.35rem 0.75rem; font-size: 14px; white-space: nowrap;" onclick="document.getElementById('ask-files').click()">+ Attach</button>
@@ -232,6 +274,9 @@ function renderMarkdownAndMath(targetEl, rawText) {
   const { masked, mathTokens } = protectMathForMarkdown(src);
   targetEl.innerHTML = window.marked.parse(masked, { gfm: true, breaks: true });
   sanitizeRenderedDOM(targetEl);
+  targetEl.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    cb.disabled = false;
+  });
 
   if (mathTokens.length > 0) {
     const walker = document.createTreeWalker(targetEl, NodeFilter.SHOW_TEXT);
@@ -266,6 +311,194 @@ function renderMarkdownAndMath(targetEl, rawText) {
 var pendingAskFiles = [];
 var activeSessionID = '';
 var activeSessionPinned = false;
+var activeAskScope = 'all';
+var activeTriageType = '';
+var lastContextUsed = 0;
+var preloadZIM = {{ .AskPreloadZIM }};
+var preloadArticle = {{ .AskPreloadArticle }};
+var preloadTitle = {{ .AskPreloadTitle }};
+var preloadQuery = {{ .AskPreloadQuery }};
+var initialAIStatus = {{ if .AIStatusJSON }}{{ .AIStatusJSON }}{{ else }}{}{{ end }};
+var defaultContextMax = {{ if gt .AIContextMax 0 }}{{ .AIContextMax }}{{ else }}8192{{ end }};
+
+function applyAIStatus(st) {
+  if (!st || typeof st !== 'object') return;
+  var badge = document.getElementById('ark-ai-status-badge');
+  var gauge = document.getElementById('ark-ctx-gauge');
+  var submitBtn = document.getElementById('ask-submit');
+  var inp = document.getElementById('ask-input');
+  var picker = document.getElementById('ask-files');
+  var attachBtn = document.getElementById('ask-attach-btn');
+
+  var loaded = !!st.model_loaded;
+  var online = !!st.server_online;
+  var online = !!st.server_online;
+  var loaded = !!st.model_loaded;
+  var cfgModel = (st.configured_model || '').trim();
+  var hasStandby = online && !loaded && cfgModel !== '';
+  var canSend = loaded || hasStandby;
+  window._arkAIModelLoaded = loaded;
+  window._arkAICanSend = canSend;
+  window._arkAIActiveModel = loaded ? (st.loaded_model || cfgModel) : (hasStandby ? cfgModel : '');
+  if (st.context_length && st.context_length > 0) {
+    defaultContextMax = st.context_length;
+  }
+
+  if (badge) {
+    badge.classList.remove('badge-success', 'badge-warning', 'badge-accent', 'badge-error');
+    var details = [];
+    if (st.quantization) details.push(st.quantization);
+    details.push(st.supports_vision ? 'Vision' : 'Text');
+    if (st.supports_tools) details.push('Tools');
+    if (loaded) {
+      badge.classList.add('badge-success');
+      badge.textContent = st.loaded_model || cfgModel || 'model';
+      badge.title = 'Loaded • ' + details.join(' \u2022 ') + ' | Context: ' + defaultContextMax;
+    } else if (hasStandby) {
+      badge.classList.add('badge-warning');
+      badge.textContent = cfgModel;
+      badge.title = 'Not loaded yet (will auto-load on send) • ' + details.join(' \u2022 ');
+    } else {
+      badge.classList.add('badge-error');
+      badge.textContent = 'No Model Available';
+      badge.title = online ? 'AI server is online, but no Chat Model is selected in Settings.' : 'Cannot reach configured AI server.';
+    }
+  }
+
+  // Only show the circular context visual when a model is actually loaded
+  if (gauge) {
+    gauge.style.display = loaded ? 'inline-flex' : 'none';
+  }
+  updateContextGauge(lastContextUsed, defaultContextMax);
+
+  if (submitBtn) {
+    submitBtn.disabled = !canSend;
+  }
+  if (inp) {
+    if (loaded) {
+      inp.placeholder = defaultContextMax <= 4096
+        ? 'Ask a concise question (low-context model active)...'
+        : 'Ask a question...';
+    } else if (hasStandby) {
+      inp.placeholder = 'Ask a question (will load ' + cfgModel + ')...';
+    } else {
+      inp.placeholder = 'No model available — check AI Settings...';
+    }
+  }
+
+  // Adapt attachment picker based on model vision support
+  if (picker && attachBtn) {
+    if (!canSend || st.supports_vision) {
+      picker.setAttribute('accept', 'image/*,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.htm,.pdf,.epub');
+      attachBtn.title = 'Attach temporary files or images';
+    } else {
+      picker.setAttribute('accept', '.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.htm,.pdf,.epub');
+      attachBtn.title = 'Attach document (selected model is text-only)';
+    }
+  }
+}
+
+function pollAIStatus() {
+  if (!document.getElementById('ark-ai-status-badge')) return;
+  fetch('/api/ai/status')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(st) { if (st) applyAIStatus(st); })
+    .catch(function() {});
+}
+
+function formatCompactTokens(n) {
+  n = Math.max(0, Math.round(n || 0));
+  if (n >= 1000) {
+    return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+  }
+  return String(n);
+}
+
+function updateContextGauge(used, max) {
+  var arc = document.getElementById('ark-ctx-arc');
+  var ratioEl = document.getElementById('ark-ctx-ratio');
+  var wrap = document.getElementById('ark-ctx-gauge');
+  max = (max && max > 0) ? max : defaultContextMax;
+  used = Math.max(0, used || 0);
+  lastContextUsed = used;
+  var frac = Math.min(1, used / max);
+  var circ = 56.55;
+  if (arc) {
+    arc.style.strokeDashoffset = String((circ * (1 - frac)).toFixed(2));
+    arc.style.stroke = frac > 0.85 ? 'var(--color-error)' : (frac > 0.65 ? 'var(--color-warning)' : 'var(--color-accent)');
+  }
+  if (ratioEl) {
+    ratioEl.textContent = formatCompactTokens(used) + '/' + formatCompactTokens(max);
+  }
+  if (wrap) {
+    wrap.title = 'Context used: ' + used + ' / ' + max + ' tokens';
+  }
+}
+
+function setAskScope(scope, el) {
+  activeAskScope = scope || 'all';
+  document.querySelectorAll('.ask-scope-pill').forEach(function(b) {
+    b.classList.toggle('btn-primary', b === el);
+  });
+}
+
+function toggleTriageBar() {
+  var bar = document.getElementById('ask-triage-bar');
+  var btn = document.getElementById('ask-triage-toggle');
+  if (!bar) return;
+  var show = bar.style.display === 'none';
+  bar.style.display = show ? 'flex' : 'none';
+  if (btn) btn.classList.toggle('btn-primary', show);
+  if (show) {
+    var ti = document.getElementById('triage-input');
+    if (ti) ti.focus();
+  }
+}
+
+function runTriageQuery() {
+  var kind = (document.getElementById('triage-kind') || {}).value || 'symptom';
+  var txt = ((document.getElementById('triage-input') || {}).value || '').trim();
+  if (!txt) return;
+  activeTriageType = kind;
+  var inp = document.getElementById('ask-input');
+  var prot = document.getElementById('ask-protocol-mode');
+  if (kind === 'pill') {
+    inp.value = 'Identify pill / medication: ' + txt;
+  } else {
+    inp.value = 'Triage symptoms: ' + txt;
+    if (prot) prot.checked = true;
+  }
+  sendAsk({ preventDefault: function(){} });
+  activeTriageType = '';
+}
+
+function renderPreloadZIMChip() {
+  var wrap = document.getElementById('ask-zim-chip-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!preloadZIM || !preloadArticle) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'flex';
+  var chip = document.createElement('span');
+  chip.className = 'ask-att-chip';
+  var lbl = document.createElement('span');
+  lbl.textContent = 'Article: ' + (preloadTitle || preloadArticle) + ' (' + preloadZIM + ')';
+  var rm = document.createElement('button');
+  rm.type = 'button';
+  rm.textContent = '×';
+  rm.setAttribute('aria-label', 'Clear article context');
+  rm.onclick = function() {
+    preloadZIM = '';
+    preloadArticle = '';
+    preloadTitle = '';
+    renderPreloadZIMChip();
+  };
+  chip.appendChild(lbl);
+  chip.appendChild(rm);
+  wrap.appendChild(chip);
+}
 
 function updateSessionButtons() {
   var pinBtn = document.getElementById('ask-pin-btn');
@@ -320,36 +553,78 @@ function startNewChat() {
   var sel = document.getElementById('ask-session-select');
   if (sel) sel.value = '';
   updateSessionButtons();
+  updateContextGauge(0, defaultContextMax);
   resetChatWelcome();
 }
 
-function renderNumberedReferences(refEl, citations) {
+function renderReferencesAndMapActions(refEl, citations, mapActions) {
   if (!refEl) return;
   refEl.innerHTML = '';
-  if (!Array.isArray(citations) || citations.length === 0) {
+  var hasCites = Array.isArray(citations) && citations.length > 0;
+  var hasMaps = Array.isArray(mapActions) && mapActions.length > 0;
+  if (!hasCites && !hasMaps) {
     refEl.style.display = 'none';
     return;
   }
   refEl.style.display = 'flex';
-  citations.forEach(function(c, idx) {
-    var num = c.num || (idx + 1);
-    var label = '[' + num + ']';
-    var name = c.clean_title || c.title || ('Source ' + num);
-    var tip = name + (c.snippet ? ' — "' + c.snippet + '"' : '');
-    var el;
-    if (c.url) {
-      el = document.createElement('a');
-      el.href = c.url;
-      el.target = '_blank';
-      el.rel = 'noopener noreferrer';
-    } else {
-      el = document.createElement('span');
-    }
-    el.className = 'ai-ref-badge';
-    el.title = tip;
-    el.textContent = label;
-    refEl.appendChild(el);
-  });
+  if (hasCites) {
+    citations.forEach(function(c, idx) {
+      var num = c.num || (idx + 1);
+      var label = '[' + num + ']';
+      var name = c.clean_title || c.title || ('Source ' + num);
+      var tip = name + (c.snippet ? ' — "' + c.snippet + '"' : '');
+      var el;
+      if (c.url) {
+        el = document.createElement('a');
+        el.href = c.url;
+        el.target = '_blank';
+        el.rel = 'noopener noreferrer';
+      } else {
+        el = document.createElement('span');
+      }
+      el.className = 'ai-ref-badge';
+      el.title = tip;
+      el.textContent = label;
+      refEl.appendChild(el);
+    });
+  }
+  if (hasMaps) {
+    mapActions.forEach(function(m) {
+      var fly = document.createElement('a');
+      fly.className = 'ai-ref-badge';
+      fly.href = m.map_url || ('/maps?lat=' + encodeURIComponent(m.lat) + '&lng=' + encodeURIComponent(m.lng) + '&zoom=12');
+      fly.target = '_blank';
+      fly.rel = 'noopener noreferrer';
+      fly.textContent = 'Fly to Map (' + Number(m.lat).toFixed(4) + ', ' + Number(m.lng).toFixed(4) + ')';
+      refEl.appendChild(fly);
+
+      var saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'ai-ref-badge';
+      saveBtn.style.cursor = 'pointer';
+      saveBtn.textContent = '+ Save Pin: ' + (m.title || 'Waypoint');
+      saveBtn.onclick = function() {
+        saveBtn.disabled = true;
+        var body = new URLSearchParams();
+        body.set('title', m.title || 'AI Waypoint');
+        body.set('lat', String(m.lat));
+        body.set('lng', String(m.lng));
+        body.set('category', m.category || 'waypoint');
+        body.set('note', m.note || '');
+        body.set('format', 'json');
+        fetch('/api/maps/pins', {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString()
+        }).then(function(r) {
+          saveBtn.textContent = r.ok ? 'Saved Pin' : 'Save Failed';
+        }).catch(function() {
+          saveBtn.textContent = 'Save Failed';
+        });
+      };
+      refEl.appendChild(saveBtn);
+    });
+  }
 }
 
 function switchAskSession(id) {
@@ -386,11 +661,12 @@ function switchAskSession(id) {
           renderMarkdownAndMath(bDiv.querySelector('.ans'), m.content || '');
           if (m.attachments && m.attachments.charAt(0) === '[') {
             try {
-              renderNumberedReferences(bDiv.querySelector('.ai-ref-list'), JSON.parse(m.attachments));
+              renderReferencesAndMapActions(bDiv.querySelector('.ai-ref-list'), JSON.parse(m.attachments), []);
             } catch (e) {}
           }
         }
       });
+      updateContextGauge(data.context_used || 0, data.context_max || defaultContextMax);
       box.scrollTop = box.scrollHeight;
     })
     .catch(function() {});
@@ -435,8 +711,22 @@ function deleteCurrentSession() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+  applyAIStatus(initialAIStatus);
   loadAskSessions('');
   updateSessionButtons();
+  updateContextGauge(0, defaultContextMax);
+  renderPreloadZIMChip();
+  if (document.getElementById('ark-ai-status-badge')) {
+    setInterval(pollAIStatus, 4000);
+    window.addEventListener('focus', pollAIStatus);
+  }
+  if (preloadQuery) {
+    var inp = document.getElementById('ask-input');
+    if (inp) {
+      inp.value = preloadQuery;
+      sendAsk({ preventDefault: function(){} });
+    }
+  }
 });
 
 function renderAttachmentChips() {
@@ -501,7 +791,11 @@ async function sendAsk(ev) {
 
   const botDiv = document.createElement('div');
   botDiv.className = 'ai-msg-open';
-  botDiv.innerHTML = '<div class="ai-msg-role">Ark AI</div><div class="ans ai-markdown">Thinking...</div><div class="ai-ref-list" style="display:none;"></div>';
+  const waitLabel = (!window._arkAIModelLoaded && window._arkAIActiveModel)
+    ? ('Loading ' + window._arkAIActiveModel + '...')
+    : 'Thinking...';
+  botDiv.innerHTML = '<div class="ai-msg-role">Ark AI</div><div class="ans ai-markdown"></div><div class="ai-ref-list" style="display:none;"></div>';
+  botDiv.querySelector('.ans').textContent = waitLabel;
   box.appendChild(botDiv);
   const ansSpan = botDiv.querySelector('.ans');
   const refList = botDiv.querySelector('.ai-ref-list');
@@ -511,11 +805,21 @@ async function sendAsk(ev) {
   renderAttachmentChips();
   btn.disabled = true;
 
+  const sourcesOnly = !!(document.getElementById('ask-sources-only') && document.getElementById('ask-sources-only').checked);
+  const protocolMode = !!(document.getElementById('ask-protocol-mode') && document.getElementById('ask-protocol-mode').checked);
+
   try {
     let resp;
     if (filesToSend.length > 0) {
       const fd = new FormData();
       fd.append('question', q);
+      fd.append('scope', activeAskScope);
+      fd.append('sources_only', sourcesOnly ? '1' : '0');
+      fd.append('protocol_mode', protocolMode ? '1' : '0');
+      fd.append('triage_type', activeTriageType);
+      fd.append('zim', preloadZIM);
+      fd.append('article', preloadArticle);
+      fd.append('stream', '1');
       if (activeSessionID) fd.append('session_id', activeSessionID);
       filesToSend.forEach(f => fd.append('files', f, f.name));
       resp = await fetch('/api/ai/chat', { method: 'POST', body: fd });
@@ -523,26 +827,87 @@ async function sendAsk(ev) {
       resp = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, session_id: activeSessionID })
+        body: JSON.stringify({
+          question: q,
+          session_id: activeSessionID,
+          scope: activeAskScope,
+          sources_only: sourcesOnly,
+          protocol_mode: protocolMode,
+          triage_type: activeTriageType,
+          zim: preloadZIM,
+          article: preloadArticle,
+          stream: true
+        })
       });
     }
-    const data = await resp.json();
-    if (!resp.ok || data.error) {
-      ansSpan.textContent = data.error || ('Request error ' + resp.status);
+
+    const rct = (resp.headers.get('Content-Type') || '').toLowerCase();
+    if (rct.includes('text/event-stream') && resp.body) {
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuf = '';
+      let liveText = '';
+      let finalPayload = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        sseBuf += decoder.decode(value, { stream: true });
+        const events = sseBuf.split('\n\n');
+        sseBuf = events.pop() || '';
+        for (const ev of events) {
+          let evType = 'message';
+          let evData = '';
+          for (const ln of ev.split('\n')) {
+            if (ln.startsWith('event:')) evType = ln.slice(6).trim();
+            else if (ln.startsWith('data:')) evData += ln.slice(5).trim();
+          }
+          if (!evData) continue;
+          try {
+            const parsed = JSON.parse(evData);
+            if (evType === 'token' && parsed.token) {
+              liveText += parsed.token;
+              ansSpan.textContent = liveText;
+              box.scrollTop = box.scrollHeight;
+            } else if (evType === 'done') {
+              finalPayload = parsed;
+            } else if (evType === 'error') {
+              ansSpan.textContent = parsed.error || 'Stream error';
+            }
+          } catch (e) {}
+        }
+      }
+      if (finalPayload) {
+        renderMarkdownAndMath(ansSpan, finalPayload.answer || liveText || '');
+        renderReferencesAndMapActions(refList, finalPayload.citations || [], finalPayload.map_actions || []);
+        updateContextGauge(finalPayload.context_used || 0, finalPayload.context_max || defaultContextMax);
+        if (finalPayload.session_id) {
+          activeSessionID = finalPayload.session_id;
+          activeSessionPinned = !!finalPayload.session_pinned;
+          updateSessionButtons();
+          loadAskSessions(activeSessionID);
+        }
+      }
     } else {
-      renderMarkdownAndMath(ansSpan, data.answer || '');
-      renderNumberedReferences(refList, data.citations || []);
-      if (data.session_id) {
-        activeSessionID = data.session_id;
-        activeSessionPinned = !!data.session_pinned;
-        updateSessionButtons();
-        loadAskSessions(activeSessionID);
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        ansSpan.textContent = data.error || ('Request error ' + resp.status);
+      } else {
+        renderMarkdownAndMath(ansSpan, data.answer || '');
+        renderReferencesAndMapActions(refList, data.citations || [], data.map_actions || []);
+        updateContextGauge(data.context_used || 0, data.context_max || defaultContextMax);
+        if (data.session_id) {
+          activeSessionID = data.session_id;
+          activeSessionPinned = !!data.session_pinned;
+          updateSessionButtons();
+          loadAskSessions(activeSessionID);
+        }
       }
     }
   } catch (err) {
     ansSpan.textContent = 'Connection error: ' + err.message;
   } finally {
-    btn.disabled = false;
+    btn.disabled = (window._arkAICanSend === false);
+    pollAIStatus();
     box.scrollTop = box.scrollHeight;
   }
   return false;

@@ -1,13 +1,7 @@
 {{ define "content" }}
-<div class="card-header" style="margin-bottom: 1.25rem;">
-  <div>
-    <h1 class="page-title">Kiwix Library Catalog</h1>
-    <p class="secondary-text" style="margin: 0;">Browse, search, and download any ZIM archive directly from <code>library.kiwix.org</code> or a custom OPDS feed.</p>
-  </div>
-  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-    <a href="/library" class="btn">Installed Library</a>
-    <a href="/read/zim/" class="btn btn-primary">Open Local ZIM Reader &rarr;</a>
-  </div>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 1rem;">
+  <a href="/library" class="btn">Installed Library</a>
+  <a href="/read/zim/" class="btn btn-primary">Open Local ZIM Reader &rarr;</a>
 </div>
 
 <section class="card" aria-label="OPDS Catalog Filters">

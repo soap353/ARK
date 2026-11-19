@@ -11,3 +11,4 @@ volumes:
   - "kolibri:/kolibri:rw"
 healthcheck: /
 lan: read
+memory_mb: 512

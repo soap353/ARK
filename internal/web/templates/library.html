@@ -1,14 +1,8 @@
 {{ define "content" }}
-<div class="card-header" style="margin-bottom: 1.25rem;">
-  <div>
-    <h1 class="page-title">Offline Library</h1>
-    <p class="secondary-text" style="margin: 0;">Click any item to open it, or right-click an item for Delete, Add to AI, or Open.</p>
-  </div>
-  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-    <button type="button" class="btn" onclick="checkZimUpdates()">Check ZIM Updates</button>
-    <a href="/kiwix" class="btn">Browse Kiwix Catalog</a>
-    <a href="/get-content" class="btn btn-primary">+ Get Content</a>
-  </div>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 1rem;">
+  <button type="button" class="btn" onclick="checkZimUpdates()">Check ZIM Updates</button>
+  <a href="/kiwix" class="btn">Browse Kiwix Catalog</a>
+  <a href="/get-content" class="btn btn-primary">+ Get Content</a>
 </div>
 
 {{ if .FlashErr }}

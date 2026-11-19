@@ -1,6 +1,6 @@
 version: 1
 id: ollama
-name: Ollama
+name: AI Assistant
 category: ai
 description: Run private local LLMs for offline chat and document Q&A.
 icon: cpu.svg

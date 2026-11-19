@@ -44,6 +44,7 @@ type AppManifest struct {
 	Healthcheck string            `yaml:"healthcheck,omitempty"`
 	Lan         string            `yaml:"lan"` // "read" (default) or "admin"
 	Compose     string            `yaml:"compose,omitempty"`
+	MemoryMB    int               `yaml:"memory_mb,omitempty"` // hard container RAM cap (0 = unlimited)
 
 	// Dir is set to the directory containing the app.yaml file
 	Dir string `yaml:"-"`

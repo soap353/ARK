@@ -299,6 +299,11 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 			Name: "no",
 		},
 	}
+	if app.MemoryMB > 0 {
+		limit := int64(app.MemoryMB) * 1024 * 1024
+		hostConfig.Resources.Memory = limit
+		hostConfig.Resources.MemorySwap = limit // no swap thrash
+	}
 
 	netConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
@@ -505,6 +510,7 @@ func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string, 
 		"ARK_HOST_DATA_DIR=" + absDataDir,
 		"ARK_DATA_DIR=/data",
 		"ARK_PORT=8080",
+		"GOMEMLIMIT=256MiB",
 	}
 	env = append(env, extraEnv...)
 
@@ -528,6 +534,10 @@ func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string, 
 			Name: "no",
 		},
 	}
+	// Core UI is light (~30 MB); cap it so a leak can never starve the host.
+	const coreMemLimit = 384 * 1024 * 1024
+	hostConfig.Resources.Memory = coreMemLimit
+	hostConfig.Resources.MemorySwap = coreMemLimit
 
 	netConfig := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{

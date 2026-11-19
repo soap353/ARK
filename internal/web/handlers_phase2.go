@@ -78,16 +78,48 @@ func (s *Server) handleSettingsAI(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
+	ctxVal := strings.TrimSpace(r.FormValue("ai_context_length"))
+	var ctxNum int
+	if ctxVal == "custom" {
+		_, _ = fmt.Sscanf(strings.TrimSpace(r.FormValue("ai_context_length_custom")), "%d", &ctxNum)
+	} else if ctxVal != "" {
+		_, _ = fmt.Sscanf(ctxVal, "%d", &ctxNum)
+	}
+	if ctxNum < 0 {
+		ctxNum = 0
+	}
 	pairs := map[string]string{
-		"ai_server_url":  strings.TrimSpace(r.FormValue("ai_server_url")),
-		"ai_chat_model":  strings.TrimSpace(r.FormValue("ai_chat_model")),
-		"ai_embed_model": strings.TrimSpace(r.FormValue("ai_embed_model")),
+		"ai_server_url":     strings.TrimSpace(r.FormValue("ai_server_url")),
+		"ai_chat_model":     strings.TrimSpace(r.FormValue("ai_chat_model")),
+		"ai_embed_model":    strings.TrimSpace(r.FormValue("ai_embed_model")),
+		"ai_context_length": fmt.Sprintf("%d", ctxNum),
 	}
 	if key := strings.TrimSpace(r.FormValue("ai_api_key")); key != "" {
 		pairs["ai_api_key"] = key
 	}
 	_ = s.saveSettings(pairs)
 	http.Redirect(w, r, "/settings?saved=1#ai", http.StatusSeeOther)
+}
+
+func (s *Server) handleAPIAIStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	conn := ai.LoadConnFromDB(r.Context(), s.db)
+	if u := strings.TrimSpace(r.URL.Query().Get("url")); u != "" {
+		conn.BaseURL = u
+	}
+	if m := strings.TrimSpace(r.URL.Query().Get("model")); m != "" {
+		conn.ChatModel = m
+	}
+	if cl := strings.TrimSpace(r.URL.Query().Get("context_length")); cl != "" {
+		var n int
+		if _, err := fmt.Sscanf(cl, "%d", &n); err == nil && n >= 0 {
+			conn.ContextLength = n
+		}
+	}
+	writeJSON(w, http.StatusOK, conn.Status(r.Context()))
 }
 
 func (s *Server) handleSettingsDownloads(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +369,7 @@ type aiStructuredResponse struct {
 	Title      string            `json:"title"`
 	Answer     string            `json:"answer"`
 	References []aiStructuredRef `json:"references"`
+	MapActions []chatMapAction   `json:"map_actions"`
 }
 
 var (
@@ -462,6 +495,11 @@ func cleanQuoteSnippet(rawQuote, fallbackSnippet string) string {
 }
 
 func (s *Server) parseStructuredAIResponse(rawOutput, query string, candidates []chatCitation) (cleanAnswer, parsedTitle string, finalCites []chatCitation) {
+	ans, title, cites, _ := s.parseStructuredAIResponseFull(rawOutput, query, candidates)
+	return ans, title, cites
+}
+
+func (s *Server) parseStructuredAIResponseFull(rawOutput, query string, candidates []chatCitation) (cleanAnswer, parsedTitle string, finalCites []chatCitation, mapActions []chatMapAction) {
 	trimmed := strings.TrimSpace(rawOutput)
 	// Strip optional ```json ... ``` wrapper
 	if strings.HasPrefix(trimmed, "```") {
@@ -484,15 +522,12 @@ func (s *Server) parseStructuredAIResponse(rawOutput, query string, candidates [
 
 	if !parsedOK {
 		cleanAnswer = stripInlineLinksAndCiteBlocks(trimmed)
-		for i, c := range candidates {
-			c.Num = i + 1
-			finalCites = append(finalCites, c)
-		}
-		return cleanAnswer, "", finalCites
+		return cleanAnswer, "", nil, nil
 	}
 
 	cleanAnswer = stripInlineLinksAndCiteBlocks(parsed.Answer)
 	parsedTitle = ai.ClampTitleWords(parsed.Title, 4)
+	mapActions = validateMapActions(parsed.MapActions)
 
 	seenSource := make(map[int]bool)
 	for _, ref := range parsed.References {
@@ -512,14 +547,65 @@ func (s *Server) parseStructuredAIResponse(rawOutput, query string, candidates [
 		finalCites = append(finalCites, base)
 	}
 
-	// If the model omitted reference IDs despite retrieved context being available, attach retrieved sources
-	if len(finalCites) == 0 && len(candidates) > 0 {
-		for i, c := range candidates {
-			c.Num = i + 1
-			finalCites = append(finalCites, c)
-		}
+	return cleanAnswer, parsedTitle, finalCites, mapActions
+}
+
+var answerFieldKeyRe = regexp.MustCompile(`"answer"\s*:\s*"`)
+
+// jsonAnswerStreamer incrementally extracts unescaped text inside the JSON "answer" field during SSE streaming.
+type jsonAnswerStreamer struct {
+	buf     strings.Builder
+	started bool
+	done    bool
+	pos     int
+	escape  bool
+}
+
+func (st *jsonAnswerStreamer) feed(chunk string) string {
+	st.buf.WriteString(chunk)
+	if st.done {
+		return ""
 	}
-	return cleanAnswer, parsedTitle, finalCites
+	raw := st.buf.String()
+	if !st.started {
+		loc := answerFieldKeyRe.FindStringIndex(raw)
+		if loc == nil {
+			return ""
+		}
+		st.started = true
+		st.pos = loc[1]
+	}
+	var out strings.Builder
+	for st.pos < len(raw) {
+		b := raw[st.pos]
+		st.pos++
+		if st.escape {
+			st.escape = false
+			switch b {
+			case 'n':
+				out.WriteByte('\n')
+			case 't':
+				out.WriteByte('\t')
+			case 'r':
+			case '"', '\\', '/':
+				out.WriteByte(b)
+			default:
+				out.WriteByte('\\')
+				out.WriteByte(b)
+			}
+			continue
+		}
+		if b == '\\' {
+			st.escape = true
+			continue
+		}
+		if b == '"' {
+			st.done = true
+			break
+		}
+		out.WriteByte(b)
+	}
+	return out.String()
 }
 
 func (s *Server) buildCitationLinkWithSnippet(sourcePath, snippet string) (openURL, cleanSnippet string) {
@@ -566,7 +652,8 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var q, sessionID string
+	var q, sessionID, scope, triageType, preZIM, preArticle string
+	var sourcesOnly, protocolMode, wantStream bool
 	var attachedNames []string
 	var attachedText strings.Builder
 	var imageParts []ai.ContentPart
@@ -581,6 +668,13 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 		q = strings.TrimSpace(r.FormValue("question"))
 		sessionID = strings.TrimSpace(r.FormValue("session_id"))
+		scope = strings.ToLower(strings.TrimSpace(r.FormValue("scope")))
+		triageType = strings.ToLower(strings.TrimSpace(r.FormValue("triage_type")))
+		preZIM = strings.TrimSpace(r.FormValue("zim"))
+		preArticle = strings.TrimSpace(r.FormValue("article"))
+		sourcesOnly = r.FormValue("sources_only") == "1" || r.FormValue("sources_only") == "true"
+		protocolMode = r.FormValue("protocol_mode") == "1" || r.FormValue("protocol_mode") == "true"
+		wantStream = r.FormValue("stream") == "1" || r.FormValue("stream") == "true"
 		if r.MultipartForm != nil {
 			for _, fh := range r.MultipartForm.File["files"] {
 				attachedNames = append(attachedNames, fh.Filename)
@@ -639,12 +733,29 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var reqBody struct {
-			Question  string `json:"question"`
-			SessionID string `json:"session_id"`
+			Question     string `json:"question"`
+			SessionID    string `json:"session_id"`
+			Scope        string `json:"scope"`
+			SourcesOnly  bool   `json:"sources_only"`
+			ProtocolMode bool   `json:"protocol_mode"`
+			TriageType   string `json:"triage_type"`
+			ZIM          string `json:"zim"`
+			Article      string `json:"article"`
+			Stream       bool   `json:"stream"`
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 32*1024)).Decode(&reqBody)
 		q = strings.TrimSpace(reqBody.Question)
 		sessionID = strings.TrimSpace(reqBody.SessionID)
+		scope = strings.ToLower(strings.TrimSpace(reqBody.Scope))
+		sourcesOnly = reqBody.SourcesOnly
+		protocolMode = reqBody.ProtocolMode
+		triageType = strings.ToLower(strings.TrimSpace(reqBody.TriageType))
+		preZIM = strings.TrimSpace(reqBody.ZIM)
+		preArticle = strings.TrimSpace(reqBody.Article)
+		wantStream = reqBody.Stream
+	}
+	if scope == "" {
+		scope = "all"
 	}
 
 	if q == "" && attachedText.Len() == 0 && len(imageParts) == 0 {
@@ -688,30 +799,164 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn := ai.LoadConnFromDB(r.Context(), s.db)
+	status := conn.Status(r.Context())
+	if !status.ServerOnline || (!status.ModelLoaded && strings.TrimSpace(conn.ChatModel) == "") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "No AI model available. Check your AI server URL and selected model in Settings."})
+		return
+	}
+	if status.ModelLoaded && status.LoadedModel != "" {
+		conn.ChatModel = status.LoadedModel
+	}
+	ctxMax := status.ContextLength
+	maxChunkRunes := 1200
+	if ctxMax > 0 && ctxMax <= 4096 {
+		maxChunkRunes = 650
+		if len(historyMsgs) > 4 {
+			historyMsgs = historyMsgs[len(historyMsgs)-4:]
+		}
+	}
 	qdrant := ai.NewQdrantClient("")
-	hits, _ := ai.SearchKnowledge(r.Context(), s.db, conn, qdrant, ai.DefaultCollection, q, 3)
+	if s.db != nil && s.dataDir != "" && (scope == "all" || scope == "notes") {
+		s.syncAutoIndexedDirs(r.Context(), conn)
+	}
 
 	var ctxBuilder strings.Builder
 	var candidates []chatCitation
-	for i, h := range hits {
-		citeURL, snippet := s.buildCitationLink(h.SourcePath, h.Text, q)
-		cleanTitle := strings.TrimSpace(strings.Split(h.Title, " (")[0])
+	seenPath := make(map[string]bool)
+	addCandidate := func(title, cleanTitle, sourcePath, urlStr, text, snippet string) {
+		if len(candidates) >= 8 || strings.TrimSpace(text) == "" {
+			return
+		}
+		if sourcePath != "" && seenPath[sourcePath] {
+			return
+		}
+		if sourcePath != "" {
+			seenPath[sourcePath] = true
+		}
 		if cleanTitle == "" {
-			cleanTitle = h.Title
+			cleanTitle = title
 		}
-		chunkPreview := strings.TrimSpace(h.Text)
-		if len([]rune(chunkPreview)) > 1400 {
-			chunkPreview = string([]rune(chunkPreview)[:1400]) + "..."
+		chunkPreview := strings.TrimSpace(text)
+		if len([]rune(chunkPreview)) > maxChunkRunes {
+			chunkPreview = string([]rune(chunkPreview)[:maxChunkRunes]) + "..."
 		}
-		fmt.Fprintf(&ctxBuilder, "[%d] Title: %s\n%s\n\n", i+1, cleanTitle, chunkPreview)
+		num := len(candidates) + 1
+		fmt.Fprintf(&ctxBuilder, "[%d] Title: %s\n%s\n\n", num, cleanTitle, chunkPreview)
 		candidates = append(candidates, chatCitation{
-			Num:        i + 1,
-			Title:      h.Title,
+			Num:        num,
+			Title:      title,
 			CleanTitle: cleanTitle,
-			Path:       h.SourcePath,
-			URL:        citeURL,
+			Path:       sourcePath,
+			URL:        urlStr,
 			Snippet:    snippet,
 		})
+	}
+
+	// #5: Preloaded ZIM article opened directly from ZIM reader (?zim=...&article=...)
+	if preZIM != "" && preArticle != "" {
+		if artTitle, artTxt, artURL, ok := s.readZIMArticlePlainText(preZIM, preArticle, 3200); ok {
+			addCandidate(fmt.Sprintf("%s (%s)", artTitle, preZIM), artTitle, filepath.Join(s.dataDir, "zim", preZIM+".zim")+"#"+strings.TrimPrefix(preArticle, "C/"), artURL, artTxt, excerptForTerms(artTxt, ai.SignificantTerms(q)))
+		}
+	}
+
+	// #13: Scoped & federated retrieval (#1 ZIMs, #2 Remedy, #3 Drug Labels, #4 Indexed notes/docs)
+	if scope != "attached" {
+		if scope == "all" || scope == "notes" || scope == "zim" {
+			hits, _ := ai.SearchKnowledge(r.Context(), s.db, conn, qdrant, ai.DefaultCollection, q, 3)
+			for _, h := range hits {
+				if scope == "notes" && strings.Contains(strings.ToLower(h.SourcePath), ".zim") {
+					continue
+				}
+				if scope == "zim" && !strings.Contains(strings.ToLower(h.SourcePath), ".zim") {
+					continue
+				}
+				citeURL, snippet := s.buildCitationLink(h.SourcePath, h.Text, q)
+				cleanTitle := strings.TrimSpace(strings.Split(h.Title, " (")[0])
+				addCandidate(h.Title, cleanTitle, h.SourcePath, citeURL, h.Text, snippet)
+			}
+		}
+		if scope == "all" || scope == "zim" {
+			for _, zHit := range s.searchLiveZIMs(q, 2) {
+				addCandidate(zHit.Title, zHit.CleanTitle, zHit.SourcePath, zHit.URL, zHit.Text, zHit.Snippet)
+			}
+		}
+		if scope == "all" || scope == "remedy" || triageType == "symptom" {
+			for _, rHit := range searchRemedyGuide(q, 2) {
+				addCandidate(rHit.Title, rHit.CleanTitle, rHit.SourcePath, rHit.URL, rHit.Text, rHit.Snippet)
+			}
+		}
+		if scope == "all" || scope == "druglabels" || triageType == "pill" || triageType == "symptom" {
+			for _, dHit := range s.searchDrugLabels(r.Context(), q, 2) {
+				addCandidate(dHit.Title, dHit.CleanTitle, dHit.SourcePath, dHit.URL, dHit.Text, dHit.Snippet)
+			}
+		}
+	}
+
+	// #7: Map waypoint context & #10: Deterministic calculator
+	var extraToolCtx strings.Builder
+	lowQ := strings.ToLower(q)
+	if scope == "all" && (coordPairRe.MatchString(q) || strings.Contains(lowQ, "pin") || strings.Contains(lowQ, "waypoint") || strings.Contains(lowQ, "map") || strings.Contains(lowQ, "closest") || strings.Contains(lowQ, "nearest") || strings.Contains(lowQ, "shelter") || strings.Contains(lowQ, "water source")) {
+		if mp := s.queryMapWaypointsContext(q); mp != "" {
+			extraToolCtx.WriteString(mp)
+			extraToolCtx.WriteByte('\n')
+		}
+	}
+	if calc := evalAskMathTool(q); calc != "" {
+		extraToolCtx.WriteString(calc)
+		extraToolCtx.WriteByte('\n')
+	}
+
+	// Reuse ctxMax from status above
+	if ctxMax <= 0 {
+		ctxMax = 8192
+	}
+
+	// #8: Strict Verified Sources Only short-circuit when zero local evidence matched
+	if sourcesOnly && ctxBuilder.Len() == 0 && attachedText.Len() == 0 && extraToolCtx.Len() == 0 {
+		noSrcAns := "No verified local source found for this question in the selected scope."
+		if sessionID != "" && s.db != nil {
+			_ = ai.AppendChatMessage(r.Context(), s.db, sessionID, "user", q, strings.Join(attachedNames, ", "))
+			_ = ai.AppendChatMessage(r.Context(), s.db, sessionID, "assistant", noSrcAns, "[]")
+		}
+		used := estimatePromptTokens("", historyMsgs, q, noSrcAns)
+		if wantStream {
+			w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			flusher, _ := w.(http.Flusher)
+			tokBytes, _ := json.Marshal(map[string]any{"token": noSrcAns})
+			_, _ = fmt.Fprintf(w, "event: token\ndata: %s\n\n", tokBytes)
+			doneBytes, _ := json.Marshal(map[string]any{
+				"title":          existingTitle,
+				"answer":         noSrcAns,
+				"citations":      []chatCitation{},
+				"map_actions":    []chatMapAction{},
+				"session_id":     sessionID,
+				"session_title":  existingTitle,
+				"session_pinned": existingPinned,
+				"context_used":   used,
+				"context_max":    ctxMax,
+			})
+			_, _ = fmt.Fprintf(w, "event: done\ndata: %s\n\n", doneBytes)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"title":          existingTitle,
+			"answer":         noSrcAns,
+			"citations":      []chatCitation{},
+			"map_actions":    []chatMapAction{},
+			"session_id":     sessionID,
+			"session_title":  existingTitle,
+			"session_pinned": existingPinned,
+			"context_used":   used,
+			"context_max":    ctxMax,
+		})
+		return
 	}
 
 	systemPrompt := `You are Ark AI, a focused offline reference assistant. Stay strictly on the user's question, ignore unrelated context snippets, and give concise direct answers (2-4 short sentences or brief bullets).
@@ -721,14 +966,32 @@ Respond ONLY with a valid JSON object matching this exact schema:
   "answer": "Concise Markdown and LaTeX ($...$ inline, $$...$$ display) response. Do NOT include any links, URLs, [1] tags, or a references section inside answer.",
   "references": [
     {"id": 1, "quote": "exact phrase or line referenced from context source 1"}
+  ],
+  "map_actions": [
+    {"title": "Location name", "lat": 40.0, "lng": -74.5, "category": "waypoint", "note": "optional note"}
   ]
 }
-Only list sources in "references" that you actually used.`
+Only list sources in "references" that you actually used to answer the question. If no retrieved context source was relevant or used, return "references": [] and do not list any sources. Only include "map_actions" when discussing specific coordinates or saved waypoints.`
+	if sourcesOnly {
+		systemPrompt += "\nSTRICT MODE ENABLED: Answer ONLY from the provided Context sources, attachments, or calculated values. Do NOT use outside memory or speculate. If the context does not contain the answer, say so clearly."
+	}
+	if protocolMode {
+		systemPrompt += "\nPROTOCOL MODE ENABLED: Format \"answer\" starting with a brief **Warnings / Contraindications** line (from sources if applicable), followed by numbered Markdown task list items (`- [ ] **Step 1:** ...`)."
+	}
+	if triageType == "pill" {
+		systemPrompt += "\nTRIAGE MODE (PILL): Prioritize exact matches on pill imprint, active/generic ingredients, dosage, boxed warnings, and contraindications from Drug Labels."
+	} else if triageType == "symptom" {
+		systemPrompt += "\nTRIAGE MODE (SYMPTOM): Highlight red-flag emergency warning signs first, then summarize matching guidance from Drug Labels and Remedy."
+	}
 	if dt := system.GetDowntimeInfo(r.Context(), s.db); dt.HasPrevious && dt.Downtime >= time.Minute {
 		systemPrompt += fmt.Sprintf("\n(Current local time: %s; Ark resumed after being offline for %s.)", time.Now().Format("2006-01-02 15:04"), dt.DowntimeHuman)
 	}
 
 	var promptBuilder strings.Builder
+	if extraToolCtx.Len() > 0 {
+		promptBuilder.WriteString(extraToolCtx.String())
+		promptBuilder.WriteByte('\n')
+	}
 	if ctxBuilder.Len() > 0 {
 		fmt.Fprintf(&promptBuilder, "Context sources:\n%s\n", ctxBuilder.String())
 	}
@@ -748,23 +1011,49 @@ Only list sources in "references" that you actually used.`
 	chatMsgs = append(chatMsgs, historyMsgs...)
 	chatMsgs = append(chatMsgs, userMsg)
 
-	rawAnswer, err := conn.ChatStream(r.Context(), chatMsgs, nil)
+	var flusher http.Flusher
+	var streamer jsonAnswerStreamer
+	var tokenCB func(string)
+	if wantStream {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		flusher, _ = w.(http.Flusher)
+		tokenCB = func(tok string) {
+			if delta := streamer.feed(tok); delta != "" {
+				b, _ := json.Marshal(map[string]any{"token": delta})
+				_, _ = fmt.Fprintf(w, "event: token\ndata: %s\n\n", b)
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+		}
+	}
 
-	w.Header().Set("Content-Type", "application/json")
+	rawAnswer, err := conn.ChatStream(r.Context(), chatMsgs, tokenCB)
+
 	if err != nil {
 		errMsg := err.Error()
 		if len(imageParts) > 0 && strings.Contains(errMsg, "400") {
 			errMsg += " (Active chat model may not support vision/images; try pulling a multimodal model such as llama3.2-vision or qwen2.5vl.)"
 		}
+		if wantStream {
+			b, _ := json.Marshal(map[string]any{"error": errMsg})
+			_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", b)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": errMsg, "citations": candidates})
 		return
 	}
-	answer, parsedTitle, cites := s.parseStructuredAIResponse(rawAnswer, q, candidates)
+	answer, parsedTitle, cites, mapActions := s.parseStructuredAIResponseFull(rawAnswer, q, candidates)
 
 	if sessionID != "" && s.db != nil {
 		if isFirstTurn {
-			// Title is based strictly on the user's query (using parsedTitle or query keywords)
 			genTitle := ai.TitleFromQuery(q, 4)
 			if parsedTitle != "" && len(strings.Fields(parsedTitle)) <= 4 {
 				genTitle = parsedTitle
@@ -779,14 +1068,28 @@ Only list sources in "references" that you actually used.`
 		_ = ai.AppendChatMessage(r.Context(), s.db, sessionID, "assistant", answer, string(citesBytes))
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	ctxUsed := estimatePromptTokens(systemPrompt, historyMsgs, promptBuilder.String(), answer)
+	payload := map[string]any{
 		"title":          existingTitle,
 		"answer":         answer,
 		"citations":      cites,
+		"map_actions":    mapActions,
 		"session_id":     sessionID,
 		"session_title":  existingTitle,
 		"session_pinned": existingPinned,
-	})
+		"context_used":   ctxUsed,
+		"context_max":    ctxMax,
+	}
+	if wantStream {
+		b, _ := json.Marshal(payload)
+		_, _ = fmt.Fprintf(w, "event: done\ndata: %s\n\n", b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (s *Server) handleAPIAISessions(w http.ResponseWriter, r *http.Request) {
@@ -817,7 +1120,22 @@ func (s *Server) handleAPIAISessionGet(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "session not found"})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "session": sess, "messages": msgs})
+	used := 0
+	for _, m := range msgs {
+		used += (len(m.Content) + 19) / 4
+	}
+	conn := ai.LoadConnFromDB(r.Context(), s.db)
+	ctxMax := conn.ContextWindow(r.Context())
+	if ctxMax <= 0 {
+		ctxMax = 8192
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":           true,
+		"session":      sess,
+		"messages":     msgs,
+		"context_used": used,
+		"context_max":  ctxMax,
+	})
 }
 
 func (s *Server) handleAPIAISessionPin(w http.ResponseWriter, r *http.Request) {

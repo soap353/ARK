@@ -17,3 +17,4 @@ volumes:
   - "zim:/data/zim:ro"
 healthcheck: /
 lan: read
+memory_mb: 512

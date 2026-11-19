@@ -578,6 +578,63 @@ func (s *Server) resolveZIMArticleURL(stemHint, articleHint string) (string, boo
 	return "", false
 }
 
+// readZIMArticlePlainText reads a specific article's cleaned plain text directly from a local ZIM file.
+func (s *Server) readZIMArticlePlainText(stemHint, articleHint string, maxRunes int) (title, plain string, resolvedPath string, ok bool) {
+	if s.dataDir == "" || strings.TrimSpace(stemHint) == "" || strings.TrimSpace(articleHint) == "" {
+		return "", "", "", false
+	}
+	resolved, rok := s.resolveZIMArticleURL(stemHint, articleHint)
+	if !rok {
+		return "", "", "", false
+	}
+	// resolved has form /read/zim/<stem>/<subPath>
+	cleanPath, _, _ := strings.Cut(resolved, "?")
+	cleanPath = strings.TrimPrefix(cleanPath, "/read/zim/")
+	slash := strings.IndexByte(cleanPath, '/')
+	if slash <= 0 {
+		return "", "", "", false
+	}
+	stem := filepath.Base(cleanPath[:slash])
+	if u, err := url.PathUnescape(stem); err == nil {
+		stem = u
+	}
+	subPath := cleanPath[slash+1:]
+	if u, err := url.PathUnescape(subPath); err == nil {
+		subPath = u
+	}
+	zimPath := filepath.Join(s.dataDir, "zim", stem+".zim")
+	arc, err := getZIMArchive(zimPath, stem)
+	if err != nil {
+		return "", "", "", false
+	}
+	f, err := os.Open(arc.path)
+	if err != nil {
+		return "", "", "", false
+	}
+	defer f.Close()
+
+	arc.mu.Lock()
+	entry, found := arc.findEntryFlex(f, subPath)
+	if found && entry.mimeID == 0xffff {
+		if redir, rerr := arc.followRedirects(f, entry); rerr == nil {
+			entry = redir
+		}
+	}
+	var blob []byte
+	if found && entry.mimeID < 0xfffd {
+		blob, _ = arc.readBlob(f, entry.clusterNum, entry.blobNum)
+	}
+	arc.mu.Unlock()
+	if !found || len(blob) == 0 {
+		return "", "", "", false
+	}
+	t, txt := ai.HTMLToPlainText(string(blob), entry.title, maxRunes)
+	if t == "" {
+		t = subPath
+	}
+	return t, txt, resolved, strings.TrimSpace(txt) != ""
+}
+
 func (s *Server) listLocalZIMStems() []string {
 	if s.dataDir == "" {
 		return nil
@@ -1122,6 +1179,75 @@ func arkThemeScriptTag(initialTheme string) string {
   if (ctn && pgr && ctn !== pgr.parentElement) {
     ctn.appendChild(pgr);
   }
+  function parseZIMPath() {
+    var m = location.pathname.match(/^\/read\/zim\/([^\/]+)\/(.*)$/);
+    if (!m) return { stem: '', art: '' };
+    return { stem: decodeURIComponent(m[1] || ''), art: decodeURIComponent(m[2] || '') };
+  }
+  var askLink = document.getElementById('ark-ask-link');
+  if (askLink) {
+    var zi = parseZIMPath();
+    if (zi.stem && zi.art) {
+      askLink.href = '/ask?zim=' + encodeURIComponent(zi.stem) + '&article=' + encodeURIComponent(zi.art);
+    }
+  }
+  var pop = null;
+  function hidePop() { if (pop) pop.style.display = 'none'; }
+  function ensurePop() {
+    if (pop) return pop;
+    pop = document.createElement('div');
+    pop.id = 'ark-sel-popover';
+    pop.style.cssText = 'position:fixed;display:none;z-index:2147483647;background:#1B2E26;border:1px solid #436153;border-radius:6px;padding:4px;gap:4px;box-shadow:0 4px 12px rgba(0,0,0,0.28);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+    var mk = function(label, accent, fn) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.style.cssText = 'border:none;border-radius:4px;padding:4px 9px;font-size:12px;font-weight:600;cursor:pointer;color:#F5F2EB;background:' + (accent ? '#C25E28' : '#2A4338') + ';';
+      b.onmousedown = function(ev) { ev.preventDefault(); ev.stopPropagation(); fn(); hidePop(); };
+      return b;
+    };
+    pop.appendChild(mk('Explain', true, function() {
+      var t = (window.getSelection() || '').toString().trim().slice(0, 1200);
+      if (!t) return;
+      var zi = parseZIMPath();
+      window.open('/ask?zim=' + encodeURIComponent(zi.stem) + '&article=' + encodeURIComponent(zi.art) + '&q=' + encodeURIComponent('Explain this: ' + t), '_blank', 'noopener');
+    }));
+    pop.appendChild(mk('Summarize', false, function() {
+      var t = (window.getSelection() || '').toString().trim().slice(0, 1200);
+      if (!t) return;
+      var zi = parseZIMPath();
+      window.open('/ask?zim=' + encodeURIComponent(zi.stem) + '&article=' + encodeURIComponent(zi.art) + '&q=' + encodeURIComponent('Summarize this: ' + t), '_blank', 'noopener');
+    }));
+    pop.appendChild(mk('Translate', false, function() {
+      var t = (window.getSelection() || '').toString().trim().slice(0, 1800);
+      if (!t) return;
+      var base = location.protocol + '//' + location.hostname + ':5000/?source=auto&target=en&q=' + encodeURIComponent(t);
+      window.open(base, '_blank', 'noopener');
+    }));
+    document.body.appendChild(pop);
+    return pop;
+  }
+  document.addEventListener('mouseup', function(ev) {
+    var nav = document.getElementById('ark-proxy-nav');
+    if (nav && nav.contains(ev.target)) return;
+    if (pop && pop.contains(ev.target)) return;
+    setTimeout(function() {
+      var sel = window.getSelection ? window.getSelection() : null;
+      var txt = sel ? sel.toString().trim() : '';
+      if (txt.length < 3 || txt.length > 2500 || !sel.rangeCount) { hidePop(); return; }
+      var rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) { hidePop(); return; }
+      var el = ensurePop();
+      el.style.display = 'flex';
+      var top = Math.max(52, rect.top - 40);
+      var left = Math.min(Math.max(8, rect.left), window.innerWidth - 230);
+      el.style.top = top + 'px';
+      el.style.left = left + 'px';
+    }, 10);
+  });
+  document.addEventListener('mousedown', function(ev) {
+    if (pop && !pop.contains(ev.target)) hidePop();
+  });
 })();
 </script>`
 }
@@ -1137,7 +1263,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<span style="color:#436153;">|</span>` +
 		`<a href="/library" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Library</a>` +
 		`<a href="/read/zim/` + escStem + `/" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Main Page</a>` +
-		`<a href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
+		`<a id="ark-ask-link" href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
 		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value,true)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
 		`<form action="/read/zim/` + escStem + `/" method="GET" style="display:flex;gap:6px;margin:0;">` +
 		`<input type="search" name="q" placeholder="Search ` + html.EscapeString(stem) + `..." style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required>` +

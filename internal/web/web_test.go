@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"ark/internal/ai"
 	"ark/internal/jobs"
@@ -63,15 +65,15 @@ func TestNewServerAndRoutes(t *testing.T) {
 	}{
 		{"/healthz", http.StatusOK, `"status":"ok"`},
 		{"/", http.StatusOK, "Zero Pre-installed Apps"},
-		{"/library", http.StatusOK, "Offline Library"},
-		{"/kiwix", http.StatusOK, "Kiwix Library Catalog"},
-		{"/get-content", http.StatusOK, "Get Content"},
-		{"/field-guide", http.StatusOK, "Field Medical"},
-		{"/apps", http.StatusOK, "Modular App Catalog"},
-		{"/ask", http.StatusOK, "Ask Local AI"},
+		{"/library", http.StatusOK, "Check ZIM Updates"},
+		{"/kiwix", http.StatusOK, "Open Local ZIM Reader"},
+		{"/get-content", http.StatusOK, "Open Local ZIM Reader"},
+		{"/field-guide", http.StatusOK, "Search Remedy"},
+		{"/apps", http.StatusOK, "<th>Module</th>"},
+		{"/ask", http.StatusOK, "Knowledge Index"},
 		{"/jobs", http.StatusSeeOther, ""},
 		{"/system", http.StatusOK, "Live Host Telemetry"},
-		{"/settings", http.StatusOK, "Settings"},
+		{"/settings", http.StatusOK, "<h2>General</h2>"},
 		{"/a/kiwix/", http.StatusNotFound, "App Not Active"},
 		{"/static/ark.css", http.StatusOK, "--color-bg: #F5F2EB;"},
 		{"/static/htmx.min.js", http.StatusOK, "htmx"},
@@ -145,26 +147,39 @@ func TestAppLifecycleEndpoints(t *testing.T) {
 		t.Errorf("expected installed app status 'stopped', got %s", status)
 	}
 
-	// 2. Start cyberchef
+	// 2. Start cyberchef -> status running and persisted auto_start = 1
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/start", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	_ = db.QueryRow("SELECT status FROM app_states WHERE id = 'cyberchef'").Scan(&status)
-	if status != "running" {
-		t.Errorf("expected app status 'running', got %s", status)
+	var autoStart int
+	_ = db.QueryRow("SELECT status, COALESCE(auto_start, 0) FROM app_states WHERE id = 'cyberchef'").Scan(&status, &autoStart)
+	if status != "running" || autoStart != 1 {
+		t.Errorf("expected app status 'running' and auto_start=1, got %s, %d", status, autoStart)
+	}
+	if ids := server.appsToRestore(); len(ids) != 1 || ids[0] != "cyberchef" {
+		t.Errorf("expected appsToRestore to return [cyberchef], got %v", ids)
 	}
 
-	// 3. Stop cyberchef
+	// Simulate shutdown (runtime status becomes stopped, desired auto_start=1 remains)
+	_, _ = db.Exec(`UPDATE app_states SET status = 'stopped' WHERE status = 'running'`)
+	if ids := server.appsToRestore(); len(ids) != 1 || ids[0] != "cyberchef" {
+		t.Errorf("expected cyberchef to persist for next startup after shutdown, got %v", ids)
+	}
+
+	// 3. Stop cyberchef -> status stopped and persisted auto_start = 0 (must not start on next Ark boot)
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/stop", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	_ = db.QueryRow("SELECT status FROM app_states WHERE id = 'cyberchef'").Scan(&status)
-	if status != "stopped" {
-		t.Errorf("expected app status 'stopped', got %s", status)
+	_ = db.QueryRow("SELECT status, COALESCE(auto_start, 0) FROM app_states WHERE id = 'cyberchef'").Scan(&status, &autoStart)
+	if status != "stopped" || autoStart != 0 {
+		t.Errorf("expected app status 'stopped' and auto_start=0, got %s, %d", status, autoStart)
+	}
+	if ids := server.appsToRestore(); len(ids) != 0 {
+		t.Errorf("expected stopped app not to be restored on next startup, got %v", ids)
 	}
 
 	// 4. Uninstall cyberchef
@@ -340,7 +355,7 @@ func TestPhase2SettingsAndAIEndpoints(t *testing.T) {
 		case "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[{"id":"llama3.2:3b"}]}`))
 		case "/v1/chat/completions":
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Boil water for 1 minute [Water Guide]."}}]}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"Boil Water\",\"answer\":\"Boil water for 1 minute.\",\"references\":[{\"id\":1,\"quote\":\"rolling boil for 1 minute\"}]}"}}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -1235,6 +1250,19 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 		t.Errorf("expected 1 numbered reference with verified ZIM URL, got %+v", refs)
 	}
 
+	// When AI returns references: [], no citations should be attached even if candidates were retrieved
+	emptyRefJSON := `{"title":"General Greeting","answer":"Hello! How can I help?","references":[]}`
+	_, _, noRefs := server.parseStructuredAIResponse(emptyRefJSON, "Hello", []chatCitation{{
+		Num:        1,
+		Title:      "Albert Einstein (mini_wiki)",
+		CleanTitle: "Albert Einstein",
+		Path:       zimPath + "#Albert_Einstein",
+		URL:        "/read/zim/mini_wiki/C/Albert_Einstein",
+	}})
+	if len(noRefs) != 0 {
+		t.Errorf("expected 0 citations when AI returns empty references, got %+v", noRefs)
+	}
+
 	// 6. Home app tiles and Apps modal Open App open in new tabs (target="_blank")
 	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
 	w = httptest.NewRecorder()
@@ -1297,7 +1325,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	for _, wantName := range []string{"ConvertX", "Data Chef", "Flatnotes", "Kiwix", "Kolibri", "Ollama"} {
+	for _, wantName := range []string{"ConvertX", "Data Chef", "Flatnotes", "Kiwix", "Kolibri", "AI Assistant"} {
 		if !strings.Contains(w.Body.String(), wantName) {
 			t.Errorf("expected /apps to render literal app name %q", wantName)
 		}
@@ -1315,5 +1343,525 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if !strings.Contains(w.Body.String(), `id="home-app-menu"`) || !strings.Contains(w.Body.String(), `id="app-ctx-start"`) || !strings.Contains(w.Body.String(), `id="app-ctx-stop"`) {
 		t.Errorf("expected Home UI to include right-click start/stop app context menu")
+	}
+}
+
+func TestOfflineMapsViewerAndPMTiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	mapsDir := filepath.Join(tmpDir, "maps")
+	if err := os.MkdirAll(mapsDir, 0o755); err != nil {
+		t.Fatalf("mkdir maps: %v", err)
+	}
+
+	// Build a minimal valid PMTiles v3 file (127-byte header + raw JSON metadata)
+	metaJSON := []byte(`{"name":"Test Region","vector_layers":[{"id":"roads"}]}`)
+	buf := make([]byte, pmtilesHeaderLen+len(metaJSON)+16)
+	copy(buf[0:7], "PMTiles")
+	buf[7] = 3
+	binary.LittleEndian.PutUint64(buf[24:32], uint64(pmtilesHeaderLen))
+	binary.LittleEndian.PutUint64(buf[32:40], uint64(len(metaJSON)))
+	buf[97] = 1 // no internal compression
+	buf[99] = 1 // MVT
+	buf[100] = 0 // minzoom
+	buf[101] = 14
+	putI32 := func(off int, v int32) {
+		binary.LittleEndian.PutUint32(buf[off:off+4], uint32(v))
+	}
+	putI32(102, -755000000) // -75.5
+	putI32(106, 388000000)  // 38.8
+	putI32(110, -739000000) // -73.9
+	putI32(114, 413000000)  // 41.3
+	buf[118] = 6
+	putI32(119, -747000000)
+	putI32(123, 400500000)
+	copy(buf[pmtilesHeaderLen:], metaJSON)
+
+	pmPath := filepath.Join(mapsDir, "test_nj.pmtiles")
+	if err := os.WriteFile(pmPath, buf, 0o644); err != nil {
+		t.Fatalf("write pmtiles: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. Native header parsing
+	meta, err := ParsePMTilesMeta(pmPath)
+	if err != nil {
+		t.Fatalf("ParsePMTilesMeta: %v", err)
+	}
+	if meta.MaxZoom != 14 || meta.TileType != "mvt" || meta.Name != "Test Region" {
+		t.Errorf("unexpected parsed pmtiles meta: %+v", meta)
+	}
+
+	// 2. Range request to /maps/files/test_nj.pmtiles returns 206 Partial Content
+	req := httptest.NewRequest(http.MethodGet, "/maps/files/test_nj.pmtiles", nil)
+	req.Header.Set("Range", "bytes=0-6")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusPartialContent || w.Body.String() != "PMTiles" {
+		t.Errorf("expected 206 Partial Content 'PMTiles', got %d (%q)", w.Code, w.Body.String())
+	}
+
+	// Traversal guard
+	req = httptest.NewRequest(http.MethodGet, "/maps/files/..%2Fsecret.pmtiles", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 on path traversal, got %d", w.Code)
+	}
+
+	// 3. Native TileJSON endpoint works without container
+	req = httptest.NewRequest(http.MethodGet, "/api/maps/tilejson?name=test_nj", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"maxzoom":14`) || !strings.Contains(w.Body.String(), `/maps/files/test_nj.pmtiles`) {
+		t.Errorf("expected valid TileJSON from /api/maps/tilejson, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 4. Interactive /maps page includes unified MapLibre + /maps/tiles/ source without redundant page header
+	req = httptest.NewRequest(http.MethodGet, "/maps?place=test_nj", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	body := w.Body.String()
+	for _, want := range []string{"maplibre-gl.js", "basemaps.js", "/maps/tiles/{z}/{x}/{y}.mvt", "test_nj.pmtiles", "Go Here"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected /maps HTML to contain %q", want)
+		}
+	}
+
+	// 4b. Verify Hilbert zxyToTileID and unified tile endpoint handle missing tiles cleanly with 204
+	if zxyToTileID(0, 0, 0) != 0 || zxyToTileID(1, 0, 0) != 1 || zxyToTileID(1, 1, 0) != 4 {
+		t.Errorf("unexpected zxyToTileID Hilbert values")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/maps/tiles/0/0/0.mvt", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204 No Content when synthetic archive has empty root dir, got %d", w.Code)
+	}
+
+	// 5. Missing font PBF fallback returns 200 empty protobuf instead of 404
+	req = httptest.NewRequest(http.MethodGet, "/static/vendor/maps/fonts/Noto%20Sans%20Regular/12800-13055.pbf", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-protobuf" {
+		t.Errorf("expected 200 application/x-protobuf for missing font range, got %d (%q)", w.Code, w.Header().Get("Content-Type"))
+	}
+
+	// 6. Library does NOT include .pmtiles map files in the library items grid
+	req = httptest.NewRequest(http.MethodGet, "/library", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "test_nj.pmtiles") || strings.Contains(w.Body.String(), "/maps?place=test_nj") {
+		t.Errorf("expected /library not to include .pmtiles map files, got %d", w.Code)
+	}
+
+	// 7. Pins API supports JSON mode without HTML redirect
+	pinForm := url.Values{"title": {"Trailhead"}, "lat": {"40.1"}, "lng": {"-74.5"}, "category": {"waypoint"}, "format": {"json"}}
+	req = httptest.NewRequest(http.MethodPost, "/api/maps/pins", strings.NewReader(pinForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"Trailhead"`) {
+		t.Errorf("expected 200 JSON pin response, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAskAIFederatedFeaturesAndStreaming(t *testing.T) {
+	// Reset auto-index cooldown so this test runs syncAutoIndexedDirs deterministically
+	autoIdxMu.Lock()
+	autoIdxLast = time.Time{}
+	autoIdxMu.Unlock()
+
+	// Mock Ollama + OpenAI server reporting /api/ps context_length=16384 and streaming JSON answer
+	aiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/ps":
+			_, _ = w.Write([]byte(`{"models":[{"name":"test-llm","model":"test-llm","context_length":16384}]}`))
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			b1, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": `{"title":"Burn First Aid","answer":"Cool burn gently`}}}})
+			b2, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": ` and cover.","references":[{"id":1,"quote":"Aloe"}],"map_actions":[{"title":"Clinic","lat":40.1,"lng":-74.5}]}`}}}})
+			_, _ = w.Write([]byte("data: " + string(b1) + "\n\ndata: " + string(b2) + "\n\ndata: [DONE]\n\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer aiSrv.Close()
+
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`INSERT INTO settings (key, value) VALUES ('ai_server_url', ?), ('ai_chat_model', 'test-llm')`, aiSrv.URL)
+
+	// Create sample note (#4), sample ZIM (#1, #5, #6), and sample druglabels.db (#3)
+	notesDir := filepath.Join(tmpDir, "notes")
+	_ = os.MkdirAll(notesDir, 0o755)
+	_ = os.WriteFile(filepath.Join(notesDir, "camp_checklist.md"), []byte("# Camp Water\nCarry two Sawyer squeeze filters and backup Aquamira drops."), 0o644)
+
+	dlDir := filepath.Join(tmpDir, "druglabels")
+	_ = os.MkdirAll(dlDir, 0o755)
+	dlDB, err := sql.Open("sqlite", filepath.Join(dlDir, "druglabels.db"))
+	if err != nil {
+		t.Fatalf("open druglabels: %v", err)
+	}
+	_, _ = dlDB.Exec(`
+		CREATE TABLE labels (set_id TEXT PRIMARY KEY, brand_name TEXT, generic_name TEXT, manufacturer TEXT, ndc TEXT, imprint TEXT, boxed_warning TEXT, indications TEXT, dosage TEXT, warnings TEXT);
+		CREATE VIRTUAL TABLE labels_fts USING fts5(set_id UNINDEXED, brand_name, generic_name, ndc, imprint, indications, warnings, content='labels', content_rowid='rowid');
+		INSERT INTO labels (set_id, brand_name, generic_name, manufacturer, ndc, imprint, boxed_warning, indications, dosage, warnings)
+		VALUES ('set-1', 'Advil', 'Ibuprofen', 'Haleon', '0573-0164', 'I-2', '', 'Pain reliever and fever reducer.', '200 mg every 4 to 6 hours', 'Stomach bleeding warning.');
+		INSERT INTO labels_fts(labels_fts) VALUES('rebuild');
+	`)
+	_ = dlDB.Close()
+
+	zimDir := filepath.Join(tmpDir, "zim")
+	_ = os.MkdirAll(zimDir, 0o755)
+	zimPath := filepath.Join(zimDir, "mini_wiki.zim")
+	{
+		art := []byte("<html><head><title>Einstein</title></head><body><h1>Einstein</h1><p>Speed of light in vacuum is 299792458 m/s.</p></body></html>")
+		var unc bytes.Buffer
+		_ = binary.Write(&unc, binary.LittleEndian, uint32(8))
+		_ = binary.Write(&unc, binary.LittleEndian, uint32(8+len(art)))
+		unc.Write(art)
+		enc, _ := zstd.NewWriter(nil)
+		var cb bytes.Buffer
+		cb.WriteByte(5)
+		cb.Write(enc.EncodeAll(unc.Bytes(), nil))
+		_ = enc.Close()
+
+		mimeList := []byte("text/html;raw=true\x00\x00")
+		mimePos := uint64(80)
+		dirStart := mimePos + uint64(len(mimeList))
+		var dir bytes.Buffer
+		_ = binary.Write(&dir, binary.LittleEndian, uint16(0))
+		dir.WriteByte(0)
+		dir.WriteByte('C')
+		_ = binary.Write(&dir, binary.LittleEndian, uint32(0))
+		_ = binary.Write(&dir, binary.LittleEndian, uint32(0))
+		_ = binary.Write(&dir, binary.LittleEndian, uint32(0))
+		dir.WriteString("Main_Page\x00Einstein\x00")
+		urlPtrPos := dirStart + uint64(dir.Len())
+		clusterPtrPos := urlPtrPos + 8
+		clusterDataPos := clusterPtrPos + 8
+		var zb bytes.Buffer
+		var hdr [80]byte
+		binary.LittleEndian.PutUint32(hdr[0:4], ai.ZIMMagic)
+		binary.LittleEndian.PutUint16(hdr[4:6], 6)
+		binary.LittleEndian.PutUint16(hdr[6:8], 3)
+		binary.LittleEndian.PutUint32(hdr[24:28], 1)
+		binary.LittleEndian.PutUint32(hdr[28:32], 1)
+		binary.LittleEndian.PutUint64(hdr[32:40], urlPtrPos)
+		binary.LittleEndian.PutUint64(hdr[40:48], urlPtrPos)
+		binary.LittleEndian.PutUint64(hdr[48:56], clusterPtrPos)
+		binary.LittleEndian.PutUint64(hdr[56:64], mimePos)
+		binary.LittleEndian.PutUint32(hdr[64:68], 0)
+		binary.LittleEndian.PutUint64(hdr[72:80], clusterDataPos+uint64(cb.Len()))
+		zb.Write(hdr[:])
+		zb.Write(mimeList)
+		zb.Write(dir.Bytes())
+		_ = binary.Write(&zb, binary.LittleEndian, dirStart)
+		_ = binary.Write(&zb, binary.LittleEndian, clusterDataPos)
+		zb.Write(cb.Bytes())
+		if err := os.WriteFile(zimPath, zb.Bytes(), 0o644); err != nil {
+			t.Fatalf("write mini zim: %v", err)
+		}
+	}
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	srv.ensureMapMarkersTable()
+	_, _ = db.Exec(`INSERT INTO map_markers (id, title, lat, lng, category, note) VALUES ('p1', 'Spring Creek', 40.10, -74.50, 'water', 'Fresh spring')`)
+
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// #1 On-the-fly ZIM lookup without prior indexing
+	zimHits := srv.searchLiveZIMs("Einstein light speed", 2)
+	if len(zimHits) == 0 || !strings.Contains(zimHits[0].URL, "/read/zim/mini_wiki/") {
+		t.Errorf("expected live ZIM hit for Einstein, got %+v", zimHits)
+	}
+
+	// #2 Remedy guide lookup
+	remHits := searchRemedyGuide("burn aloe", 2)
+	if len(remHits) == 0 || !strings.Contains(remHits[0].URL, "/field-guide?") {
+		t.Errorf("expected Remedy guide hit, got %+v", remHits)
+	}
+
+	// #3 Drug label & pill imprint lookup
+	dlHits := srv.searchDrugLabels(t.Context(), "Advil I-2", 2)
+	if len(dlHits) == 0 || !strings.Contains(dlHits[0].Text, "Ibuprofen") {
+		t.Errorf("expected DrugLabel hit for Ibuprofen, got %+v", dlHits)
+	}
+
+	// #4 Auto-indexed note synced into rag_documents on /ask load
+	req := httptest.NewRequest(http.MethodGet, "/ask?zim=mini_wiki&article=C/Main_Page", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	askHTML := w.Body.String()
+	for _, want := range []string{`id="ark-ctx-gauge"`, `id="ark-ctx-ratio"`, `0/16384`, `id="ask-sources-only"`, `id="ask-protocol-mode"`, `id="ask-triage-bar"`, `ask-scope-pill`, `camp_checklist.md`} {
+		if !strings.Contains(askHTML, want) {
+			t.Errorf("expected /ask HTML to contain %q", want)
+		}
+	}
+
+	// #5 & #6 ZIM reader includes #ark-ask-link and selection popover (Explain/Summarize/Translate -> :5000)
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/C/Main_Page", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	zimHTML := w.Body.String()
+	for _, want := range []string{`id="ark-ask-link"`, `ark-sel-popover`, `Explain`, `Summarize`, `Translate`, `:5000/?source=auto&target=en`} {
+		if !strings.Contains(zimHTML, want) {
+			t.Errorf("expected ZIM page HTML to contain %q", want)
+		}
+	}
+
+	// #7 Map Haversine context & action validation
+	mapCtx := srv.queryMapWaypointsContext("nearest water source to 40.12, -74.51")
+	if !strings.Contains(mapCtx, "Spring Creek") || !strings.Contains(mapCtx, "km") {
+		t.Errorf("expected Haversine distance in map context, got %q", mapCtx)
+	}
+	actions := validateMapActions([]chatMapAction{{Title: "Camp", Lat: 40.1, Lng: -74.5}})
+	if len(actions) != 1 || !strings.Contains(actions[0].MapURL, "/maps?lat=40.100000&lng=-74.500000") {
+		t.Errorf("unexpected validated map action: %+v", actions)
+	}
+
+	// #8 Strict Sources Only short-circuits when scope='attached' has no sources
+	strictBody := `{"question":"Unknown query","scope":"attached","sources_only":true,"stream":false}`
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(strictBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "No verified local source found") {
+		t.Errorf("expected strict sources_only short-circuit, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// #10 Deterministic offline calculator
+	calcOut := evalAskMathTool("Give 15 mg/kg for 70 kg; also check 100Ah 12V battery at 50W and 146.52 MHz")
+	if !strings.Contains(calcOut, "1050.00 mg") || !strings.Contains(calcOut, "1200.00 Wh") || !strings.Contains(calcOut, "24.00 hours") || !strings.Contains(calcOut, "MHz") {
+		t.Errorf("expected exact calculations in evalAskMathTool, got %q", calcOut)
+	}
+
+	// #12 jsonAnswerStreamer extracts unescaped answer tokens cleanly while streaming JSON
+	var st jsonAnswerStreamer
+	part1 := st.feed(`{"title":"Test","answer":"Line 1\n\"quoted`)
+	part2 := st.feed(`\" end","references":[]}`)
+	if part1+part2 != "Line 1\n\"quoted\" end" {
+		t.Errorf("unexpected streamed JSON answer decode: %q", part1+part2)
+	}
+
+	// #12 + #13 + #9 + #11 End-to-end SSE streaming chat with scope="remedy", protocol_mode, triage, and context_max=16384
+	sseReqBody := `{"question":"burn care aloe","scope":"remedy","protocol_mode":true,"triage_type":"symptom","stream":true}`
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(sseReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	sseOut := w.Body.String()
+	for _, want := range []string{"event: token", "Cool burn gently", "event: done", `"context_max":16384`, `/maps?lat=40.100000`, `/field-guide?condition=burns`} {
+		if !strings.Contains(sseOut, want) {
+			t.Errorf("expected SSE stream to contain %q, got:\n%s", want, sseOut)
+		}
+	}
+}
+
+func TestAIModelStatusAndContextSetting(t *testing.T) {
+	modelLoaded := false
+	lmMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v0/models" {
+			state := "not-loaded"
+			loadedCtx := 0
+			if modelLoaded {
+				state = "loaded"
+				loadedCtx = 32768
+			}
+			_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":"gemma-vlm","type":"vlm","arch":"gemma3","quantization":"Q4_K_M","state":%q,"max_context_length":131072,"loaded_context_length":%d,"capabilities":["tool_use"]}]}`, state, loadedCtx)
+			return
+		}
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"gemma-vlm"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer lmMock.Close()
+
+	_, _, mux, _ := func() (*Server, *sql.DB, *http.ServeMux, func()) {
+		tmpDir := t.TempDir()
+		db, err := sql.Open("sqlite", ":memory:")
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+		srv, err := NewServer(db, tmpDir)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+		m := http.NewServeMux()
+		if err := srv.RegisterRoutes(m); err != nil {
+			t.Fatalf("RegisterRoutes: %v", err)
+		}
+		return srv, db, m, func() {}
+	}()
+
+	// Save LM Studio URL + custom ai_context_length=16384 via /settings/ai
+	form := url.Values{
+		"ai_server_url":     {lmMock.URL},
+		"ai_chat_model":     {"gemma-vlm"},
+		"ai_context_length": {"16384"},
+		"ai_embed_model":    {""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/settings/ai", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect from POST /settings/ai, got %d", w.Code)
+	}
+
+	// Unloaded state: /api/ai/status reports model_loaded: false; /ask hides #ark-ctx-gauge and shows No Model Loaded
+	req = httptest.NewRequest(http.MethodGet, "/api/ai/status", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/ai/status, got %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`"server_online":true`, `"model_loaded":false`, `"context_length":16384`, `"max_context_length":131072`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unloaded status missing %s: %s", want, body)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ask", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	askUnloaded := w.Body.String()
+	if !strings.Contains(askUnloaded, `badge badge-warning`) || !strings.Contains(askUnloaded, `>gemma-vlm<`) {
+		t.Errorf("expected /ask to display yellow badge-warning with gemma-vlm when unloaded")
+	}
+	if !strings.Contains(askUnloaded, `id="ark-ctx-gauge"`) || !strings.Contains(askUnloaded, `display:none`) {
+		t.Errorf("expected #ark-ctx-gauge to be hidden (display:none) when no model is loaded")
+	}
+
+	// Loaded state: /api/ai/status reports model_loaded: true, supports_vision: true; /ask shows green badge-success & gauge
+	modelLoaded = true
+	req = httptest.NewRequest(http.MethodGet, "/api/ai/status", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	body = w.Body.String()
+	for _, want := range []string{`"model_loaded":true`, `"loaded_model":"gemma-vlm"`, `"supports_vision":true`, `"supports_tools":true`, `"context_length":16384`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("loaded status missing %s: %s", want, body)
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ask", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	askLoaded := w.Body.String()
+	if !strings.Contains(askLoaded, `badge badge-success`) || !strings.Contains(askLoaded, `>gemma-vlm<`) {
+		t.Errorf("expected /ask to display green badge-success with gemma-vlm when loaded")
+	}
+	if !strings.Contains(askLoaded, `id="ark-ctx-gauge"`) || !strings.Contains(askLoaded, `display:inline-flex`) {
+		t.Errorf("expected #ark-ctx-gauge to be visible (display:inline-flex) when model is loaded")
+	}
+
+	// Offline/unreachable server: /ask shows red badge-error "No Model Available" and hides gauge
+	lmMock.Close()
+	req = httptest.NewRequest(http.MethodGet, "/ask", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	askOffline := w.Body.String()
+	if !strings.Contains(askOffline, `badge badge-error`) || !strings.Contains(askOffline, "No Model Available") {
+		t.Errorf("expected /ask to display red badge-error No Model Available when server offline")
+	}
+}
+
+func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. /settings renders <select id="ai_chat_model" ...> dropdown
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /settings status = %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `<select id="ai_chat_model" name="ai_chat_model"`) {
+		t.Errorf("expected /settings to render #ai_chat_model as a <select> dropdown")
+	}
+
+	// 2. /system renders #system-clock
+	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /system status = %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `id="system-clock"`) {
+		t.Errorf("expected /system to render #system-clock element")
+	}
+
+	// 3. /api/system/time returns source=device when offline and source=online when probe succeeds
+	origProbe := onlineTimeProbeURL
+	defer func() { onlineTimeProbeURL = origProbe }()
+
+	onlineTimeProbeURL = ""
+	req = httptest.NewRequest(http.MethodGet, "/api/system/time", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"device"`) {
+		t.Errorf("expected offline /api/system/time source=device, got %d: %s", w.Code, w.Body.String())
+	}
+
+	timeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Date", time.Date(2026, 11, 19, 21, 55, 0, 0, time.UTC).Format(http.TimeFormat))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer timeSrv.Close()
+
+	onlineTimeProbeURL = timeSrv.URL
+	req = httptest.NewRequest(http.MethodGet, "/api/system/time", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"online"`) {
+		t.Errorf("expected online /api/system/time source=online, got %d: %s", w.Code, w.Body.String())
 	}
 }

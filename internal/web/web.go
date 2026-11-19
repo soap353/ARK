@@ -112,6 +112,13 @@ type PageData struct {
 	InstalledApps       []AppView
 	AvailableApps       []AppView
 	AIConnected         bool
+	AIStatus            ai.ModelRuntimeStatus
+	AIStatusJSON        template.JS
+	AIContextMax        int
+	AskPreloadZIM       string
+	AskPreloadArticle   string
+	AskPreloadTitle     string
+	AskPreloadQuery     string
 	HasActiveJobs       bool
 	Settings            map[string]string
 	RAGDocs             []ai.RAGDocument
@@ -127,6 +134,8 @@ type PageData struct {
 	RollbackAvailable   bool
 	RollbackNotice      string
 	MapArchives         []MapArchiveView
+	MapArchivesJSON     template.JS
+	SelectedMap         string
 	MapsRunning         bool
 	WikipediaOptions    []WikipediaOptionView
 	NomadCollections    []NomadCollectionView
@@ -134,6 +143,7 @@ type PageData struct {
 	CreatorVideoPacks   []kiwix.VideoCreatorPack
 	CountryMaps         []kiwix.CountryMapOption
 	MapPins             []MapPinView
+	MapPinsJSON         template.JS
 	CustomOPDS          string
 	InitialQuery        string
 	SelectedCategory    string
@@ -252,8 +262,20 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 		return fmt.Errorf("failed to create static sub-filesystem: %w", err)
 	}
 
-	// Static assets
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	// Static assets (with graceful empty-protobuf fallback for unbundled map font ranges offline)
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
+	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/static/vendor/maps/fonts/") && strings.HasSuffix(r.URL.Path, ".pbf") {
+			rel := strings.TrimPrefix(r.URL.Path, "/static/")
+			if _, statErr := fs.Stat(staticFS, rel); statErr != nil {
+				w.Header().Set("Content-Type", "application/x-protobuf")
+				w.Header().Set("Cache-Control", "public, max-age=86400")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		staticHandler.ServeHTTP(w, r)
+	})
 	if s.dataDir != "" {
 		mux.Handle("/media/", http.StripPrefix("/media/", http.FileServer(http.Dir(filepath.Join(s.dataDir, "media")))))
 	}
@@ -283,6 +305,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/settings/restart", s.handleSettingsRestart)
 	mux.HandleFunc("/settings/shutdown", s.handleSettingsShutdown)
 	mux.HandleFunc("/maps", s.handleMapsViewer)
+	mux.HandleFunc("/maps/files/", s.handleMapsFiles)
+	mux.HandleFunc("/maps/tiles/", s.handleUnifiedMapTiles)
 	mux.HandleFunc("/read/zim", s.handleZIMReader)
 	mux.HandleFunc("/read/zim/", s.handleZIMReader)
 
@@ -305,10 +329,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/update", s.handleAPIAppUpdateImage)
 	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
 	mux.HandleFunc("/api/system/benchmark", s.handleAPISystemBenchmark)
+	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
 	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
 	mux.HandleFunc("/api/ai/test", s.handleAPIAITest)
+	mux.HandleFunc("/api/ai/status", s.handleAPIAIStatus)
 	mux.HandleFunc("/api/ai/chat", s.handleAPIAIChat)
 	mux.HandleFunc("/api/ai/sessions", s.handleAPIAISessions)
 	mux.HandleFunc("/api/ai/sessions/get", s.handleAPIAISessionGet)
@@ -323,6 +349,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/ai/models/select", s.handleAPIAIModelSelect)
 	mux.HandleFunc("/api/maps/extract", s.handleAPIMapsExtract)
 	mux.HandleFunc("/api/maps/pins", s.handleAPIMapPins)
+	mux.HandleFunc("/api/maps/tilejson", s.handleAPIMapsTileJSON)
 	mux.HandleFunc("/api/reader/theme", s.handleAPIReaderTheme)
 
 	// App reverse proxy
@@ -496,16 +523,46 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	settingsMap := s.fetchSettings()
+	conn := ai.LoadConnFromDB(r.Context(), s.db)
+	if conn.BaseURL == "" {
+		conn.BaseURL = settingsMap["ai_server_url"]
+	}
+	if conn.ChatModel == "" {
+		conn.ChatModel = settingsMap["ai_chat_model"]
+	}
+	if s.db != nil && s.dataDir != "" {
+		s.syncAutoIndexedDirs(r.Context(), conn)
+	}
 	ragDocs, _ := ai.ListDocuments(r.Context(), s.db)
 
+	status := conn.Status(r.Context())
+	statusBytes, _ := json.Marshal(status)
+
+	preZIM := strings.TrimSpace(r.URL.Query().Get("zim"))
+	preArt := strings.TrimSpace(r.URL.Query().Get("article"))
+	preQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	var preTitle string
+	if preZIM != "" && preArt != "" {
+		if t, _, _, ok := s.readZIMArticlePlainText(preZIM, preArt, 200); ok {
+			preTitle = t
+		}
+	}
+
 	data := PageData{
-		Title:       "Ask AI",
-		ActiveNav:   "ask",
-		AIConnected: settingsMap["ai_server_url"] != "",
-		RAGDocs:     ragDocs,
-		Settings:    settingsMap,
-		FlashMsg:    strings.TrimSpace(r.URL.Query().Get("msg")),
-		FlashErr:    strings.TrimSpace(r.URL.Query().Get("err")),
+		Title:             "Ask AI",
+		ActiveNav:         "ask",
+		AIConnected:       settingsMap["ai_server_url"] != "",
+		AIStatus:          status,
+		AIStatusJSON:      template.JS(statusBytes),
+		AIContextMax:      status.ContextLength,
+		AskPreloadZIM:     preZIM,
+		AskPreloadArticle: preArt,
+		AskPreloadTitle:   preTitle,
+		AskPreloadQuery:   preQ,
+		RAGDocs:           ragDocs,
+		Settings:          settingsMap,
+		FlashMsg:          strings.TrimSpace(r.URL.Query().Get("msg")),
+		FlashErr:          strings.TrimSpace(r.URL.Query().Get("err")),
 	}
 	s.render(w, "ask.html", data)
 }
@@ -933,7 +990,7 @@ func (s *Server) startAppContainer(ctx context.Context, appID string) error {
 		}
 	}
 	if s.db != nil {
-		_, _ = s.db.Exec("UPDATE app_states SET image = ?, container_id = ?, port = ?, proxy_mode = ?, status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", m.Image, info.ID, info.HostPort, m.Proxy, appID)
+		_, _ = s.db.Exec("UPDATE app_states SET image = ?, container_id = ?, port = ?, proxy_mode = ?, status = 'running', auto_start = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", m.Image, info.ID, info.HostPort, m.Proxy, appID)
 		if appID == "ollama" && info.HostPort > 0 {
 			var curAI string
 			_ = s.db.QueryRow(`SELECT value FROM settings WHERE key = 'ai_server_url'`).Scan(&curAI)
@@ -945,24 +1002,9 @@ func (s *Server) startAppContainer(ctx context.Context, appID string) error {
 	return nil
 }
 
-// RestoreRunningApps starts all installed apps registered in SQLite and wires their proxies.
+// RestoreRunningApps starts installed apps whose persisted desired state is running (auto_start = 1) and wires their proxies.
 func (s *Server) RestoreRunningApps(ctx context.Context) {
-	if s.db == nil {
-		return
-	}
-	rows, err := s.db.Query("SELECT id FROM app_states")
-	if err != nil {
-		return
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			ids = append(ids, id)
-		}
-	}
-	rows.Close()
-
+	ids := s.appsToRestore()
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		wg.Add(1)
@@ -974,6 +1016,25 @@ func (s *Server) RestoreRunningApps(ctx context.Context) {
 		}(id)
 	}
 	wg.Wait()
+}
+
+func (s *Server) appsToRestore() []string {
+	if s.db == nil {
+		return nil
+	}
+	rows, err := s.db.Query("SELECT id FROM app_states WHERE auto_start = 1")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (s *Server) handleAPIAppStart(w http.ResponseWriter, r *http.Request) {
@@ -1004,7 +1065,7 @@ func (s *Server) handleAPIAppStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if s.docker == nil && s.db != nil {
-			_, _ = s.db.Exec("UPDATE app_states SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+			_, _ = s.db.Exec("UPDATE app_states SET status = 'running', auto_start = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
 		}
 	}
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
@@ -1026,7 +1087,7 @@ func (s *Server) handleAPIAppStop(w http.ResponseWriter, r *http.Request) {
 			s.proxy.Unregister(appID)
 		}
 		if s.db != nil {
-			_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
+			_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', auto_start = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)
 		}
 	}
 	redirect := r.FormValue("redirect")

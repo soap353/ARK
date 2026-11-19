@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -139,6 +140,7 @@ PRAGMA user_version = 1;
 `
 
 func main() {
+	tuneRuntimeMemory()
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "update":
@@ -868,5 +870,16 @@ func handleUninstall(args []string) {
 		fmt.Printf("[Ark] Removed ArkData directory: %s\n", dataDir)
 	} else {
 		fmt.Println("[Ark] Kept ArkData content directory (--keep-data).")
+	}
+}
+
+// tuneRuntimeMemory keeps the Go heap small: collect earlier and soft-cap at 256 MiB
+// unless the operator already set GOGC/GOMEMLIMIT.
+func tuneRuntimeMemory() {
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(256 << 20)
 	}
 }

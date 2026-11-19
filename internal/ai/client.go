@@ -19,11 +19,41 @@ import (
 // Conn holds connection settings for any OpenAI-compatible AI server
 // (Ollama, LM Studio, vLLM, llama.cpp).
 type Conn struct {
-	BaseURL    string
-	APIKey     string
-	ChatModel  string
-	EmbedModel string
-	HTTPClient *http.Client
+	BaseURL       string
+	APIKey        string
+	ChatModel     string
+	EmbedModel    string
+	ContextLength int
+	HTTPClient    *http.Client
+}
+
+// ModelInfo describes a model installed on the local AI server and its properties.
+type ModelInfo struct {
+	ID                  string   `json:"id"`
+	Type                string   `json:"type,omitempty"`
+	Arch                string   `json:"arch,omitempty"`
+	Quantization        string   `json:"quantization,omitempty"`
+	State               string   `json:"state,omitempty"`
+	MaxContextLength    int      `json:"max_context_length,omitempty"`
+	LoadedContextLength int      `json:"loaded_context_length,omitempty"`
+	Capabilities        []string `json:"capabilities,omitempty"`
+	SupportsVision      bool     `json:"supports_vision,omitempty"`
+	SupportsTools       bool     `json:"supports_tools,omitempty"`
+}
+
+// ModelRuntimeStatus reports live reachability, load state, and capabilities of the AI server.
+type ModelRuntimeStatus struct {
+	ServerOnline     bool        `json:"server_online"`
+	ModelLoaded      bool        `json:"model_loaded"`
+	LoadedModel      string      `json:"loaded_model,omitempty"`
+	ConfiguredModel  string      `json:"configured_model,omitempty"`
+	ContextLength    int         `json:"context_length"`
+	MaxContextLength int         `json:"max_context_length,omitempty"`
+	SupportsVision   bool        `json:"supports_vision"`
+	SupportsTools    bool        `json:"supports_tools"`
+	Quantization     string      `json:"quantization,omitempty"`
+	Arch             string      `json:"arch,omitempty"`
+	Models           []ModelInfo `json:"models,omitempty"`
 }
 
 // ImageURL carries a base64 data URI or URL for vision-capable chat models.
@@ -136,7 +166,11 @@ func (c Conn) Models(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client().Do(req)
+	hc := c.HTTPClient
+	if hc == nil {
+		hc = &http.Client{Timeout: 180 * time.Second}
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +199,251 @@ func (c Conn) Models(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
+// ContextWindow returns the effective context length in tokens for the active model.
+func (c Conn) ContextWindow(ctx context.Context) int {
+	st := c.Status(ctx)
+	if st.ContextLength > 0 {
+		return st.ContextLength
+	}
+	return 8192
+}
+
+func resolveEffectiveCtx(configured, loaded, maxCtx int) int {
+	base := loaded
+	if base <= 0 {
+		base = maxCtx
+	}
+	if base <= 0 {
+		base = 8192
+	}
+	if configured > 0 {
+		if maxCtx > 0 && configured > maxCtx {
+			return maxCtx
+		}
+		if loaded > 0 && configured > loaded {
+			return loaded
+		}
+		return configured
+	}
+	return base
+}
+
+func hasCapability(caps []string, target string) bool {
+	for _, capStr := range caps {
+		if strings.EqualFold(strings.TrimSpace(capStr), target) {
+			return true
+		}
+	}
+	return false
+}
+
+// Status probes the AI server (LM Studio /api/v0/models, Ollama /api/ps + /api/show,
+// or generic OpenAI /v1/models) to determine true server reachability, whether a chat
+// model is actually loaded in memory, its active context length, and vision/tool support.
+// shortcut: falls back to 8192 tokens on generic servers that omit context metadata.
+func (c Conn) Status(ctx context.Context) ModelRuntimeStatus {
+	out := ModelRuntimeStatus{
+		ConfiguredModel: strings.TrimSpace(c.ChatModel),
+		ContextLength:   8192,
+	}
+	base := NormalizeBaseURL(c.BaseURL)
+	if base == "" {
+		return out
+	}
+	root := strings.TrimSuffix(base, "/v1")
+	hc := &http.Client{Timeout: 1500 * time.Millisecond}
+	if c.HTTPClient != nil {
+		hc = c.HTTPClient
+	}
+
+	// 1. Probe LM Studio native /api/v0/models (explicit state: loaded|not-loaded, type, max_context_length, loaded_context_length)
+	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/v0/models", nil); err == nil {
+		if resp, err := hc.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var lms struct {
+					Data []ModelInfo `json:"data"`
+				}
+				if json.NewDecoder(io.LimitReader(resp.Body, 512*1024)).Decode(&lms) == nil {
+					out.ServerOnline = true
+					var cfgMatch, loadedMatch *ModelInfo
+					for i := range lms.Data {
+						m := &lms.Data[i]
+						m.SupportsVision = strings.EqualFold(m.Type, "vlm") || hasCapability(m.Capabilities, "vision")
+						m.SupportsTools = hasCapability(m.Capabilities, "tool_use")
+						if m.ID == out.ConfiguredModel {
+							cfgMatch = m
+						}
+						if strings.EqualFold(m.State, "loaded") && !strings.EqualFold(m.Type, "embeddings") {
+							if m.ID == out.ConfiguredModel || loadedMatch == nil {
+								loadedMatch = m
+							}
+						}
+					}
+					out.Models = lms.Data
+					active := loadedMatch
+					if loadedMatch != nil {
+						out.ModelLoaded = true
+						out.LoadedModel = loadedMatch.ID
+					} else if cfgMatch != nil {
+						active = cfgMatch
+					}
+					if active != nil {
+						out.MaxContextLength = active.MaxContextLength
+						out.SupportsVision = active.SupportsVision
+						out.SupportsTools = active.SupportsTools
+						out.Quantization = active.Quantization
+						out.Arch = active.Arch
+						out.ContextLength = resolveEffectiveCtx(c.ContextLength, active.LoadedContextLength, active.MaxContextLength)
+					} else {
+						out.ContextLength = resolveEffectiveCtx(c.ContextLength, 0, 0)
+					}
+					return out
+				}
+			}
+		}
+	}
+
+	// 2. Probe Ollama /api/ps (currently loaded in RAM/VRAM) + /api/tags & /api/show
+	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/ps", nil); err == nil {
+		if resp, err := hc.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var ps struct {
+					Models []struct {
+						Name          string `json:"name"`
+						Model         string `json:"model"`
+						ContextLength int    `json:"context_length"`
+					} `json:"models"`
+				}
+				if json.NewDecoder(io.LimitReader(resp.Body, 256*1024)).Decode(&ps) == nil {
+					out.ServerOnline = true
+					var loadedCtx int
+					for _, m := range ps.Models {
+						name := m.Name
+						if name == "" {
+							name = m.Model
+						}
+						if name == "" {
+							continue
+						}
+						if !out.ModelLoaded || (out.ConfiguredModel != "" && (name == out.ConfiguredModel || m.Model == out.ConfiguredModel)) {
+							out.ModelLoaded = true
+							out.LoadedModel = name
+							if m.ContextLength > 0 {
+								loadedCtx = m.ContextLength
+							}
+						}
+					}
+					queryModel := out.LoadedModel
+					if queryModel == "" {
+						queryModel = out.ConfiguredModel
+					}
+					var maxCtx int
+					if queryModel != "" {
+						maxCtx, out.SupportsVision = probeOllamaShow(ctx, hc, root, queryModel)
+					}
+					if installed, err := c.Models(ctx); err == nil {
+						for _, id := range installed {
+							out.Models = append(out.Models, ModelInfo{ID: id})
+						}
+					}
+					out.MaxContextLength = maxCtx
+					out.ContextLength = resolveEffectiveCtx(c.ContextLength, loadedCtx, maxCtx)
+					return out
+				}
+			}
+		}
+	}
+
+	// 3. Fallback: generic OpenAI server (/v1/models)
+	if req, err := c.newRequest(ctx, http.MethodGet, "/models", nil); err == nil {
+		if resp, err := hc.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var mdl struct {
+					Data []struct {
+						ID            string `json:"id"`
+						ContextLength int    `json:"context_length"`
+						MaxModelLen   int    `json:"max_model_len"`
+					} `json:"data"`
+				}
+				if json.NewDecoder(io.LimitReader(resp.Body, 256*1024)).Decode(&mdl) == nil {
+					out.ServerOnline = true
+					var maxCtx int
+					for _, m := range mdl.Data {
+						if m.ID == "" {
+							continue
+						}
+						mc := m.ContextLength
+						if mc <= 0 {
+							mc = m.MaxModelLen
+						}
+						out.Models = append(out.Models, ModelInfo{ID: m.ID, MaxContextLength: mc, State: "loaded"})
+						if m.ID == out.ConfiguredModel || (!out.ModelLoaded && m.ID != "") {
+							out.ModelLoaded = true
+							out.LoadedModel = m.ID
+							maxCtx = mc
+						}
+					}
+					out.MaxContextLength = maxCtx
+					out.ContextLength = resolveEffectiveCtx(c.ContextLength, 0, maxCtx)
+					return out
+				}
+			}
+		}
+	}
+
+	return out
+}
+
+func probeOllamaShow(ctx context.Context, hc *http.Client, root, model string) (maxCtx int, vision bool) {
+	bodyBytes, err := json.Marshal(map[string]string{"name": model})
+	if err != nil {
+		return 0, false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/api/show", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return 0, false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := hc.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return 0, false
+	}
+	defer resp.Body.Close()
+	var show struct {
+		Capabilities []string       `json:"capabilities"`
+		Parameters   string         `json:"parameters"`
+		ModelInfo    map[string]any `json:"model_info"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 512*1024)).Decode(&show)
+	vision = hasCapability(show.Capabilities, "vision")
+	for _, line := range strings.Split(show.Parameters, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "num_ctx" {
+			var n int
+			if _, _ = fmt.Sscanf(fields[1], "%d", &n); n > 0 {
+				maxCtx = n
+			}
+		}
+	}
+	for k, v := range show.ModelInfo {
+		if strings.Contains(strings.ToLower(k), "vision") {
+			vision = true
+		}
+		if strings.HasSuffix(k, ".context_length") {
+			if f, ok := v.(float64); ok && int(f) > 0 && maxCtx == 0 {
+				maxCtx = int(f)
+			}
+		}
+	}
+	return maxCtx, vision
+}
+
 // Embed computes vector embeddings for texts via POST /v1/embeddings.
 func (c Conn) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
@@ -183,7 +462,11 @@ func (c Conn) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client().Do(req)
+	hc := c.HTTPClient
+	if hc == nil {
+		hc = &http.Client{Timeout: 180 * time.Second}
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +518,11 @@ func (c Conn) ChatStream(ctx context.Context, msgs []Msg, onToken func(string)) 
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.client().Do(req)
+	hc := c.HTTPClient
+	if hc == nil {
+		hc = &http.Client{Timeout: 180 * time.Second}
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return "", err
 	}

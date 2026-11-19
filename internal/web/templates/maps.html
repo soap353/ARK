@@ -1,13 +1,189 @@
 {{ define "content" }}
-<div class="card-header" style="margin-bottom: 1.25rem;">
-  <div>
-    <h1 class="page-title">Offline Maps &amp; Waypoints</h1>
-    <p class="secondary-text" style="margin: 0;">Protomaps (<code>.pmtiles</code>) server powered by <code>go-pmtiles</code>, country/world extractor, and offline pin manager.</p>
-  </div>
-  <span class="badge {{ if .MapsRunning }}badge-success{{ else }}badge-accent{{ end }}">
-    {{ if .MapsRunning }}Maps Tile Server Running{{ else }}Start Maps in Apps to serve tiles{{ end }}
-  </span>
-</div>
+<link rel="stylesheet" href="/static/vendor/maps/maplibre-gl.css">
+<style>
+  .maps-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 1.15rem;
+    align-items: start;
+    margin-bottom: 1.25rem;
+  }
+  @media (max-width: 1120px) {
+    .maps-workspace {
+      grid-template-columns: 1fr;
+    }
+  }
+  .map-viewport-card {
+    padding: 0;
+    overflow: hidden;
+  }
+  .map-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .map-places-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg);
+  }
+  .place-pill {
+    min-height: 30px;
+    padding: 0.2rem 0.75rem;
+    font-size: 13px;
+    border-radius: 999px;
+  }
+  .map-toolbar-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+  }
+  .map-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 68vh;
+    min-height: 460px;
+    background: #EAE5D9;
+  }
+  #ark-map {
+    width: 100%;
+    height: 100%;
+  }
+  .map-canvas-wrap.drop-pin-active #ark-map,
+  .map-canvas-wrap.drop-pin-active .maplibregl-canvas {
+    cursor: crosshair !important;
+  }
+  .map-drop-banner {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(27, 46, 38, 0.94);
+    color: #F5F2EB;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+    display: none;
+    align-items: center;
+    gap: 0.6rem;
+    white-space: nowrap;
+  }
+  .map-drop-banner.visible {
+    display: inline-flex;
+  }
+  .map-coords-pill {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 8;
+    background: rgba(253, 251, 247, 0.92);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 0.28rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+  .map-empty-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    background: rgba(245, 242, 235, 0.95);
+  }
+  .pins-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  .pin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    max-height: 330px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+  .pin-card {
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 0.65rem 0.75rem;
+    background: var(--color-bg);
+    transition: border-color 0.14s ease, background-color 0.14s ease;
+  }
+  .pin-card:hover {
+    border-color: var(--color-accent);
+    background: var(--color-surface);
+  }
+  .pin-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .archive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0.85rem;
+  }
+  .archive-card {
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 0.9rem;
+    background: var(--color-bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 0.65rem;
+  }
+  .archive-card.active-archive {
+    border-color: var(--color-accent);
+    background: var(--color-surface);
+    box-shadow: 0 0 0 1px var(--color-accent);
+  }
+  .extract-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 0.75rem;
+  }
+  .ark-map-marker {
+    width: 18px;
+    height: 18px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    border: 2px solid #FDFBF7;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+  }
+  .maplibregl-popup-content {
+    font-family: var(--font-base);
+    color: var(--color-text-primary);
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    min-width: 195px;
+  }
+</style>
 
 {{ if .FlashErr }}
 <div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
@@ -20,45 +196,185 @@
 </div>
 {{ end }}
 
-<div class="card">
-  <div class="card-header">
-    <h2 style="margin: 0;">Installed Map Archives</h2>
+<div id="maps-toast" class="card" style="display: none; border-color: var(--color-accent); padding: 0.75rem 1.1rem; margin-bottom: 1rem;"></div>
+
+<div class="maps-workspace">
+  <!-- Unified Interactive Map Viewport (All installed .pmtiles active simultaneously) -->
+  <div class="card map-viewport-card">
+    <div class="map-toolbar">
+      <div class="map-toolbar-group" style="flex: 1; min-width: 220px;">
+        <label for="map-place-select" style="font-size: 13px; font-weight: 600; color: var(--color-text-secondary); white-space: nowrap;">Go to:</label>
+        <select id="map-place-select" class="form-control" style="max-width: 250px; min-height: 36px; padding: 0.3rem 0.65rem; font-size: 14px;" {{ if not .MapArchives }}disabled{{ end }}>
+          {{ if .MapArchives }}
+            {{ range .MapArchives }}
+            <option value="{{ .Name }}" {{ if eq $.SelectedMap .Name }}selected{{ end }}>{{ .Title }}</option>
+            {{ end }}
+          {{ else }}
+            <option value="">No map places installed</option>
+          {{ end }}
+        </select>
+
+        <label for="map-theme-select" style="font-size: 13px; font-weight: 600; color: var(--color-text-secondary); margin-left: 0.25rem;">Style:</label>
+        <select id="map-theme-select" class="form-control" style="width: auto; min-height: 36px; padding: 0.3rem 0.65rem; font-size: 14px;">
+          <option value="contrast" selected>Standard Color</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="grayscale">Grayscale</option>
+        </select>
+      </div>
+
+      <div class="map-toolbar-group">
+        <button type="button" id="btn-fit-all" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 13px;" title="Zoom out to show all installed regions" {{ if not .MapArchives }}disabled{{ end }}>All Regions</button>
+        <button type="button" id="btn-drop-pin" class="btn btn-primary" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 13px;" title="Click anywhere on the map to place a waypoint">+ Drop Pin</button>
+        <a href="/get-content" class="btn" style="min-height: 36px; padding: 0.25rem 0.75rem; font-size: 13px;">+ Get Maps</a>
+      </div>
+    </div>
+
+    {{ if .MapArchives }}
+    <div class="map-places-bar" id="map-places-bar">
+      <span class="secondary-text" style="font-size: 12px; font-weight: 600; margin-right: 0.25rem;">Installed Places ({{ len .MapArchives }} loaded):</span>
+      {{ range .MapArchives }}
+      <button type="button" class="btn place-pill {{ if eq $.SelectedMap .Name }}btn-primary{{ end }}" data-place-pill="{{ .Name }}" onclick="flyToPlace('{{ .Name }}')">{{ .Title }}</button>
+      {{ end }}
+    </div>
+    {{ end }}
+
+    <div id="map-canvas-wrap" class="map-canvas-wrap">
+      <div id="ark-map"></div>
+      <div id="map-drop-banner" class="map-drop-banner">
+        <span>Click anywhere on the map to set pin coordinates</span>
+        <button type="button" onclick="toggleDropPinMode(false)" style="background:rgba(255,255,255,0.18);color:#F5F2EB;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">Cancel</button>
+      </div>
+      <div id="map-coords-pill" class="map-coords-pill">Move cursor or pan map &bull; Zoom 0.0</div>
+
+      {{ if not .MapArchives }}
+      <div class="map-empty-overlay">
+        <h2 style="margin-bottom: 0.5rem;">No Offline Map Files Found</h2>
+        <p class="secondary-text" style="max-width: 460px; margin-bottom: 1rem;">
+          Download a country or US state <code>.pmtiles</code> map file below (or from Get Content) to explore all your maps seamlessly offline.
+        </p>
+        <div style="display: flex; gap: 0.65rem; flex-wrap: wrap; justify-content: center;">
+          <a href="#extract-maps" class="btn btn-primary">Download Country Map</a>
+          <a href="/get-content" class="btn">Browse US State Packs</a>
+        </div>
+      </div>
+      {{ end }}
+    </div>
+
+    <div id="tilejson-panel" style="display:none; padding: 1rem; border-top: 1px solid var(--color-border); background: var(--color-surface);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+        <h3 style="margin:0; font-size: 15px;">Archive Metadata / TileJSON</h3>
+        <button type="button" class="btn" style="min-height:30px; padding:0.15rem 0.65rem; font-size:12px;" onclick="document.getElementById('tilejson-panel').style.display='none'">Close</button>
+      </div>
+      <pre id="tilejson-output" style="background:var(--color-bg); padding:0.85rem; border-radius:6px; border:1px solid var(--color-border); overflow-x:auto; max-height:240px; font-size:12px; margin:0;"></pre>
+    </div>
+  </div>
+
+  <!-- Waypoints & Pins Sidebar -->
+  <aside class="pins-sidebar">
+    <section class="card" style="margin-bottom: 0;" aria-label="Add Offline Waypoint">
+      <div class="card-header" style="margin-bottom: 0.65rem;">
+        <h2 style="margin: 0; font-size: 17px;">Save Waypoint</h2>
+        <button type="button" onclick="toggleDropPinMode()" class="btn" style="min-height: 30px; padding: 0.15rem 0.6rem; font-size: 12px;">Pick on Map</button>
+      </div>
+      <form id="pin-save-form" action="/api/maps/pins" method="POST" style="display: flex; flex-direction: column; gap: 0.6rem;">
+        <div>
+          <label for="pin_title" class="form-label" style="font-size: 13px;">Location Name</label>
+          <input type="text" id="pin_title" name="title" class="form-control" style="min-height: 36px; padding: 0.35rem 0.65rem;" placeholder="e.g. Base Camp / Spring" required>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+          <div>
+            <label for="pin_lat" class="form-label" style="font-size: 13px;">Latitude</label>
+            <input type="number" step="any" id="pin_lat" name="lat" class="form-control tabular" style="min-height: 36px; padding: 0.35rem 0.65rem;" placeholder="40.0731" required>
+          </div>
+          <div>
+            <label for="pin_lng" class="form-label" style="font-size: 13px;">Longitude</label>
+            <input type="number" step="any" id="pin_lng" name="lng" class="form-control tabular" style="min-height: 36px; padding: 0.35rem 0.65rem;" placeholder="-74.7243" required>
+          </div>
+        </div>
+        <div>
+          <label for="pin_cat" class="form-label" style="font-size: 13px;">Category</label>
+          <select id="pin_cat" name="category" class="form-control" style="min-height: 36px; padding: 0.35rem 0.65rem;">
+            <option value="waypoint">Waypoint</option>
+            <option value="water">Water Source</option>
+            <option value="shelter">Shelter</option>
+            <option value="medical">Medical</option>
+            <option value="supply">Supply Cache</option>
+          </select>
+        </div>
+        <div>
+          <label for="pin_note" class="form-label" style="font-size: 13px;">Notes</label>
+          <input type="text" id="pin_note" name="note" class="form-control" style="min-height: 36px; padding: 0.35rem 0.65rem;" placeholder="Access notes, elevation, etc.">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 38px;">Save Pin</button>
+      </form>
+    </section>
+
+    <section class="card" style="margin-bottom: 0;" aria-label="Saved Offline Map Pins">
+      <div class="card-header" style="margin-bottom: 0.65rem;">
+        <h2 style="margin: 0; font-size: 17px;">Saved Pins (<span id="pins-count">{{ len .MapPins }}</span>)</h2>
+      </div>
+      <input type="search" id="pin-filter-input" class="form-control" style="min-height: 34px; padding: 0.3rem 0.65rem; font-size: 13px; margin-bottom: 0.65rem;" placeholder="Filter pins...">
+      <div id="pins-list-container" class="pin-list"></div>
+    </section>
+  </aside>
+</div>
+
+<!-- Installed Map Regions -->
+<section class="card" aria-label="Installed Map Files">
+  <div class="card-header" style="margin-bottom: 0.85rem;">
+    <div>
+      <h2 style="margin: 0;">Installed Map Regions (All Active on Map)</h2>
+      <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 14px;">Every <code>.pmtiles</code> region below is loaded together seamlessly &mdash; click <strong>Go Here</strong> to jump right to a place.</p>
+    </div>
     <a href="/get-content" class="btn">US Regional Packs &rarr;</a>
   </div>
 
   {{ if .MapArchives }}
-  <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+  <div class="archive-grid" id="archive-cards-grid">
     {{ range .MapArchives }}
-    <div style="border:1px solid var(--color-border); border-radius:6px; padding:1rem; background: var(--color-bg);">
-      <div style="font-weight:600; margin-bottom:0.25rem;">{{ .FileName }}</div>
-      <div class="secondary-text tabular" style="font-size:14px; margin-bottom:0.75rem;">{{ .SizeText }}</div>
-      <button type="button" class="btn btn-primary" style="min-height: 36px; padding: 0.2rem 0.85rem;" onclick="inspectTileJSON('{{ .Name }}')">Inspect TileJSON</button>
+    <div class="archive-card {{ if eq $.SelectedMap .Name }}active-archive{{ end }}" data-archive-card="{{ .Name }}">
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem;">
+          <strong style="font-size: 15px;">{{ .Title }}</strong>
+          <span class="badge tabular" style="font-size: 11px;">z{{ .MinZoom }}&ndash;{{ .MaxZoom }}</span>
+        </div>
+        <div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.25rem; word-break: break-all;">{{ .FileName }} &bull; {{ .SizeText }}</div>
+      </div>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" style="flex:1; min-height: 36px; padding: 0.2rem 0.75rem; font-size: 13px;" onclick="flyToPlace('{{ .Name }}', true)">Go Here</button>
+        <button type="button" class="btn" style="min-height: 36px; padding: 0.2rem 0.7rem; font-size: 13px;" onclick="inspectTileJSON('{{ .Name }}')">Details</button>
+      </div>
     </div>
     {{ end }}
   </div>
   {{ else }}
-  <div style="padding:1rem; border:1px dashed var(--color-border); border-radius:6px; margin-bottom:1rem;">
-    <strong>No <code>.pmtiles</code> map files found yet.</strong>
-    <p class="secondary-text" style="margin:0.5rem 0 0;">
-      Download US regions in <a href="/get-content" style="color: var(--color-accent);">Get Content</a> or extract the World Basemap / any country below.
-    </p>
-  </div>
+  <p class="secondary-text" style="margin: 0;">No <code>.pmtiles</code> files installed yet. Download a country or world map below.</p>
   {{ end }}
+</section>
 
-  <div id="tilejson-panel" style="display:none; margin-top:1rem;">
-    <h3 style="margin-bottom:0.5rem;">TileJSON Metadata</h3>
-    <pre id="tilejson-output" style="background:var(--color-bg); padding:1rem; border-radius:6px; border:1px solid var(--color-border); overflow-x:auto; font-size:13px;"></pre>
+<!-- World & Country Map Downloader -->
+<section id="extract-maps" class="card" aria-label="Extract World or Country Map">
+  <div class="card-header" style="margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.65rem;">
+    <div>
+      <h2 style="margin: 0;">Download Country &amp; World Maps</h2>
+      <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 14px;">Extracts offline <code>.pmtiles</code> basemaps into <code>data/maps/</code> (added automatically to the live map).</p>
+    </div>
+    <input type="search" id="extract-search" class="form-control" style="max-width: 240px; min-height: 36px; padding: 0.3rem 0.7rem; font-size: 14px;" placeholder="Search countries or regions...">
   </div>
-</div>
 
-<section class="card" aria-label="Extract World or Country Map">
-  <h2>World &amp; Country Extracts (Protomaps)</h2>
-  <p class="secondary-text" style="margin-bottom: 1rem;">
-    Extracts targeted <code>.pmtiles</code> regions from the latest Protomaps build directly into <code>data/maps/</code> using <code>go-pmtiles</code>.
-  </p>
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem;">
+  <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem;" id="extract-region-filters">
+    <button type="button" class="btn btn-primary" data-region-filter="all" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">All</button>
+    <button type="button" class="btn" data-region-filter="Global" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">World</button>
+    <button type="button" class="btn" data-region-filter="North America" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">North America</button>
+    <button type="button" class="btn" data-region-filter="Europe" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Europe</button>
+    <button type="button" class="btn" data-region-filter="Asia" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Asia &amp; Pacific</button>
+    <button type="button" class="btn" data-region-filter="Other" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Other Regions</button>
+  </div>
+
+  <div class="extract-grid" id="extract-grid">
     {{ range .CountryMaps }}
-    <div style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem;">
+    <div class="extract-card" data-name="{{ .Name }}" data-region="{{ .Region }}" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
       <div>
         <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
           <strong>{{ .Name }}</strong>
@@ -68,100 +384,483 @@
       </div>
       <form action="/api/maps/extract" method="POST" style="margin: 0;">
         <input type="hidden" name="slug" value="{{ .Slug }}">
-        <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 14px;">Extract .pmtiles</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 13px;">Download .pmtiles</button>
       </form>
     </div>
     {{ end }}
   </div>
 </section>
 
-<section class="card" aria-label="Saved Offline Map Pins">
-  <h2>Saved Map Pins &amp; Waypoints</h2>
-  <form action="/api/maps/pins" method="POST" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; align-items: end; margin-bottom: 1.25rem;">
-    <div>
-      <label for="pin_title" class="form-label">Location Name</label>
-      <input type="text" id="pin_title" name="title" class="form-control" placeholder="e.g. Rally Point Alpha" required>
-    </div>
-    <div>
-      <label for="pin_lat" class="form-label">Latitude</label>
-      <input type="number" step="any" id="pin_lat" name="lat" class="form-control" placeholder="45.5231" required>
-    </div>
-    <div>
-      <label for="pin_lng" class="form-label">Longitude</label>
-      <input type="number" step="any" id="pin_lng" name="lng" class="form-control" placeholder="-122.6765" required>
-    </div>
-    <div>
-      <label for="pin_cat" class="form-label">Category</label>
-      <select id="pin_cat" name="category" class="form-control">
-        <option value="waypoint">Waypoint</option>
-        <option value="water">Water Source</option>
-        <option value="shelter">Shelter</option>
-        <option value="medical">Medical</option>
-        <option value="supply">Supply Cache</option>
-      </select>
-    </div>
-    <div>
-      <label for="pin_note" class="form-label">Notes</label>
-      <input type="text" id="pin_note" name="note" class="form-control" placeholder="Access notes...">
-    </div>
-    <div>
-      <button type="submit" class="btn btn-primary" style="width: 100%;">Save Pin</button>
-    </div>
-  </form>
-
-  {{ if .MapPins }}
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Location</th>
-          <th>Coordinates</th>
-          <th>Category</th>
-          <th>Notes</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{ range .MapPins }}
-        <tr>
-          <td><strong>{{ .Title }}</strong></td>
-          <td class="tabular"><code>{{ printf "%.4f, %.4f" .Lat .Lng }}</code></td>
-          <td><span class="badge">{{ .Category }}</span></td>
-          <td class="secondary-text">{{ .Note }}</td>
-          <td>
-            <form action="/api/maps/pins" method="POST" style="margin: 0;">
-              <input type="hidden" name="action" value="delete">
-              <input type="hidden" name="id" value="{{ .ID }}">
-              <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 13px;">Remove</button>
-            </form>
-          </td>
-        </tr>
-        {{ end }}
-      </tbody>
-    </table>
-  </div>
-  {{ else }}
-  <p class="secondary-text">No offline waypoints saved yet.</p>
-  {{ end }}
-</section>
-
+<script src="/static/vendor/maps/maplibre-gl.js"></script>
+<script src="/static/vendor/maps/basemaps.js"></script>
 <script>
-function inspectTileJSON(name) {
-  const panel = document.getElementById('tilejson-panel');
-  const out = document.getElementById('tilejson-output');
-  panel.style.display = 'block';
-  out.textContent = 'Fetching /a/maps/' + name + '.json...';
-  fetch('/a/maps/' + encodeURIComponent(name) + '.json')
-    .then(r => {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' (make sure the Maps app is Running)');
-      return r.json();
-    })
-    .then(data => {
-      out.textContent = JSON.stringify(data, null, 2);
-    })
-    .catch(err => {
-      out.textContent = 'Could not inspect archive: ' + err.message;
+(function() {
+  var ARCHIVES = {{ .MapArchivesJSON }} || [];
+  function normalizePins(list) {
+    return (list || []).map(function(p) {
+      return {
+        id: p.id || p.ID || '',
+        title: p.title || p.Title || '',
+        lat: Number(p.lat !== undefined ? p.lat : p.Lat),
+        lng: Number(p.lng !== undefined ? p.lng : p.Lng),
+        category: p.category || p.Category || 'waypoint',
+        note: p.note || p.Note || ''
+      };
     });
-}
+  }
+  var PINS = normalizePins({{ .MapPinsJSON }});
+  var SELECTED_NAME = {{ .SelectedMap }} || '';
+
+  var CATEGORY_COLORS = {
+    waypoint: '#C25E28',
+    water: '#0284C7',
+    shelter: '#2E6F40',
+    medical: '#B91C1C',
+    supply: '#B45309'
+  };
+  var CATEGORY_LABELS = {
+    waypoint: 'Waypoint',
+    water: 'Water Source',
+    shelter: 'Shelter',
+    medical: 'Medical',
+    supply: 'Supply Cache'
+  };
+
+  var map = null;
+  var dropPinMode = false;
+  var markerInstances = [];
+  var draftMarker = null;
+  var activeArchive = ARCHIVES.find(function(a) { return a.name === SELECTED_NAME; }) || ARCHIVES[0] || null;
+
+  function showToast(msg, isErr) {
+    var el = document.getElementById('maps-toast');
+    if (!el) return;
+    el.style.display = 'block';
+    el.style.borderColor = isErr ? 'var(--color-error)' : 'var(--color-accent)';
+    el.innerHTML = (isErr ? '<strong>Error:</strong> ' : '<strong>Info:</strong> ') + escapeHTML(msg);
+    clearTimeout(el._timer);
+    el._timer = setTimeout(function() { el.style.display = 'none'; }, 4500);
+  }
+
+  function escapeHTML(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function computeGlobalLimits() {
+    var minZoom = 0;
+    var maxZoom = 14;
+    if (ARCHIVES.length > 0) {
+      maxZoom = ARCHIVES.reduce(function(acc, a) { return Math.max(acc, a.max_zoom || 0); }, 0) || 14;
+    }
+    return { minZoom: minZoom, maxZoom: maxZoom };
+  }
+
+  // Single unified vector style backed by /maps/tiles/{z}/{x}/{y}.mvt for ALL installed .pmtiles files.
+  // Keeps browser GPU/worker memory constant regardless of how many archives are installed.
+  function buildUnifiedStyle(themeName) {
+    if (ARCHIVES.length === 0) {
+      return { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#EAE5D9' } }] };
+    }
+    var limits = computeGlobalLimits();
+    var layers = [];
+    if (window.protomaps_themes_base && typeof window.protomaps_themes_base.default === 'function') {
+      layers = window.protomaps_themes_base.default('protomaps', themeName || 'contrast', 'en');
+    } else {
+      layers = [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#F5F2EB' } },
+        { id: 'water', type: 'fill', source: 'protomaps', 'source-layer': 'water', paint: { 'fill-color': '#A5C8D6' } },
+        { id: 'roads', type: 'line', source: 'protomaps', 'source-layer': 'roads', paint: { 'line-color': '#FFFFFF', 'line-width': 1.5 } }
+      ];
+    }
+
+    return {
+      version: 8,
+      glyphs: window.location.origin + '/static/vendor/maps/fonts/{fontstack}/{range}.pbf',
+      sources: {
+        protomaps: {
+          type: 'vector',
+          tiles: [window.location.origin + '/maps/tiles/{z}/{x}/{y}.mvt'],
+          minzoom: limits.minZoom,
+          maxzoom: limits.maxZoom
+        }
+      },
+      layers: layers
+    };
+  }
+
+  function addTownspotImage(m) {
+    if (!m || m.hasImage('townspot')) return;
+    var size = 10;
+    var data = new Uint8Array(size * size * 4);
+    var r = 3.5;
+    var cx = (size - 1) / 2;
+    for (var y = 0; y < size; y++) {
+      for (var x = 0; x < size; x++) {
+        var d = Math.hypot(x - cx, y - cx);
+        var idx = (y * size + x) * 4;
+        if (d <= r) {
+          data[idx] = 28; data[idx + 1] = 31; data[idx + 2] = 29; data[idx + 3] = 220;
+        } else if (d <= r + 1.1) {
+          data[idx] = 253; data[idx + 1] = 251; data[idx + 2] = 247; data[idx + 3] = 220;
+        }
+      }
+    }
+    m.addImage('townspot', { width: size, height: size, data: data });
+  }
+
+  function updateCoordsReadout(lngLat) {
+    var pill = document.getElementById('map-coords-pill');
+    if (!pill || !map) return;
+    var z = map.getZoom().toFixed(1);
+    var c = lngLat || map.getCenter();
+    pill.textContent = c.lat.toFixed(5) + ', ' + c.lng.toFixed(5) + '  |  Zoom ' + z;
+  }
+
+  function fitToBounds(archive, immediate) {
+    if (!map || !archive) return;
+    if (archive.has_geo_meta && archive.bounds && archive.bounds.length === 4) {
+      var b = archive.bounds;
+      if (b[2] > b[0] && b[3] > b[1]) {
+        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {
+          padding: 28,
+          duration: immediate ? 0 : 750,
+          maxZoom: Math.max(archive.min_zoom || 0, Math.min(10, archive.max_zoom || 15))
+        });
+        return;
+      }
+    }
+    if (archive.center && (archive.center[0] !== 0 || archive.center[1] !== 0)) {
+      map.flyTo({ center: [archive.center[0], archive.center[1]], zoom: Math.max(5, archive.center[2] || 6), speed: 1.5 });
+    }
+  }
+
+  function fitAllInstalled() {
+    if (!map || ARCHIVES.length === 0) return;
+    var minLng = 180, minLat = 90, maxLng = -180, maxLat = -90, count = 0;
+    ARCHIVES.forEach(function(a) {
+      if (!a.has_geo_meta || !a.bounds || a.bounds.length !== 4) return;
+      minLng = Math.min(minLng, a.bounds[0]);
+      minLat = Math.min(minLat, a.bounds[1]);
+      maxLng = Math.max(maxLng, a.bounds[2]);
+      maxLat = Math.max(maxLat, a.bounds[3]);
+      count++;
+    });
+    if (count > 0 && maxLng > minLng && maxLat > minLat) {
+      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 36, duration: 750, maxZoom: 7 });
+    }
+  }
+
+  function initMap() {
+    if (!window.maplibregl || ARCHIVES.length === 0) return;
+    var theme = document.getElementById('map-theme-select').value || 'contrast';
+    var style = buildUnifiedStyle(theme);
+    var initCenter = (activeArchive && activeArchive.has_geo_meta && activeArchive.bounds)
+      ? [(activeArchive.bounds[0] + activeArchive.bounds[2]) / 2, (activeArchive.bounds[1] + activeArchive.bounds[3]) / 2]
+      : [0, 20];
+
+    map = new maplibregl.Map({
+      container: 'ark-map',
+      style: style,
+      center: initCenter,
+      zoom: 6,
+      maxTileCacheSize: 40, // keep client decoded-tile RAM bounded on low-memory devices
+      attributionControl: true
+    });
+
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+    map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'imperial' }), 'bottom-right');
+
+    map.on('styleimagemissing', function(e) {
+      if (e.id === 'townspot') addTownspotImage(map);
+    });
+
+    map.on('load', function() {
+      addTownspotImage(map);
+      var sp = new URLSearchParams(window.location.search);
+      var qLat = parseFloat(sp.get('lat'));
+      var qLng = parseFloat(sp.get('lng'));
+      var qZoom = parseFloat(sp.get('zoom'));
+      if (!isNaN(qLat) && !isNaN(qLng)) {
+        map.jumpTo({ center: [qLng, qLat], zoom: !isNaN(qZoom) ? qZoom : 11 });
+      } else if (activeArchive) {
+        fitToBounds(activeArchive, true);
+      } else {
+        fitAllInstalled();
+      }
+      updateCoordsReadout();
+    });
+    map.on('mousemove', function(e) { updateCoordsReadout(e.lngLat); });
+    map.on('zoom', function() { updateCoordsReadout(); });
+    map.on('moveend', function() { updateCoordsReadout(); });
+
+    map.on('click', function(e) {
+      if (!dropPinMode && !(e.originalEvent && e.originalEvent.shiftKey)) return;
+      var lat = Number(e.lngLat.lat.toFixed(6));
+      var lng = Number(e.lngLat.lng.toFixed(6));
+      document.getElementById('pin_lat').value = lat;
+      document.getElementById('pin_lng').value = lng;
+      if (draftMarker) draftMarker.remove();
+      draftMarker = new maplibregl.Marker({ color: '#1B2E26' }).setLngLat([lng, lat]).addTo(map);
+      toggleDropPinMode(false);
+      var titleInput = document.getElementById('pin_title');
+      if (titleInput) {
+        titleInput.focus();
+        titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      showToast('Coordinates captured (' + lat + ', ' + lng + '). Enter a name and click Save Pin.');
+    });
+
+    renderMapMarkers();
+  }
+
+  window.toggleDropPinMode = function(force) {
+    dropPinMode = (typeof force === 'boolean') ? force : !dropPinMode;
+    var wrap = document.getElementById('map-canvas-wrap');
+    var banner = document.getElementById('map-drop-banner');
+    var btn = document.getElementById('btn-drop-pin');
+    if (wrap) wrap.classList.toggle('drop-pin-active', dropPinMode);
+    if (banner) banner.classList.toggle('visible', dropPinMode);
+    if (btn) btn.textContent = dropPinMode ? 'Cancel Pin' : '+ Drop Pin';
+  };
+
+  window.flyToPlace = function(name, scrollToMap) {
+    var next = ARCHIVES.find(function(a) { return a.name === name; });
+    if (!next) return;
+    activeArchive = next;
+
+    var sel = document.getElementById('map-place-select');
+    if (sel) sel.value = next.name;
+
+    document.querySelectorAll('[data-place-pill]').forEach(function(pill) {
+      pill.classList.toggle('btn-primary', pill.getAttribute('data-place-pill') === next.name);
+    });
+    document.querySelectorAll('[data-archive-card]').forEach(function(card) {
+      card.classList.toggle('active-archive', card.getAttribute('data-archive-card') === next.name);
+    });
+
+    try {
+      var u = new URL(window.location.href);
+      u.searchParams.set('place', next.name);
+      u.searchParams.delete('map');
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) {}
+
+    fitToBounds(next, false);
+    if (scrollToMap) {
+      document.getElementById('map-canvas-wrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  window.flyToPin = function(id) {
+    var pin = PINS.find(function(p) { return p.id === id; });
+    if (!pin || !map || isNaN(pin.lat) || isNaN(pin.lng)) return;
+    map.flyTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
+    var found = markerInstances.find(function(m) { return m._pinId === id; });
+    if (found && found.getPopup && !found.getPopup().isOpen()) {
+      found.togglePopup();
+    }
+  };
+
+  function renderMapMarkers() {
+    markerInstances.forEach(function(m) { m.remove(); });
+    markerInstances = [];
+    if (!map || !window.maplibregl) return;
+
+    PINS.forEach(function(pin) {
+      if (isNaN(pin.lat) || isNaN(pin.lng)) return;
+      var el = document.createElement('div');
+      el.className = 'ark-map-marker';
+      el.style.backgroundColor = CATEGORY_COLORS[pin.category] || '#C25E28';
+      el.title = pin.title;
+
+      var popupHTML =
+        '<div style="font-weight:700;font-size:14px;margin-bottom:3px;">' + escapeHTML(pin.title) + '</div>' +
+        '<div style="font-size:11px;color:#525B54;margin-bottom:5px;">' +
+          escapeHTML(CATEGORY_LABELS[pin.category] || pin.category) + ' &bull; ' +
+          pin.lat.toFixed(4) + ', ' + pin.lng.toFixed(4) +
+        '</div>' +
+        (pin.note ? '<div style="font-size:12px;margin-bottom:6px;">' + escapeHTML(pin.note) + '</div>' : '') +
+        '<button type="button" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')" ' +
+          'style="background:#B91C1C;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;">Remove</button>';
+
+      var popup = new maplibregl.Popup({ offset: 18 }).setHTML(popupHTML);
+      var marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([pin.lng, pin.lat])
+        .setPopup(popup)
+        .addTo(map);
+      marker._pinId = pin.id;
+      markerInstances.push(marker);
+    });
+  }
+
+  function renderPinsList() {
+    var listEl = document.getElementById('pins-list-container');
+    var countEl = document.getElementById('pins-count');
+    var filterVal = (document.getElementById('pin-filter-input').value || '').toLowerCase().trim();
+    if (countEl) countEl.textContent = String(PINS.length);
+    if (!listEl) return;
+
+    var visible = PINS.filter(function(p) {
+      if (!filterVal) return true;
+      return (p.title + ' ' + p.category + ' ' + p.note).toLowerCase().indexOf(filterVal) !== -1;
+    });
+
+    if (visible.length === 0) {
+      listEl.innerHTML = '<p class="secondary-text" style="font-size:13px;margin:0.25rem 0;">' +
+        (PINS.length === 0 ? 'No saved pins yet. Click "+ Drop Pin" on the map to add one.' : 'No pins match that filter.') +
+        '</p>';
+      return;
+    }
+
+    listEl.innerHTML = visible.map(function(p) {
+      var color = CATEGORY_COLORS[p.category] || '#C25E28';
+      var label = CATEGORY_LABELS[p.category] || p.category;
+      return (
+        '<div class="pin-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.4rem;">' +
+            '<div style="display:flex;align-items:center;gap:0.45rem;min-width:0;">' +
+              '<span class="pin-dot" style="background:' + color + ';"></span>' +
+              '<strong style="font-size:14px;word-break:break-word;">' + escapeHTML(p.title) + '</strong>' +
+            '</div>' +
+            '<span class="badge" style="font-size:10px;">' + escapeHTML(label) + '</span>' +
+          '</div>' +
+          '<div class="secondary-text tabular" style="font-size:12px;margin-top:0.25rem;">' +
+            p.lat.toFixed(4) + ', ' + p.lng.toFixed(4) +
+          '</div>' +
+          (p.note ? '<div class="secondary-text" style="font-size:12px;margin-top:0.2rem;">' + escapeHTML(p.note) + '</div>' : '') +
+          '<div style="display:flex;gap:0.4rem;margin-top:0.5rem;">' +
+            '<button type="button" class="btn" style="flex:1;min-height:28px;padding:0.15rem 0.5rem;font-size:12px;" onclick="flyToPin(\'' + escapeHTML(p.id) + '\')">Fly To</button>' +
+            '<button type="button" class="btn btn-danger" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="deletePinById(\'' + escapeHTML(p.id) + '\')">Remove</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  window.deletePinById = function(id) {
+    var body = new URLSearchParams();
+    body.set('action', 'delete');
+    body.set('id', id);
+    body.set('format', 'json');
+    fetch('/api/maps/pins', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.error) throw new Error(res.error);
+      PINS = normalizePins(res.pins);
+      renderPinsList();
+      renderMapMarkers();
+    })
+    .catch(function(err) { showToast(err.message, true); });
+  };
+
+  window.inspectTileJSON = function(name) {
+    var target = name || (activeArchive && activeArchive.name);
+    if (!target) return;
+    var panel = document.getElementById('tilejson-panel');
+    var out = document.getElementById('tilejson-output');
+    panel.style.display = 'block';
+    out.textContent = 'Reading PMTiles metadata for ' + target + '...';
+    fetch('/api/maps/tilejson?name=' + encodeURIComponent(target))
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        out.textContent = JSON.stringify(data, null, 2);
+      })
+      .catch(function(err) {
+        out.textContent = 'Could not read metadata: ' + err.message;
+      });
+  };
+
+  var placeSelect = document.getElementById('map-place-select');
+  if (placeSelect) {
+    placeSelect.addEventListener('change', function() { flyToPlace(this.value, false); });
+  }
+  var themeSelect = document.getElementById('map-theme-select');
+  if (themeSelect) {
+    themeSelect.addEventListener('change', function() {
+      if (map && ARCHIVES.length > 0) {
+        map.setStyle(buildUnifiedStyle(this.value));
+        map.once('styledata', function() { addTownspotImage(map); });
+      }
+    });
+  }
+  var fitAllBtn = document.getElementById('btn-fit-all');
+  if (fitAllBtn) {
+    fitAllBtn.addEventListener('click', fitAllInstalled);
+  }
+  var dropBtn = document.getElementById('btn-drop-pin');
+  if (dropBtn) {
+    dropBtn.addEventListener('click', function() { toggleDropPinMode(); });
+  }
+
+  var pinForm = document.getElementById('pin-save-form');
+  if (pinForm) {
+    pinForm.addEventListener('submit', function(ev) {
+      ev.preventDefault();
+      var fd = new FormData(pinForm);
+      fd.set('format', 'json');
+      var body = new URLSearchParams(fd);
+      fetch('/api/maps/pins', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.error) throw new Error(res.error);
+        PINS = normalizePins(res.pins);
+        renderPinsList();
+        renderMapMarkers();
+        if (draftMarker) { draftMarker.remove(); draftMarker = null; }
+        var titleSaved = pinForm.querySelector('#pin_title').value;
+        pinForm.querySelector('#pin_title').value = '';
+        pinForm.querySelector('#pin_note').value = '';
+        showToast('Saved waypoint "' + titleSaved + '"');
+      })
+      .catch(function(err) { showToast(err.message, true); });
+    });
+  }
+
+  var pinFilter = document.getElementById('pin-filter-input');
+  if (pinFilter) {
+    pinFilter.addEventListener('input', renderPinsList);
+  }
+
+  var activeRegionFilter = 'all';
+  function filterExtracts() {
+    var q = (document.getElementById('extract-search').value || '').toLowerCase().trim();
+    document.querySelectorAll('#extract-grid .extract-card').forEach(function(card) {
+      var name = (card.getAttribute('data-name') || '').toLowerCase();
+      var region = card.getAttribute('data-region') || '';
+      var regionMatch = activeRegionFilter === 'all' ||
+        (activeRegionFilter === 'Asia' && (region.indexOf('Asia') !== -1 || region.indexOf('Oceania') !== -1 || region.indexOf('Pacific') !== -1)) ||
+        (activeRegionFilter === 'Other' && ['Global', 'North America', 'Europe'].indexOf(region) === -1 && region.indexOf('Asia') === -1 && region.indexOf('Oceania') === -1) ||
+        region === activeRegionFilter;
+      var qMatch = !q || name.indexOf(q) !== -1 || region.toLowerCase().indexOf(q) !== -1;
+      card.style.display = (regionMatch && qMatch) ? 'flex' : 'none';
+    });
+  }
+  var extractSearch = document.getElementById('extract-search');
+  if (extractSearch) extractSearch.addEventListener('input', filterExtracts);
+  document.querySelectorAll('[data-region-filter]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      activeRegionFilter = btn.getAttribute('data-region-filter');
+      document.querySelectorAll('[data-region-filter]').forEach(function(b) {
+        b.classList.toggle('btn-primary', b === btn);
+      });
+      filterExtracts();
+    });
+  });
+
+  renderPinsList();
+  initMap();
+})();
 </script>
 {{ end }}

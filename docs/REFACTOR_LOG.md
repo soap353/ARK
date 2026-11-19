@@ -56,3 +56,14 @@ This document records the safe and clean refactoring changes applied across Ark 
 
 ### `images/druglabels/main.go`, `images/indexer/extract.py`, `catalog/`, `install/`
 - **Audit Result**: Clean bill of health. All 9 app manifests (`catalog/*/app.yaml`), standalone service files (`images/druglabels/main.go`, `images/druglabels/go.mod`, `images/indexer/extract.py`), and installers (`install/install.ps1`, `install/install.sh`) are minimal, modular, and free of dead code or extraneous dependencies.
+
+---
+
+## 5. Memory Efficiency Pass
+
+- `cmd/ark/main.go`: `tuneRuntimeMemory()` sets GC percent 50 and a 256 MiB soft memory limit (respects `GOGC`/`GOMEMLIMIT`).
+- `internal/apps/manifest.go` + `internal/docker/docker.go`: new `memory_mb` manifest field applied as a hard container limit (swap disabled). Core container capped at 384 MB with `GOMEMLIMIT=256MiB`.
+- `catalog/*/app.yaml`: added `memory_mb` caps to 8 apps (Ollama intentionally uncapped).
+- `internal/jobs/druglabels.go`: FDA ZIP partitions are streamed to a temp file (`spoolZip`) instead of `io.ReadAll`.
+- `internal/ai/indexer.go`: `readCapped` limits plain-text/HTML reads to 16 MB per file.
+- See `docs/SYSTEM_REQUIREMENTS.md` for measurements and minimum-spec estimates.
