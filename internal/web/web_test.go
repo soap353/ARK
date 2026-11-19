@@ -1017,7 +1017,6 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	}
 
 	// 6. Media/video HTTP Range requests (206 Partial Content) for scrubbing
-	// Verify /media/ serves 206 Partial Content on Range requests
 	vidDir := filepath.Join(tmpDir, "media", "video")
 	_ = os.MkdirAll(vidDir, 0o755)
 	_ = os.WriteFile(filepath.Join(vidDir, "clip.mp4"), []byte("0123456789ABCDEF"), 0o644)
@@ -1027,6 +1026,35 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusPartialContent || w.Body.String() != "4567" {
 		t.Errorf("expected 206 Partial Content '4567' for video Range request, got %d (%q)", w.Code, w.Body.String())
+	}
+
+	// 7. Reader theme persists in SQLite across pages and restarts via /api/reader/theme
+	themeDB, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer themeDB.Close()
+	_, _ = themeDB.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	serverWithDB, err := NewServer(themeDB, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer with db: %v", err)
+	}
+	muxWithDB := http.NewServeMux()
+	if err := serverWithDB.RegisterRoutes(muxWithDB); err != nil {
+		t.Fatalf("RegisterRoutes with db: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/reader/theme", strings.NewReader(`{"theme":"sepia"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	muxWithDB.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"theme":"sepia"`) {
+		t.Fatalf("expected /api/reader/theme POST to save sepia, got %d: %s", w.Code, w.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/C/Main_Page", nil)
+	w = httptest.NewRecorder()
+	muxWithDB.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `var SERVER_THEME = "sepia";`) {
+		t.Errorf("expected ZIM page to embed saved SERVER_THEME sepia, got %d", w.Code)
 	}
 }
 

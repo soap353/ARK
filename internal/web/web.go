@@ -323,6 +323,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/ai/models/select", s.handleAPIAIModelSelect)
 	mux.HandleFunc("/api/maps/extract", s.handleAPIMapsExtract)
 	mux.HandleFunc("/api/maps/pins", s.handleAPIMapPins)
+	mux.HandleFunc("/api/reader/theme", s.handleAPIReaderTheme)
 
 	// App reverse proxy
 	if s.proxy != nil {

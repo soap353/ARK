@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -679,11 +680,15 @@ func (s *Server) renderZIMStartPage(w http.ResponseWriter, stem, zimPath string,
 		escStem,
 		html.EscapeString(displayTitle),
 		escStem,
-		arkThemeScriptTag(),
+		arkThemeScriptTag(s.getSavedReaderTheme()),
 	)
 }
 
 func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/api/reader/theme") {
+		s.handleAPIReaderTheme(w, r)
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -820,7 +825,7 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 			blob = preserveQueryInMetaRefresh(blob, r.URL.RawQuery)
 		}
 		curLabel := formatSubpageLabel(stem, entry, blob)
-		blob = injectZIMReaderNav(blob, stem, s.isZIMIndexed(zimPath), prevPage, nextPage, curLabel)
+		blob = injectZIMReaderNav(blob, stem, s.isZIMIndexed(zimPath), prevPage, nextPage, curLabel, s.getSavedReaderTheme())
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		w.Header().Set("Content-Type", mimeType)
 		_, _ = w.Write(blob)
@@ -909,7 +914,56 @@ func themeRule(bg, surface, fg, link, border string, isDark bool) string {
 	)
 }
 
-func arkThemeScriptTag() string {
+func validReaderTheme(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "forest", "light", "sepia", "dark", "default":
+		return strings.ToLower(strings.TrimSpace(t))
+	default:
+		return "forest"
+	}
+}
+
+func (s *Server) getSavedReaderTheme() string {
+	if s.db == nil {
+		return "forest"
+	}
+	var val string
+	if err := s.db.QueryRow(`SELECT value FROM settings WHERE key = 'reader_theme'`).Scan(&val); err == nil {
+		return validReaderTheme(val)
+	}
+	return "forest"
+}
+
+func (s *Server) handleAPIReaderTheme(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		_ = json.NewEncoder(w).Encode(map[string]string{"theme": s.getSavedReaderTheme()})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var theme string
+	if strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+		var payload struct {
+			Theme string `json:"theme"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&payload); err == nil {
+			theme = payload.Theme
+		}
+	} else {
+		theme = r.FormValue("theme")
+	}
+	theme = validReaderTheme(theme)
+	if s.db != nil {
+		_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_theme', ?)`, theme)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "theme": theme})
+}
+
+func arkThemeScriptTag(initialTheme string) string {
+	initialTheme = validReaderTheme(initialTheme)
 	return `<style id="ark-reader-theme"></style><script>
 (function() {
   var THEMES = {
@@ -920,7 +974,8 @@ func arkThemeScriptTag() string {
     dark: ` + fmt.Sprintf("%q", themeRule("#121715", "#1B221F", "#E6ECE8", "#E08A5A", "#2D3A34", true)) + `
   };
   var KEY = 'ark-zim-theme';
-  function applyTheme(t) {
+  var SERVER_THEME = ` + fmt.Sprintf("%q", initialTheme) + `;
+  function applyTheme(t, persist) {
     if (!THEMES.hasOwnProperty(t)) t = 'forest';
     var root = document.documentElement;
     if (root && root.classList) {
@@ -938,11 +993,34 @@ func arkThemeScriptTag() string {
     var sel = document.getElementById('ark-theme-sel');
     if (sel && sel.value !== t) sel.value = t;
     try { localStorage.setItem(KEY, t); } catch (e) {}
+    if (persist) {
+      try {
+        var doFetch = window.__arkFetch || window.fetch;
+        doFetch('/api/reader/theme', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ theme: t })
+        }).catch(function(){});
+      } catch (e) {}
+    }
   }
   window.arkSetZIMTheme = applyTheme;
-  var saved = 'forest';
-  try { saved = localStorage.getItem(KEY) || 'forest'; } catch (e) {}
-  applyTheme(saved);
+  var initial = SERVER_THEME;
+  if (!THEMES.hasOwnProperty(initial)) {
+    try { initial = localStorage.getItem(KEY) || 'forest'; } catch (e) { initial = 'forest'; }
+  }
+  applyTheme(initial, false);
+  window.addEventListener('pageshow', function(ev) {
+    if (ev && ev.persisted) {
+      try {
+        fetch(location.origin + '/api/reader/theme')
+          .then(function(r) { return r.json(); })
+          .then(function(d) { if (d && d.theme) applyTheme(d.theme, false); })
+          .catch(function(){});
+      } catch (e) {}
+    }
+  });
 
   function highlightAIQuote() {
     var hl = new URLSearchParams(location.search).get('ark_hl');
@@ -995,11 +1073,50 @@ func arkThemeScriptTag() string {
       }
     }
   }
+  function offsetFixedTopbars() {
+    if (!document.body) return;
+    var nav = document.getElementById('ark-proxy-nav');
+    var navH = nav ? Math.ceil(nav.getBoundingClientRect().height || 46) : 46;
+    var seen = [];
+    var candidates = [];
+    var push = function(el) {
+      if (!el || el === nav || el.id === 'ark-page-pager' || (nav && nav.contains(el))) return;
+      if (seen.indexOf(el) === -1) { seen.push(el); candidates.push(el); }
+    };
+    for (var i = 0; i < document.body.children.length; i++) push(document.body.children[i]);
+    var q = document.body.querySelectorAll('header, nav, .navbar, .navbar-fixed-top, [class*="header"], [class*="navbar"], [class*="topbar"], [id*="header"], [id*="nav"]');
+    for (var j = 0; j < q.length; j++) push(q[j]);
+
+    var maxExtraH = 0;
+    for (var k = 0; k < candidates.length; k++) {
+      var el = candidates[k];
+      if (el.getAttribute('data-ark-shifted') === '1') {
+        var rShifted = el.getBoundingClientRect();
+        if (rShifted.height > maxExtraH && rShifted.height < 220) maxExtraH = rShifted.height;
+        continue;
+      }
+      var cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+      var r = el.getBoundingClientRect();
+      if (r.height <= 0 || r.height >= 220 || r.top < -2 || r.top >= navH) continue;
+      var curTop = parseFloat(cs.top);
+      if (isNaN(curTop)) curTop = 0;
+      el.setAttribute('data-ark-shifted', '1');
+      el.style.setProperty('top', (curTop + navH) + 'px', 'important');
+      if (r.height > maxExtraH) maxExtraH = r.height;
+    }
+    if (maxExtraH > 0) {
+      document.body.style.setProperty('padding-top', (navH + Math.ceil(maxExtraH)) + 'px', 'important');
+      document.documentElement.style.setProperty('scroll-padding-top', (navH + Math.ceil(maxExtraH) + 8) + 'px', 'important');
+    }
+  }
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', highlightAIQuote);
+    document.addEventListener('DOMContentLoaded', function() { highlightAIQuote(); offsetFixedTopbars(); });
   } else {
     highlightAIQuote();
+    offsetFixedTopbars();
   }
+  window.addEventListener('load', offsetFixedTopbars);
   var ctn = document.getElementById('container');
   var pgr = document.getElementById('ark-page-pager');
   if (ctn && pgr && ctn !== pgr.parentElement) {
@@ -1013,7 +1130,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 	escStem := url.PathEscape(stem)
 	addBtn := ""
 	if !hideAddToAI {
-		addBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);fetch('/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Add to AI</button>`
+		addBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);fetch(location.origin+'/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Add to AI</button>`
 	}
 	return `<nav id="ark-proxy-nav" style="position:fixed;top:0;left:0;right:0;width:100%;height:46px;max-height:46px;box-sizing:border-box;flex:none;align-self:flex-start;z-index:2147483647;background:#1B2E26;border-bottom:1px solid #2A4338;padding:6px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:12px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
 		`<a href="/" style="color:#F5F2EB;font-weight:700;text-decoration:none;font-size:14px;white-space:nowrap;">&#8592; Ark Home</a>` +
@@ -1021,7 +1138,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<a href="/library" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Library</a>` +
 		`<a href="/read/zim/` + escStem + `/" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Main Page</a>` +
 		`<a href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
-		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
+		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value,true)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
 		`<form action="/read/zim/` + escStem + `/" method="GET" style="display:flex;gap:6px;margin:0;">` +
 		`<input type="search" name="q" placeholder="Search ` + html.EscapeString(stem) + `..." style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required>` +
 		`<button type="submit" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;">Search</button>` +
@@ -1122,21 +1239,30 @@ func buildReaderPagerHTML(stem string, prev, next *zimTitleRecord, currentLabel 
 		`</div>`
 }
 
-func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool, prev, next *zimTitleRecord, currentLabel string) []byte {
+func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool, prev, next *zimTitleRecord, currentLabel, initialTheme string) []byte {
 	headSnippet := arkThemeHeadTag()
 	navSnippet := buildReaderNavHTML(stem, archiveIndexed)
 	pagerSnippet := buildReaderPagerHTML(stem, prev, next, currentLabel)
-	tailSnippet := pagerSnippet + arkThemeScriptTag()
+	tailSnippet := pagerSnippet + arkThemeScriptTag(initialTheme)
 
-	out := make([]byte, 0, len(htmlBytes)+len(headSnippet)+len(navSnippet)+len(tailSnippet))
+	out := make([]byte, 0, len(htmlBytes)+len(headSnippet)+len(navSnippet)+len(tailSnippet)+64)
 	lower := bytes.ToLower(htmlBytes)
 
+	headOpen := bytes.Index(lower, []byte("<head"))
 	headClose := bytes.Index(lower, []byte("</head>"))
 	bodyOpen := bytes.Index(lower, []byte("<body"))
 
 	pos := 0
-	if headClose != -1 {
-		out = append(out, htmlBytes[:headClose]...)
+	if headOpen != -1 {
+		if hEnd := bytes.IndexByte(lower[headOpen:], '>'); hEnd != -1 {
+			insertHeadAt := headOpen + hEnd + 1
+			out = append(out, htmlBytes[:insertHeadAt]...)
+			out = append(out, []byte(`<script>window.__arkFetch=window.fetch;</script>`)...)
+			pos = insertHeadAt
+		}
+	}
+	if headClose != -1 && headClose >= pos {
+		out = append(out, htmlBytes[pos:headClose]...)
 		out = append(out, []byte(headSnippet)...)
 		pos = headClose
 	} else {
@@ -1201,7 +1327,7 @@ func (s *Server) renderZIMSearchResults(w http.ResponseWriter, stem, query strin
 		list.WriteString(`</ul>`)
 	}
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Search: %s — %s</title><link rel="stylesheet" href="/static/ark.css">%s</head><body style="margin:0;">%s<main style="padding:2rem;max-width:860px;margin:0 auto;"><h1>Search in %s</h1><form action="/read/zim/%s/" method="GET" style="display:flex;gap:8px;margin-bottom:1.25rem;"><input type="search" name="q" value="%s" class="form-control" style="flex:1;"><button type="submit" class="btn btn-primary">Search</button></form><p class="secondary-text">%d result(s) for "%s"</p>%s</main>%s</body></html>`,
-		html.EscapeString(query), html.EscapeString(stem), arkThemeHeadTag(), buildReaderNavHTML(stem, archiveIndexed), html.EscapeString(stem), escStem, html.EscapeString(query), len(hits), html.EscapeString(query), list.String(), arkThemeScriptTag())
+		html.EscapeString(query), html.EscapeString(stem), arkThemeHeadTag(), buildReaderNavHTML(stem, archiveIndexed), html.EscapeString(stem), escStem, html.EscapeString(query), len(hits), html.EscapeString(query), list.String(), arkThemeScriptTag(s.getSavedReaderTheme()))
 }
 
 var (
