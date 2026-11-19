@@ -980,7 +980,7 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	pageOut := w.Body.String()
-	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-page-pager"`, `id="ark-prev-page"`, `id="ark-next-page"`, `id="ark-current-page-label"`, `/read/zim/mini_wiki/C/Solar_Cell`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
+	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-download-html"`, `id="ark-page-pager"`, `id="ark-prev-page"`, `id="ark-next-page"`, `id="ark-current-page-label"`, `/read/zim/mini_wiki/C/Solar_Cell`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
 		if w.Code != http.StatusOK || !strings.Contains(pageOut, want) {
 			if want == `id="ark-prev-page"` {
 				continue // Main_Page may be first in sequence
@@ -1002,6 +1002,31 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "/read/zim/mini_wiki/C/Solar_Cell") {
 		t.Errorf("expected ZIM title search result linking to Solar_Cell, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 5. ?download=1 returns standalone HTML attachment without reader chrome
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/C/Main_Page?download=1", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	disp := w.Header().Get("Content-Disposition")
+	if w.Code != http.StatusOK || !strings.Contains(disp, "attachment;") || !strings.Contains(disp, ".html") {
+		t.Errorf("expected HTML attachment response, got %d disp=%q", w.Code, disp)
+	}
+	if !strings.Contains(w.Body.String(), "Beta-lactam antibiotic.") || strings.Contains(w.Body.String(), `id="ark-proxy-nav"`) {
+		t.Errorf("expected clean standalone HTML without reader nav")
+	}
+
+	// 6. Media/video HTTP Range requests (206 Partial Content) for scrubbing
+	// Verify /media/ serves 206 Partial Content on Range requests
+	vidDir := filepath.Join(tmpDir, "media", "video")
+	_ = os.MkdirAll(vidDir, 0o755)
+	_ = os.WriteFile(filepath.Join(vidDir, "clip.mp4"), []byte("0123456789ABCDEF"), 0o644)
+	req = httptest.NewRequest(http.MethodGet, "/media/video/clip.mp4", nil)
+	req.Header.Set("Range", "bytes=4-7")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusPartialContent || w.Body.String() != "4567" {
+		t.Errorf("expected 206 Partial Content '4567' for video Range request, got %d (%q)", w.Code, w.Body.String())
 	}
 }
 

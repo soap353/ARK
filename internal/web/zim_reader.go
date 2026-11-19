@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"ark/internal/ai"
 
@@ -790,6 +793,18 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 		mimeType = arc.mimes[entry.mimeID]
 	}
 	isHTML := strings.Contains(strings.ToLower(mimeType), "text/html")
+	if isHTML && berr == nil && r.URL.Query().Get("download") == "1" {
+		standalone := inlineZIMPageAssets(arc, f, entry, blob)
+		label := formatSubpageLabel(stem, entry, blob)
+		arc.mu.Unlock()
+		fileName := sanitizeDownloadHTMLFilename(label, entry.url)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		_, _ = w.Write(standalone)
+		return
+	}
+
 	var prevPage, nextPage *zimTitleRecord
 	if isHTML && berr == nil {
 		prevPage, nextPage = arc.adjacentHTMLPages(f, entryIdx, entry.ns)
@@ -807,11 +822,16 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 		curLabel := formatSubpageLabel(stem, entry, blob)
 		blob = injectZIMReaderNav(blob, stem, s.isZIMIndexed(zimPath), prevPage, nextPage, curLabel)
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Content-Type", mimeType)
+		_, _ = w.Write(blob)
+		return
 	}
+
+	// Serve non-HTML ZIM assets (videos, audio, PDFs, images, CSS, JS) via http.ServeContent
+	// so HTTP Range / 206 Partial Content seeking & scrubbing work natively.
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("Content-Type", mimeType)
-	_, _ = w.Write(blob)
+	http.ServeContent(w, r, path.Base(entry.url), time.Unix(0, arc.modUnixNano), bytes.NewReader(blob))
 }
 
 func arkThemeHeadTag() string {
@@ -1006,6 +1026,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<input type="search" name="q" placeholder="Search ` + html.EscapeString(stem) + `..." style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required>` +
 		`<button type="submit" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;">Search</button>` +
 		`</form>` +
+		`<a id="ark-download-html" href="?download=1" onclick="var u=new URL(location.href);u.searchParams.set('download','1');this.href=u.toString();" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">&#8595; Download HTML</a>` +
 		addBtn +
 		`</nav>`
 }
@@ -1181,4 +1202,218 @@ func (s *Server) renderZIMSearchResults(w http.ResponseWriter, stem, query strin
 	}
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Search: %s — %s</title><link rel="stylesheet" href="/static/ark.css">%s</head><body style="margin:0;">%s<main style="padding:2rem;max-width:860px;margin:0 auto;"><h1>Search in %s</h1><form action="/read/zim/%s/" method="GET" style="display:flex;gap:8px;margin-bottom:1.25rem;"><input type="search" name="q" value="%s" class="form-control" style="flex:1;"><button type="submit" class="btn btn-primary">Search</button></form><p class="secondary-text">%d result(s) for "%s"</p>%s</main>%s</body></html>`,
 		html.EscapeString(query), html.EscapeString(stem), arkThemeHeadTag(), buildReaderNavHTML(stem, archiveIndexed), html.EscapeString(stem), escStem, html.EscapeString(query), len(hits), html.EscapeString(query), list.String(), arkThemeScriptTag())
+}
+
+var (
+	linkStylesheetRe = regexp.MustCompile(`(?is)<link\b[^>]*rel=["']?[^"'>]*stylesheet[^"'>]*["']?[^>]*>`)
+	hrefAttrRe       = regexp.MustCompile(`(?is)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	srcAttrRe        = regexp.MustCompile(`(?is)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	posterAttrRe     = regexp.MustCompile(`(?is)\bposter\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	srcsetAttrRe     = regexp.MustCompile(`(?is)\s+\bsrcset\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)`)
+	scriptSrcRe      = regexp.MustCompile(`(?is)<script\b([^>]*)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))([^>]*)>\s*</script>`)
+	imgOrMediaTagRe  = regexp.MustCompile(`(?is)<(?:img|source|video|audio)\b[^>]*>`)
+	cssURLRe         = regexp.MustCompile(`(?is)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]+))\s*\)`)
+)
+
+func sanitizeDownloadHTMLFilename(label, fallbackURL string) string {
+	name := strings.TrimSpace(label)
+	if name == "" {
+		name = path.Base(strings.TrimSuffix(fallbackURL, "/"))
+	}
+	if name == "" || name == "." || name == "/" {
+		name = "page"
+	}
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == ' ':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	clean := strings.TrimSpace(b.String())
+	if clean == "" {
+		clean = "page"
+	}
+	if !strings.HasSuffix(strings.ToLower(clean), ".html") {
+		clean += ".html"
+	}
+	return clean
+}
+
+func resolveZIMRelativeAsset(arc *zimArchive, f *os.File, baseNS byte, baseURL, rawRef string) ([]byte, string, bool) {
+	ref := strings.TrimSpace(rawRef)
+	if ref == "" {
+		return nil, "", false
+	}
+	low := strings.ToLower(ref)
+	if strings.HasPrefix(low, "data:") || strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") ||
+		strings.HasPrefix(low, "javascript:") || strings.HasPrefix(low, "mailto:") || strings.HasPrefix(low, "#") || strings.HasPrefix(ref, "//") {
+		return nil, "", false
+	}
+	if idx := strings.IndexAny(ref, "?#"); idx != -1 {
+		ref = ref[:idx]
+	}
+	if unesc, err := url.PathUnescape(ref); err == nil && unesc != "" {
+		ref = unesc
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, "", false
+	}
+
+	var candidates []string
+	if strings.HasPrefix(ref, "/") {
+		candidates = append(candidates, strings.TrimPrefix(ref, "/"))
+	} else {
+		dir := path.Dir(strings.TrimPrefix(baseURL, "/"))
+		if dir == "." {
+			candidates = append(candidates, path.Clean(ref))
+		} else {
+			candidates = append(candidates, path.Clean(dir+"/"+ref))
+		}
+		candidates = append(candidates, strings.TrimPrefix(ref, "./"))
+	}
+
+	for _, cand := range candidates {
+		cand = strings.TrimPrefix(cand, "/")
+		if cand == "" || cand == "." {
+			continue
+		}
+		var entry zimResolvedEntry
+		var ok bool
+		if baseNS != 0 {
+			entry, ok = arc.findEntry(f, baseNS, cand)
+		}
+		if !ok {
+			entry, ok = arc.findEntryFlex(f, cand)
+		}
+		if !ok {
+			continue
+		}
+		if entry.mimeID == 0xffff {
+			if redir, err := arc.followRedirects(f, entry); err == nil {
+				entry = redir
+			}
+		}
+		if entry.mimeID >= 0xfffd {
+			continue
+		}
+		blob, err := arc.readBlob(f, entry.clusterNum, entry.blobNum)
+		if err != nil {
+			continue
+		}
+		mimeType := "application/octet-stream"
+		if int(entry.mimeID) < len(arc.mimes) && arc.mimes[entry.mimeID] != "" {
+			mimeType = arc.mimes[entry.mimeID]
+		}
+		return blob, mimeType, true
+	}
+	return nil, "", false
+}
+
+func inlineZIMCSSAssets(arc *zimArchive, f *os.File, cssNS byte, cssURL string, cssBytes []byte) []byte {
+	return cssURLRe.ReplaceAllFunc(cssBytes, func(match []byte) []byte {
+		sub := cssURLRe.FindSubmatch(match)
+		if len(sub) < 4 {
+			return match
+		}
+		ref := string(sub[1])
+		if ref == "" {
+			ref = string(sub[2])
+		}
+		if ref == "" {
+			ref = string(sub[3])
+		}
+		blob, mimeType, ok := resolveZIMRelativeAsset(arc, f, cssNS, cssURL, ref)
+		if !ok || len(blob) > 4*1024*1024 {
+			return match
+		}
+		return []byte(`url("data:` + mimeType + `;base64,` + base64.StdEncoding.EncodeToString(blob) + `")`)
+	})
+}
+
+// inlineZIMPageAssets embeds local CSS stylesheets, JS scripts, and media/image assets
+// into a standalone HTML document so downloading a page preserves full styling and functionality offline.
+func inlineZIMPageAssets(arc *zimArchive, f *os.File, entry zimResolvedEntry, rawHTML []byte) []byte {
+	out := string(rawHTML)
+
+	// 1. Inline <link rel="stylesheet" href="...">
+	out = linkStylesheetRe.ReplaceAllStringFunc(out, func(tag string) string {
+		m := hrefAttrRe.FindStringSubmatch(tag)
+		if len(m) < 4 {
+			return tag
+		}
+		href := m[1]
+		if href == "" {
+			href = m[2]
+		}
+		if href == "" {
+			href = m[3]
+		}
+		blob, _, ok := resolveZIMRelativeAsset(arc, f, entry.ns, entry.url, href)
+		if !ok {
+			return tag
+		}
+		inlinedCSS := inlineZIMCSSAssets(arc, f, entry.ns, path.Clean(path.Dir(entry.url)+"/"+href), blob)
+		safeCSS := strings.ReplaceAll(string(inlinedCSS), "</style", `<\/style`)
+		return "<style>\n" + safeCSS + "\n</style>"
+	})
+
+	// 2. Inline <script src="..."></script>
+	out = scriptSrcRe.ReplaceAllStringFunc(out, func(tag string) string {
+		m := scriptSrcRe.FindStringSubmatch(tag)
+		if len(m) < 6 {
+			return tag
+		}
+		src := m[2]
+		if src == "" {
+			src = m[3]
+		}
+		if src == "" {
+			src = m[4]
+		}
+		blob, _, ok := resolveZIMRelativeAsset(arc, f, entry.ns, entry.url, src)
+		if !ok || len(blob) > 4*1024*1024 {
+			return tag
+		}
+		safeJS := strings.ReplaceAll(string(blob), "</script", `<\/script`)
+		return "<script" + m[1] + m[5] + ">\n" + safeJS + "\n</script>"
+	})
+
+	// 3. Inline <img src="...">, <source src="...">, <video poster="...">
+	out = imgOrMediaTagRe.ReplaceAllStringFunc(out, func(tag string) string {
+		updated := tag
+		if m := srcAttrRe.FindStringSubmatch(updated); len(m) >= 4 {
+			src := m[1]
+			if src == "" {
+				src = m[2]
+			}
+			if src == "" {
+				src = m[3]
+			}
+			if blob, mimeType, ok := resolveZIMRelativeAsset(arc, f, entry.ns, entry.url, src); ok && len(blob) <= 12*1024*1024 {
+				dataURI := `src="data:` + mimeType + `;base64,` + base64.StdEncoding.EncodeToString(blob) + `"`
+				updated = srcAttrRe.ReplaceAllString(updated, dataURI)
+				updated = srcsetAttrRe.ReplaceAllString(updated, "")
+			}
+		}
+		if m := posterAttrRe.FindStringSubmatch(updated); len(m) >= 4 {
+			poster := m[1]
+			if poster == "" {
+				poster = m[2]
+			}
+			if poster == "" {
+				poster = m[3]
+			}
+			if blob, mimeType, ok := resolveZIMRelativeAsset(arc, f, entry.ns, entry.url, poster); ok && len(blob) <= 6*1024*1024 {
+				dataURI := `poster="data:` + mimeType + `;base64,` + base64.StdEncoding.EncodeToString(blob) + `"`
+				updated = posterAttrRe.ReplaceAllString(updated, dataURI)
+			}
+		}
+		return updated
+	})
+
+	return []byte(out)
 }

@@ -2,8 +2,11 @@ package system
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -32,6 +35,24 @@ type Metrics struct {
 // CollectMetrics gathers current CPU, memory, disk, and host metrics.
 // If diskPath is empty, the current working directory or root is used.
 func CollectMetrics(ctx context.Context, diskPath string) (*Metrics, error) {
+	if metricsURL := strings.TrimSpace(os.Getenv("ARK_HOST_METRICS_URL")); metricsURL != "" {
+		reqCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, metricsURL, nil)
+		if err == nil {
+			resp, rerr := (&http.Client{Timeout: 1200 * time.Millisecond}).Do(req)
+			if rerr == nil {
+				var hostM Metrics
+				derr := json.NewDecoder(resp.Body).Decode(&hostM)
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK && derr == nil && hostM.Hostname != "" {
+					cancel()
+					return &hostM, nil
+				}
+			}
+		}
+		cancel()
+	}
+
 	m := &Metrics{
 		OS:        runtime.GOOS,
 		Timestamp: time.Now().Unix(),

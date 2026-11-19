@@ -235,7 +235,9 @@
           <td class="tabular">{{ .MemoryText }}</td>
           <td>
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-              {{ if eq .Status "running" }}
+              {{ if eq .AppID "core" }}
+              <span class="badge badge-accent" style="align-self: center;">Core UI</span>
+              {{ else if eq .Status "running" }}
               <form action="/api/containers/restart" method="POST" style="margin: 0;">
                 <input type="hidden" name="id" value="{{ .AppID }}">
                 <input type="hidden" name="redirect" value="/system">
@@ -253,7 +255,9 @@
                 <button type="submit" class="btn btn-primary" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Start</button>
               </form>
               {{ end }}
+              {{ if ne .AppID "core" }}
               <button type="button" class="btn" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;" onclick="loadLogs('{{ .AppID }}')">Logs</button>
+              {{ end }}
             </div>
           </td>
         </tr>

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -521,8 +522,29 @@ func runContainerizedHost(port, dataDir string, openUI bool) bool {
 		return false
 	}
 
+	// Start a lightweight host-only telemetry endpoint so ark-core displays true host CPU/RAM/OS stats
+	var extraEnv []string
+	if metricsLn, merr := net.Listen("tcp", "127.0.0.1:0"); merr == nil {
+		metricsMux := http.NewServeMux()
+		metricsMux.HandleFunc("/host-metrics", func(w http.ResponseWriter, r *http.Request) {
+			m, err := system.CollectMetrics(r.Context(), dataDir)
+			if err != nil || m == nil {
+				http.Error(w, "metrics unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(m)
+		})
+		metricsSrv := &http.Server{Handler: metricsMux, ReadTimeout: 2 * time.Second, WriteTimeout: 2 * time.Second}
+		go func() { _ = metricsSrv.Serve(metricsLn) }()
+		defer func() { _ = metricsSrv.Close() }()
+		if tcpAddr, ok := metricsLn.Addr().(*net.TCPAddr); ok {
+			extraEnv = append(extraEnv, fmt.Sprintf("ARK_HOST_METRICS_URL=http://host.docker.internal:%d/host-metrics", tcpAddr.Port))
+		}
+	}
+
 	log.Printf("[Ark] Starting containerized Ark Command Center (%s)...", docker.CoreContainerName)
-	if err := cli.EnsureCoreContainer(bootCtx, port, dataDir); err != nil {
+	if err := cli.EnsureCoreContainer(bootCtx, port, dataDir, extraEnv...); err != nil {
 		log.Printf("[Ark] Failed to start %s container: %v", docker.CoreContainerName, err)
 		return false
 	}

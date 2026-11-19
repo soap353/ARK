@@ -452,7 +452,7 @@ func (c *Client) Restart(ctx context.Context, appID string, timeoutSec int) erro
 }
 
 // EnsureCoreContainer builds (if missing) and starts the containerized Ark Command Center web UI (ark-core).
-func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string) error {
+func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string, extraEnv ...string) error {
 	if c == nil || c.cli == nil {
 		return errors.New("docker client is nil")
 	}
@@ -500,15 +500,18 @@ func (c *Client) EnsureCoreContainer(ctx context.Context, port, dataDir string) 
 		},
 	}
 
+	env := []string{
+		"ARK_IN_CONTAINER=1",
+		"ARK_HOST_DATA_DIR=" + absDataDir,
+		"ARK_DATA_DIR=/data",
+		"ARK_PORT=8080",
+	}
+	env = append(env, extraEnv...)
+
 	containerConfig := &container.Config{
 		Image:        CoreImageName,
 		ExposedPorts: nat.PortSet{containerPort: struct{}{}},
-		Env: []string{
-			"ARK_IN_CONTAINER=1",
-			"ARK_HOST_DATA_DIR=" + absDataDir,
-			"ARK_DATA_DIR=/data",
-			"ARK_PORT=8080",
-		},
+		Env:          env,
 		Labels: map[string]string{
 			CoreLabelKey: "true",
 		},
@@ -771,36 +774,49 @@ func (c *Client) ImageLoad(ctx context.Context, input io.Reader) error {
 	return nil
 }
 
-// ListArkContainers lists all containers bearing the ark.app label.
+// ListArkContainers lists all containers bearing the ark.app or ark.core label.
 func (c *Client) ListArkContainers(ctx context.Context) ([]ContainerInfo, error) {
-	containers, err := c.cli.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", AppLabelKey)),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list ark containers: %w", err)
-	}
-
+	seen := make(map[string]bool)
 	var results []ContainerInfo
-	for _, cnt := range containers {
-		appID := cnt.Labels[AppLabelKey]
-		var hostPort int
-		for _, p := range cnt.Ports {
-			if p.PublicPort > 0 {
-				hostPort = int(p.PublicPort)
-				break
-			}
-		}
 
-		results = append(results, ContainerInfo{
-			ID:       cnt.ID,
-			AppID:    appID,
-			Name:     strings.TrimPrefix(cnt.Names[0], "/"),
-			Image:    cnt.Image,
-			Status:   cnt.State,
-			HostPort: hostPort,
-			Created:  time.Unix(cnt.Created, 0),
+	for _, labelKey := range []string{AppLabelKey, CoreLabelKey} {
+		containers, err := c.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filters.NewArgs(filters.Arg("label", labelKey)),
 		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list ark containers: %w", err)
+		}
+		for _, cnt := range containers {
+			if seen[cnt.ID] {
+				continue
+			}
+			seen[cnt.ID] = true
+			appID := cnt.Labels[AppLabelKey]
+			if appID == "" && cnt.Labels[CoreLabelKey] == "true" {
+				appID = "core"
+			}
+			var hostPort int
+			for _, p := range cnt.Ports {
+				if p.PublicPort > 0 {
+					hostPort = int(p.PublicPort)
+					break
+				}
+			}
+			name := ""
+			if len(cnt.Names) > 0 {
+				name = strings.TrimPrefix(cnt.Names[0], "/")
+			}
+			results = append(results, ContainerInfo{
+				ID:       cnt.ID,
+				AppID:    appID,
+				Name:     name,
+				Image:    cnt.Image,
+				Status:   cnt.State,
+				HostPort: hostPort,
+				Created:  time.Unix(cnt.Created, 0),
+			})
+		}
 	}
 	return results, nil
 }
