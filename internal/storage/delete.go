@@ -47,10 +47,7 @@ func CascadeDelete(ctx context.Context, cfg DeleteCascadeConfig, target DeleteTa
 	res := &DeleteCascadeResult{}
 
 	// Resolve absolute file path
-	absFilePath := target.FilePath
-	if absFilePath != "" && !filepath.IsAbs(absFilePath) && cfg.DataDir != "" {
-		absFilePath = filepath.Join(cfg.DataDir, target.FilePath)
-	}
+	absFilePath := resolveDataPath(cfg.DataDir, target.FilePath)
 
 	// 1. Remove File from Disk
 	if absFilePath != "" {

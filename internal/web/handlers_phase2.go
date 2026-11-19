@@ -59,8 +59,7 @@ func (s *Server) saveSettings(pairs map[string]string) error {
 }
 
 func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	lan := "false"
@@ -76,8 +75,7 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsAI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	pairs := map[string]string{
@@ -93,8 +91,7 @@ func (s *Server) handleSettingsAI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsDownloads(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	_ = s.saveSettings(map[string]string{
@@ -183,8 +180,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIContainerRestart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	appID := r.FormValue("id")
@@ -212,19 +208,16 @@ func (s *Server) handleAPIContainerLogs(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAPIAIDetect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	host := r.FormValue("host")
 	servers := ai.DetectServers(r.Context(), host)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"servers": servers})
+	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
 }
 
 func (s *Server) handleAPIAITest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	urlStr := strings.TrimSpace(r.FormValue("ai_server_url"))

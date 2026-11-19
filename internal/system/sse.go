@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -40,32 +41,32 @@ func (s *SSEFeed) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 
 	// Send an immediate first frame
-	if metrics, err := CollectMetrics(ctx, s.DiskPath); err == nil {
-		if data, err := json.Marshal(metrics); err == nil {
-			fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", data)
-			flusher.Flush()
-		}
-	}
+	_ = sendMetricsFrame(ctx, w, flusher, s.DiskPath)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			metrics, err := CollectMetrics(ctx, s.DiskPath)
-			if err != nil {
-				continue
-			}
-
-			data, err := json.Marshal(metrics)
-			if err != nil {
-				continue
-			}
-
-			if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", data); err != nil {
+			if err := sendMetricsFrame(ctx, w, flusher, s.DiskPath); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
+}
+
+func sendMetricsFrame(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, diskPath string) error {
+	metrics, err := CollectMetrics(ctx, diskPath)
+	if err != nil {
+		return nil
+	}
+	data, err := json.Marshal(metrics)
+	if err != nil {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "event: metrics\ndata: %s\n\n", data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }

@@ -72,27 +72,11 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 	}
 
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head><title>App Unreachable — Ark</title>
-<style>
-body { background: #F4F6F9; color: #0F172A; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-.box { text-align: center; max-width: 480px; padding: 32px; background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
-h1 { color: #0369A1; font-size: 1.5rem; margin-bottom: 12px; }
-p { color: #475569; line-height: 1.5; }
-a { color: #0369A1; text-decoration: none; font-weight: 600; }
-</style>
-</head>
-<body>
-<div class="box">
-  <h1>App Module Unavailable</h1>
-  <p>The module <strong>%s</strong> is still starting up or temporarily unreachable.</p>
-  <p><a href="javascript:location.reload()">Click here to retry</a> or return to <a href="/">Ark Home</a>.</p>
-</div>
-</body>
-</html>`, appID)
+		writeAppStatusPage(w, http.StatusBadGateway,
+			"App Unreachable — Ark",
+			"App Module Unavailable",
+			fmt.Sprintf(`<p>The module <strong>%s</strong> is still starting up or temporarily unreachable.</p>
+  <p><a href="javascript:location.reload()">Click here to retry</a> or return to <a href="/">Ark Home</a>.</p>`, appID))
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -156,27 +140,11 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pm.mu.RUnlock()
 
 	if !ok || route == nil || route.Proxy == nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head><title>App Not Running — Ark</title>
-<style>
-body { background: #F4F6F9; color: #0F172A; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-.box { text-align: center; max-width: 480px; padding: 32px; background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
-h1 { color: #0369A1; font-size: 1.5rem; margin-bottom: 12px; }
-p { color: #475569; line-height: 1.5; }
-a { color: #0369A1; text-decoration: none; font-weight: 600; }
-</style>
-</head>
-<body>
-<div class="box">
-  <h1>App Not Active</h1>
-  <p>The module <strong>%s</strong> is not currently running.</p>
-  <p><a href="/apps">Manage Apps in Settings</a> or return to <a href="/">Ark Home</a>.</p>
-</div>
-</body>
-</html>`, appID)
+		writeAppStatusPage(w, http.StatusNotFound,
+			"App Not Running — Ark",
+			"App Not Active",
+			fmt.Sprintf(`<p>The module <strong>%s</strong> is not currently running.</p>
+  <p><a href="/apps">Manage Apps in Settings</a> or return to <a href="/">Ark Home</a>.</p>`, appID))
 		return
 	}
 
@@ -240,4 +208,27 @@ func insertAfterBodyOpen(htmlBytes, snippet []byte) []byte {
 		}
 	}
 	return bytes.Replace(htmlBytes, []byte("</body>"), append(snippet, []byte("</body>")...), 1)
+}
+
+func writeAppStatusPage(w http.ResponseWriter, status int, title, heading, bodyHTML string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head><title>%s</title>
+<style>
+body { background: #F4F6F9; color: #0F172A; font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { text-align: center; max-width: 480px; padding: 32px; background: #FFFFFF; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
+h1 { color: #0369A1; font-size: 1.5rem; margin-bottom: 12px; }
+p { color: #475569; line-height: 1.5; }
+a { color: #0369A1; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>%s</h1>
+  %s
+</div>
+</body>
+</html>`, title, heading, bodyHTML)
 }

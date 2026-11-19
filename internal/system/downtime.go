@@ -30,27 +30,14 @@ func RecordShutdownTime(ctx context.Context, db *sql.DB, now time.Time) error {
 	if db == nil {
 		return nil
 	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	} else {
-		now = now.UTC()
-	}
-	ts := now.Format(time.RFC3339)
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO settings (key, value) VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value
-	`, settingLastShutdownAt, ts)
-	return err
+	ts := normalizeUTC(now).Format(time.RFC3339)
+	return upsertSetting(ctx, db, settingLastShutdownAt, ts)
 }
 
 // RecordStartupAndComputeDowntime compares current system time against the saved shutdown time
 // and stores the elapsed downtime in settings for Telemetry, AI, and retention checks.
 func RecordStartupAndComputeDowntime(ctx context.Context, db *sql.DB, now time.Time) DowntimeInfo {
-	if now.IsZero() {
-		now = time.Now().UTC()
-	} else {
-		now = now.UTC()
-	}
+	now = normalizeUTC(now)
 	startedStr := now.Format(time.RFC3339)
 	info := DowntimeInfo{LastStartedAt: startedStr}
 	if db == nil {
@@ -79,12 +66,24 @@ func RecordStartupAndComputeDowntime(ctx context.Context, db *sql.DB, now time.T
 		{settingLastDowntimeHuman, info.DowntimeHuman},
 	}
 	for _, p := range pairs {
-		_, _ = db.ExecContext(ctx, `
-			INSERT INTO settings (key, value) VALUES (?, ?)
-			ON CONFLICT(key) DO UPDATE SET value = excluded.value
-		`, p[0], p[1])
+		_ = upsertSetting(ctx, db, p[0], p[1])
 	}
 	return info
+}
+
+func normalizeUTC(now time.Time) time.Time {
+	if now.IsZero() {
+		return time.Now().UTC()
+	}
+	return now.UTC()
+}
+
+func upsertSetting(ctx context.Context, db *sql.DB, key, value string) error {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO settings (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, key, value)
+	return err
 }
 
 // GetDowntimeInfo reads the computed startup downtime metadata from SQLite settings.

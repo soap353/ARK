@@ -521,11 +521,6 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 	return nil
 }
 
-func (r *Aria2cRunner) probeRangeSupport(ctx context.Context, rawURL string) (int64, bool) {
-	totalLen, _, ok := r.probeSingleMirrorRange(ctx, rawURL, 8*time.Second)
-	return totalLen, ok
-}
-
 func (r *Aria2cRunner) probeSingleMirrorRange(ctx context.Context, rawURL string, timeout time.Duration) (int64, string, bool) {
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

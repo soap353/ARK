@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,12 +90,11 @@ func formatHumanBytes(b int64) string {
 }
 
 func (s *Server) handleSettingsUSBProfile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Invalid form submission"), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Invalid form submission")
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("profile_name"))
@@ -108,20 +106,19 @@ func (s *Server) handleSettingsUSBProfile(w http.ResponseWriter, r *http.Request
 	}
 	if s.db != nil {
 		if err := usb.SaveProfile(s.db, name, desc, cfg); err != nil {
-			http.Redirect(w, r, "/settings?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+			redirectWithQuery(w, r, "/settings", "err", err.Error())
 			return
 		}
 	}
-	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("USB export profile saved."), http.StatusSeeOther)
+	redirectWithQuery(w, r, "/settings", "msg", "USB export profile saved.")
 }
 
 func (s *Server) handleSettingsUSBExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Invalid form submission"), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Invalid form submission")
 		return
 	}
 
@@ -131,7 +128,7 @@ func (s *Server) handleSettingsUSBExport(w http.ResponseWriter, r *http.Request)
 		target = custom
 	}
 	if target == "" {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Select a target drive or enter a custom destination path."), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Select a target drive or enter a custom destination path.")
 		return
 	}
 
@@ -139,7 +136,7 @@ func (s *Server) handleSettingsUSBExport(w http.ResponseWriter, r *http.Request)
 	includeDocker := r.FormValue("include_docker") != ""
 	includeConfig := r.FormValue("include_config") != ""
 	if len(categories) == 0 && !includeDocker && !includeConfig {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Select at least one content category, Docker images, or settings to export."), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Select at least one content category, Docker images, or settings to export.")
 		return
 	}
 
@@ -166,7 +163,7 @@ func (s *Server) handleSettingsUSBExport(w http.ResponseWriter, r *http.Request)
 			Metadata:    string(metaBytes),
 		}
 		if err := s.queue.Submit(r.Context(), job); err != nil {
-			http.Redirect(w, r, "/settings?err="+url.QueryEscape("Failed to enqueue USB export: "+err.Error()), http.StatusSeeOther)
+			redirectWithQuery(w, r, "/settings", "err", "Failed to enqueue USB export: "+err.Error())
 			return
 		}
 		http.Redirect(w, r, "/system", http.StatusSeeOther)
@@ -174,10 +171,10 @@ func (s *Server) handleSettingsUSBExport(w http.ResponseWriter, r *http.Request)
 	}
 
 	if _, err := usb.ExportToUSB(r.Context(), s.dataDir, cfg, nil, nil); err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", err.Error())
 		return
 	}
-	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("USB export completed."), http.StatusSeeOther)
+	redirectWithQuery(w, r, "/settings", "msg", "USB export completed.")
 }
 
 func (s *Server) installedImageNames() []string {
@@ -202,55 +199,53 @@ func (s *Server) installedImageNames() []string {
 }
 
 func (s *Server) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	src := strings.TrimSpace(r.FormValue("update_source"))
 	if src == "" {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Enter the update bundle directory or mounted USB path."), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Enter the update bundle directory or mounted USB path.")
 		return
 	}
 
 	pubKey, err := update.DefaultPublicKey()
 	if err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", err.Error())
 		return
 	}
 	m, newBin, err := update.LoadUpdateFromDir(src, pubKey)
 	if err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Update rejected: "+err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Update rejected: "+err.Error())
 		return
 	}
 	exePath, err := os.Executable()
 	if err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", err.Error())
 		return
 	}
 	s.stopAllContainersForLifecycle(r.Context())
 	if err := update.ApplyUpdate(exePath, newBin, s.dataDir, update.ArkVersion, m.Version); err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Apply update failed: "+err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Apply update failed: "+err.Error())
 		return
 	}
 	msg := fmt.Sprintf("Update v%s verified and staged with DB snapshot. Restart Ark to complete upgrade.", m.Version)
-	http.Redirect(w, r, "/settings?msg="+url.QueryEscape(msg), http.StatusSeeOther)
+	redirectWithQuery(w, r, "/settings", "msg", msg)
 }
 
 func (s *Server) handleSettingsRollback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	exePath, err := os.Executable()
 	if err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", err.Error())
 		return
 	}
 	if err := update.Rollback(exePath, s.dataDir); err != nil {
-		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Rollback failed: "+err.Error()), http.StatusSeeOther)
+		redirectWithQuery(w, r, "/settings", "err", "Rollback failed: "+err.Error())
 		return
 	}
-	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("Rolled back binary and database snapshot. Restart Ark to run the previous version."), http.StatusSeeOther)
+	redirectWithQuery(w, r, "/settings", "msg", "Rolled back binary and database snapshot. Restart Ark to run the previous version.")
 }
 
 func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {

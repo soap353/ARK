@@ -16,6 +16,14 @@ type IntegrityReport struct {
 	OrphanRAGDocs  []string `json:"orphan_rag_docs"`  // RAG documents pointing to non-existent disk files
 }
 
+// resolveDataPath resolves a relative path against dataDir if it is not already absolute.
+func resolveDataPath(dataDir, p string) string {
+	if p == "" || filepath.IsAbs(p) || dataDir == "" {
+		return p
+	}
+	return filepath.Join(dataDir, p)
+}
+
 // CheckIntegrity audits ArkData storage against database records to find discrepancies.
 func CheckIntegrity(ctx context.Context, dataDir string, db *sql.DB) (*IntegrityReport, error) {
 	report := &IntegrityReport{
@@ -38,10 +46,7 @@ func CheckIntegrity(ctx context.Context, dataDir string, db *sql.DB) (*Integrity
 				catalogMap[slashP] = id
 
 				// Check if file exists on disk
-				checkPath := cleanP
-				if !filepath.IsAbs(checkPath) && dataDir != "" {
-					checkPath = filepath.Join(dataDir, cleanP)
-				}
+				checkPath := resolveDataPath(dataDir, cleanP)
 				if _, err := os.Stat(checkPath); os.IsNotExist(err) {
 					report.MissingFiles = append(report.MissingFiles, slashP)
 				}
@@ -58,10 +63,7 @@ func CheckIntegrity(ctx context.Context, dataDir string, db *sql.DB) (*Integrity
 			if err := ragRows.Scan(&id, &sourcePath); err == nil && sourcePath != "" {
 				cleanP := filepath.Clean(sourcePath)
 				slashP := filepath.ToSlash(cleanP)
-				checkPath := cleanP
-				if !filepath.IsAbs(checkPath) && dataDir != "" {
-					checkPath = filepath.Join(dataDir, cleanP)
-				}
+				checkPath := resolveDataPath(dataDir, cleanP)
 				if _, err := os.Stat(checkPath); os.IsNotExist(err) {
 					report.OrphanRAGDocs = append(report.OrphanRAGDocs, slashP)
 				}
@@ -116,11 +118,7 @@ func PruneOrphans(ctx context.Context, dataDir string, db *sql.DB, report *Integ
 	// 3. Delete orphan files if requested
 	if removeOrphanDiskFiles {
 		for _, orphanFile := range report.OrphanFiles {
-			target := orphanFile
-			if !filepath.IsAbs(target) && dataDir != "" {
-				target = filepath.Join(dataDir, target)
-			}
-			_ = os.Remove(target)
+			_ = os.Remove(resolveDataPath(dataDir, orphanFile))
 		}
 	}
 
