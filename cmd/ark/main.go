@@ -351,7 +351,18 @@ func runServer(args []string) {
 		log.Fatalf("[Ark] Failed to register web routes: %v", err)
 	}
 
-	ln, err := net.Listen("tcp", ":"+port)
+	var ln net.Listener
+	listenTries := 1
+	if os.Getenv("ARK_RESTART") == "1" {
+		listenTries = 80 // restarted child: wait up to ~40s for the old instance to release the port
+	}
+	for i := 0; i < listenTries; i++ {
+		ln, err = net.Listen("tcp", ":"+port)
+		if err == nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 	if err != nil {
 		_, _ = update.CheckAndRecoverOnStartup(exePath, dataDir)
 		log.Fatalf("[Ark] Failed to listen on port %s: %v", port, err)

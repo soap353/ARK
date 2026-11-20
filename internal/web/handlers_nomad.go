@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -288,9 +290,19 @@ func (s *Server) handleSettingsRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	s.stopAllContainersForLifecycle(r.Context())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte("<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem;background:#F5F2EB;color:#1C1F1D'><h2>Ark is shutting down for restart...</h2><p>If running under a service manager, reload this page in a few seconds. Otherwise start <code>ark</code> again to boot the updated binary.</p></body></html>"))
+	_, _ = w.Write([]byte("<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem;background:#F5F2EB;color:#1C1F1D'><h2>Restarting Ark...</h2><p id='st'>Stopping services and relaunching. This page will reload automatically.</p><script>(function(){var tries=0;function poll(){tries++;fetch('/healthz',{cache:'no-store'}).then(function(r){if(r.ok&&tries>4){location.href='/settings';}else{setTimeout(poll,1000);}}).catch(function(){setTimeout(poll,1000);});}setTimeout(poll,2500);})();</script></body></html>"))
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
+	}
+	// Relaunch a fresh copy of this binary; the child waits for the port to free up (ARK_RESTART=1).
+	if exe, err := os.Executable(); err == nil && os.Getenv("ARK_IN_CONTAINER") != "1" {
+		cmd := exec.Command(exe, os.Args[1:]...)
+		cmd.Env = append(os.Environ(), "ARK_RESTART=1", "ARK_NO_BROWSER=1")
+		if err := cmd.Start(); err != nil {
+			log.Printf("[Ark] Restart relaunch failed: %v", err)
+		} else {
+			_ = cmd.Process.Release()
+		}
 	}
 	go func() {
 		time.Sleep(350 * time.Millisecond)
