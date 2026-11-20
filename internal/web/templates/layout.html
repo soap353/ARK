@@ -110,6 +110,57 @@
         bd.classList.toggle('open');
       }
     }
+
+    document.addEventListener('submit', function(ev) {
+      var form = ev.target;
+      if (!form || form.tagName !== 'FORM' || form.dataset.spaceConfirmed === '1') return;
+      var action = form.getAttribute('action') || '';
+      if (action !== '/api/jobs' && action !== '/api/maps/extract') return;
+
+      var typeEl = form.querySelector('[name="type"]');
+      var targetEl = form.querySelector('[name="target"]');
+      var slugEl = form.querySelector('[name="slug"]');
+      var sizeEl = form.querySelector('[name="size_bytes"]');
+      var dlType = action === '/api/maps/extract' ? 'map_extract' : (typeEl ? typeEl.value : '');
+      var dlTarget = action === '/api/maps/extract' ? (slugEl ? slugEl.value : '') : (targetEl ? targetEl.value : '');
+      if (!dlType || !dlTarget) return;
+
+      ev.preventDefault();
+      var qs = '/api/storage/check-space?type=' + encodeURIComponent(dlType) + '&target=' + encodeURIComponent(dlTarget);
+      if (sizeEl && sizeEl.value) {
+        qs += '&size_bytes=' + encodeURIComponent(sizeEl.value);
+      }
+
+      fetch(qs)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(res) {
+          if (!res || res.status === 'ok') {
+            form.dataset.spaceConfirmed = '1';
+            form.submit();
+            return;
+          }
+          if (res.status === 'insufficient') {
+            alert(res.message || 'Not enough free disk space for this download.');
+            return;
+          }
+          if (confirm((res.message || 'This download uses a large portion of your free disk space.') + '\n\nProceed with download anyway?')) {
+            var ci = form.querySelector('input[name="confirm_space"]');
+            if (!ci) {
+              ci = document.createElement('input');
+              ci.type = 'hidden';
+              ci.name = 'confirm_space';
+              form.appendChild(ci);
+            }
+            ci.value = '1';
+            form.dataset.spaceConfirmed = '1';
+            form.submit();
+          }
+        })
+        .catch(function() {
+          form.dataset.spaceConfirmed = '1';
+          form.submit();
+        });
+    });
   </script>
 </body>
 </html>

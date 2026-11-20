@@ -349,6 +349,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/library/delete", s.handleAPILibraryDelete)
 	mux.HandleFunc("/api/library/updates", s.handleAPILibraryUpdates)
 	mux.HandleFunc("/api/library/icon", s.handleAPILibraryIcon)
+	mux.HandleFunc("/api/storage/check-space", s.handleAPIStorageCheckSpace)
 	mux.HandleFunc("/api/update/check", s.handleAPIUpdateCheck)
 	mux.HandleFunc("/api/apps/install", s.handleAPIAppInstall)
 	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
@@ -648,6 +649,26 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	target := r.FormValue("target")
 	if rawType == "" || target == "" {
 		http.Error(w, "Missing type or target", http.StatusBadRequest)
+		return
+	}
+
+	var sizeHint int64
+	if sb := strings.TrimSpace(r.FormValue("size_bytes")); sb != "" {
+		_, _ = fmt.Sscanf(sb, "%d", &sizeHint)
+	}
+	if spaceRes, ok := s.checkDownloadSpace(r.Context(), rawType, target, sizeHint); ok && spaceRes.Status == "insufficient" {
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInsufficientStorage)
+			_ = json.NewEncoder(w).Encode(spaceRes)
+			return
+		}
+		redir := sanitizeLocalRedirect(r.FormValue("redirect"))
+		sep := "?"
+		if strings.Contains(redir, "?") {
+			sep = "&"
+		}
+		http.Redirect(w, r, redir+sep+"err="+url.QueryEscape(spaceRes.Message), http.StatusSeeOther)
 		return
 	}
 

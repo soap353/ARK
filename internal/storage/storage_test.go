@@ -242,3 +242,38 @@ func TestIntegrityAndPrune(t *testing.T) {
 		t.Errorf("Expected zero orphans after prune, got: %+v", postReport)
 	}
 }
+
+func TestEvaluateSpaceAndParseSizeText(t *testing.T) {
+	const gb = uint64(1024 * 1024 * 1024)
+
+	// 1. OK (< 25% of free space and > 1 GB buffer)
+	okRes := EvaluateSpace(20*gb, 100*gb, int64(2*gb))
+	if okRes.Status != "ok" {
+		t.Errorf("expected ok for 2 GB on 20 GB free, got %+v", okRes)
+	}
+
+	// 2. Warn (>= 25% of free space)
+	warnRes := EvaluateSpace(20*gb, 100*gb, int64(6*gb))
+	if warnRes.Status != "warn" {
+		t.Errorf("expected warn for 6 GB on 20 GB free, got %+v", warnRes)
+	}
+
+	// 3. Insufficient (would violate 1 GB safety buffer or exceed free)
+	insRes := EvaluateSpace(5*gb, 100*gb, int64(4500*1024*1024))
+	if insRes.Status != "insufficient" {
+		t.Errorf("expected insufficient for 4.5 GB on 5 GB free, got %+v", insRes)
+	}
+
+	// 4. Unknown size on critically low disk (< 2 GB free) -> warn
+	lowRes := EvaluateSpace(1*gb, 100*gb, 0)
+	if lowRes.Status != "warn" {
+		t.Errorf("expected warn on 1 GB free with unknown size, got %+v", lowRes)
+	}
+
+	if got := ParseSizeText("~3.5 GB"); got != int64(3.5*float64(gb)) {
+		t.Errorf("ParseSizeText(~3.5 GB) = %d", got)
+	}
+	if got := ParseSizeText("280 MB"); got != 280*1024*1024 {
+		t.Errorf("ParseSizeText(280 MB) = %d", got)
+	}
+}

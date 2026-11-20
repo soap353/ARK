@@ -1875,3 +1875,53 @@ func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
 		t.Errorf("expected online /api/system/time source=online, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestStorageSpacePrecheckAndBlocking(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, metadata TEXT, error TEXT, created_at DATETIME, updated_at DATETIME)`)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. Check /api/storage/check-space on starter_pack and map_extract
+	req := httptest.NewRequest(http.MethodGet, "/api/storage/check-space?type=preset&target=starter_pack", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"known_size":true`) {
+		t.Fatalf("expected known_size:true from /api/storage/check-space, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/storage/check-space?type=map_extract&target=united-states", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"known_size":true`) {
+		t.Fatalf("expected known_size:true for united-states map extract, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. Oversized download is blocked cleanly by POST /api/jobs (JSON 507 + form redirect ?err=)
+	form := url.Values{
+		"type":       {"kiwix_zim"},
+		"target":     {"https://example.invalid/huge.zim"},
+		"size_bytes": {"99999999999999999"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInsufficientStorage || !strings.Contains(w.Body.String(), `"status":"insufficient"`) {
+		t.Errorf("expected HTTP 507 insufficient for oversized download, got %d: %s", w.Code, w.Body.String())
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"ark/internal/fieldguide"
 	"ark/internal/jobs"
 	"ark/internal/kiwix"
+	"ark/internal/storage"
 	"ark/internal/system"
 	"ark/internal/update"
 )
@@ -585,6 +586,73 @@ func (s *Server) handleAPISystemInstallRuntime(w http.ResponseWriter, r *http.Re
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": msg, "runtime": "Podman"})
 }
 
+func (s *Server) estimateDownloadBytes(ctx context.Context, rawType, target string, sizeHint int64) int64 {
+	if sizeHint > 0 {
+		return sizeHint
+	}
+	switch strings.ToLower(strings.TrimSpace(rawType)) {
+	case "preset":
+		var total int64
+		for _, res := range kiwix.ResolvePresetResources(target) {
+			if res.SizeMB > 0 {
+				total += int64(res.SizeMB) * 1024 * 1024
+			}
+		}
+		if total > 0 {
+			return total
+		}
+		norm := strings.ToLower(strings.TrimSpace(target))
+		for _, opt := range kiwix.GetWikipediaOptions() {
+			if norm == strings.ToLower(opt.ID) || norm == strings.ToLower(opt.PresetTarget) {
+				if parsed := storage.ParseSizeText(opt.SizeLabel); parsed > 0 {
+					return parsed
+				}
+			}
+		}
+	case "map_extract":
+		if opt := kiwix.FindCountryMapBySlug(target); opt != nil {
+			return storage.ParseSizeText(opt.SizeEstimate)
+		}
+	}
+	if s.db != nil && (strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")) {
+		var sz int64
+		if err := s.db.QueryRow(`SELECT COALESCE(size_bytes, 0) FROM catalog_items WHERE url = ? LIMIT 1`, target).Scan(&sz); err == nil && sz > 0 {
+			return sz
+		}
+	}
+	return storage.ProbeRemoteSize(ctx, target)
+}
+
+func (s *Server) checkDownloadSpace(ctx context.Context, rawType, target string, sizeHint int64) (storage.SpaceCheckResult, bool) {
+	est := s.estimateDownloadBytes(ctx, rawType, target, sizeHint)
+	res, err := storage.CheckDiskSpaceForPath(ctx, s.dataDir, est)
+	if err != nil {
+		return storage.SpaceCheckResult{}, false
+	}
+	return res, true
+}
+
+func (s *Server) handleAPIStorageCheckSpace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rawType := strings.TrimSpace(r.URL.Query().Get("type"))
+	target := strings.TrimSpace(r.URL.Query().Get("target"))
+	var sizeHint int64
+	if sb := strings.TrimSpace(r.URL.Query().Get("size_bytes")); sb != "" {
+		if parsed, err := strconv.ParseInt(sb, 10, 64); err == nil && parsed > 0 {
+			sizeHint = parsed
+		}
+	}
+	res, ok := s.checkDownloadSpace(r.Context(), rawType, target, sizeHint)
+	if !ok {
+		res = storage.EvaluateSpace(0, 0, sizeHint)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
+}
+
 // ---------------------------------------------------------------------------
 // Maps Country Extract & Custom Offline Map Pins (/maps)
 // ---------------------------------------------------------------------------
@@ -635,6 +703,10 @@ func (s *Server) handleAPIMapsExtract(w http.ResponseWriter, r *http.Request) {
 	opt := kiwix.FindCountryMapBySlug(slug)
 	if opt == nil {
 		http.Redirect(w, r, "/maps?err="+url.QueryEscape("Unknown country/map slug"), http.StatusSeeOther)
+		return
+	}
+	if spaceRes, ok := s.checkDownloadSpace(r.Context(), "map_extract", opt.Slug, 0); ok && spaceRes.Status == "insufficient" {
+		http.Redirect(w, r, "/maps?err="+url.QueryEscape(spaceRes.Message), http.StatusSeeOther)
 		return
 	}
 	metaBytes, _ := json.Marshal(jobs.JobMetadata{
