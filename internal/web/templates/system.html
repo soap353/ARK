@@ -174,41 +174,6 @@
   {{ end }}
 </section>
 
-<!-- System & AI Hardware Benchmark -->
-<div class="card" aria-label="Hardware and AI Benchmark">
-  <div class="card-header">
-    <div>
-      <h2 style="margin: 0;">System &amp; AI Benchmark</h2>
-      <span class="secondary-text" style="font-size: 13px;">Measures multi-core CPU hash rate, memory bandwidth, disk I/O in ArkData, and optional AI tok/s.</span>
-    </div>
-    <button type="button" id="bench-run-btn" class="btn btn-primary" onclick="runBenchmark()">Run Benchmark</button>
-  </div>
-
-  <div id="bench-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 0.85rem;">
-    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 13px;">Ark Readiness Score</div>
-      <div id="bench-score" class="tabular" style="font-size: 24px; font-weight: 700;">{{ if .LastBenchmark }}{{ .LastBenchmark.OverallScore }}{{ else }}-{{ end }}</div>
-      <div id="bench-tier" class="badge" style="margin-top: 4px;">{{ if .LastBenchmark }}{{ .LastBenchmark.Tier }}{{ else }}Not run{{ end }}</div>
-    </div>
-    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 13px;">CPU Compute</div>
-      <div id="bench-cpu" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.0f MB/s" .LastBenchmark.CPUMBs }}{{ else }}-{{ end }}</div>
-    </div>
-    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 13px;">Memory Bandwidth</div>
-      <div id="bench-ram" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.1f GB/s" .LastBenchmark.MemoryGBs }}{{ else }}-{{ end }}</div>
-    </div>
-    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 13px;">Disk I/O (W / R)</div>
-      <div id="bench-disk" class="tabular" style="font-size: 19px; font-weight: 700;">{{ if .LastBenchmark }}{{ printf "%.0f / %.0f MB/s" .LastBenchmark.DiskWriteMBs .LastBenchmark.DiskReadMBs }}{{ else }}-{{ end }}</div>
-    </div>
-    <div style="padding: 0.85rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
-      <div class="secondary-text" style="font-size: 13px;">AI Inference</div>
-      <div id="bench-ai" class="tabular" style="font-size: 22px; font-weight: 700;">{{ if and .LastBenchmark (gt .LastBenchmark.AITokensPerSec 0.0) }}{{ printf "%.1f tok/s" .LastBenchmark.AITokensPerSec }}{{ else }}N/A{{ end }}</div>
-    </div>
-  </div>
-</div>
-
 <div class="card">
   <h2>App Containers</h2>
   {{ if .Containers }}
@@ -321,26 +286,6 @@
     } catch (_) {}
   });
 })();
-
-function runBenchmark() {
-  const btn = document.getElementById('bench-run-btn');
-  btn.disabled = true;
-  btn.textContent = 'Running (~2s)...';
-  fetch('/api/system/benchmark', { method: 'POST' })
-    .then(r => r.json())
-    .then(b => {
-      document.getElementById('bench-score').textContent = b.overall_score;
-      document.getElementById('bench-tier').textContent = b.tier;
-      document.getElementById('bench-cpu').textContent = Math.round(b.cpu_mbs) + ' MB/s';
-      document.getElementById('bench-ram').textContent = b.memory_gbs.toFixed(1) + ' GB/s';
-      document.getElementById('bench-disk').textContent = Math.round(b.disk_write_mbs) + ' / ' + Math.round(b.disk_read_mbs) + ' MB/s';
-      document.getElementById('bench-ai').textContent = b.ai_tokens_per_sec > 0 ? (b.ai_tokens_per_sec.toFixed(1) + ' tok/s') : 'Offline';
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.textContent = 'Run Benchmark';
-    });
-}
 
 function loadLogs(appId) {
   const card = document.getElementById('logs-card');

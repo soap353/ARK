@@ -200,7 +200,6 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		DockerOnline:        rtOnline,
 		RuntimeLabel:        rtLabel,
 		CanInstallRuntime:   canInstallRt,
-		LastBenchmark:       s.loadLastBenchmark(),
 		LastDowntime:        system.GetDowntimeInfo(r.Context(), s.db),
 		StorageFreeGB:       freeGB,
 		StorageTotalGB:      totalGB,

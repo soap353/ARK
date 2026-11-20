@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"ark/catalog"
 	"ark/internal/ai"
+	"ark/internal/apps"
 	"ark/internal/jobs"
 
 	"github.com/klauspost/compress/zstd"
@@ -717,12 +719,17 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 		t.Errorf("expected deleted ZIM file to be removed from disk")
 	}
 
-	// Verify /api/system/benchmark works
-	req = httptest.NewRequest(http.MethodPost, "/api/system/benchmark", nil)
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"overall_score"`) {
-		t.Errorf("expected benchmark JSON, got %d: %s", w.Code, w.Body.String())
+	// Verify embedded catalog fallback works cleanly even outside repo root (standalone release binary)
+	embeddedManifests, err := apps.LoadAllManifestsFS(catalog.FS)
+	if err != nil || len(embeddedManifests) < 9 {
+		t.Errorf("expected embedded catalog manifests to load cleanly, got count=%d err=%v", len(embeddedManifests), err)
+	}
+	origWD, _ := os.Getwd()
+	_ = os.Chdir(t.TempDir())
+	_, avail := server.fetchApps()
+	_ = os.Chdir(origWD)
+	if len(avail) < 9 {
+		t.Errorf("expected fetchApps() to fall back to embedded catalog when disk catalog/ is absent, got %d apps", len(avail))
 	}
 
 	// Verify custom map pin save & read

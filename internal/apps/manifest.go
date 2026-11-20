@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -103,6 +104,44 @@ func LoadAllManifests(baseDir string) ([]*AppManifest, error) {
 		yamlPath := filepath.Join(baseDir, entry.Name(), "app.yaml")
 		if _, err := os.Stat(yamlPath); err == nil {
 			m, err := LoadManifest(yamlPath)
+			if err != nil {
+				return nil, err
+			}
+			manifests = append(manifests, m)
+		}
+	}
+	return manifests, nil
+}
+
+// LoadManifestFS loads and validates an AppManifest from an embedded or virtual fs.FS.
+func LoadManifestFS(fsys fs.FS, filePath string) (*AppManifest, error) {
+	f, err := fsys.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open embedded manifest %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	m, err := ParseManifest(f)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedded manifest %s: %w", filePath, err)
+	}
+	return m, nil
+}
+
+// LoadAllManifestsFS scans an fs.FS root (e.g. embedded catalog.FS) for <id>/app.yaml manifests.
+func LoadAllManifestsFS(fsys fs.FS) ([]*AppManifest, error) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read embedded catalog: %w", err)
+	}
+	var manifests []*AppManifest
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		yamlPath := entry.Name() + "/app.yaml"
+		if _, err := fs.Stat(fsys, yamlPath); err == nil {
+			m, err := LoadManifestFS(fsys, yamlPath)
 			if err != nil {
 				return nil, err
 			}

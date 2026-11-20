@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"ark/catalog"
 	"ark/internal/ai"
 	"ark/internal/apps"
 	"ark/internal/docker"
@@ -154,7 +155,6 @@ type PageData struct {
 	GuideConditions     []fieldguide.Condition
 	GuideCategories     []string
 	GuideRemedies       []fieldguide.Remedy
-	LastBenchmark       *system.BenchmarkResult
 	LastDowntime        system.DowntimeInfo
 	GitHubRepo          string
 }
@@ -330,7 +330,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/custom", s.handleAPICustomAppSave)
 	mux.HandleFunc("/api/apps/update", s.handleAPIAppUpdateImage)
 	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
-	mux.HandleFunc("/api/system/benchmark", s.handleAPISystemBenchmark)
 	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
 	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
@@ -1140,7 +1139,10 @@ func (s *Server) handleAPIAppUninstall(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) fetchApps() ([]AppView, []AppView) {
 	catDir := findCatalogDir()
-	manifests, _ := apps.LoadAllManifests(catDir)
+	manifests, err := apps.LoadAllManifests(catDir)
+	if err != nil || len(manifests) == 0 {
+		manifests, _ = apps.LoadAllManifestsFS(catalog.FS)
+	}
 	customs := apps.LoadCustomManifests(s.dataDir)
 	customSet := make(map[string]bool)
 	for _, cm := range customs {

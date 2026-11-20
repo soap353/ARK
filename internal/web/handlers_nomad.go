@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"ark/catalog"
 	"ark/internal/ai"
 	"ark/internal/apps"
 	"ark/internal/docker"
@@ -527,24 +528,8 @@ func (s *Server) handleAPIAIModelSelect(w http.ResponseWriter, r *http.Request) 
 }
 
 // ---------------------------------------------------------------------------
-// System Hardware & AI Benchmark (/system)
+// System Time & Container Runtime Setup (/system)
 // ---------------------------------------------------------------------------
-
-func (s *Server) handleAPISystemBenchmark(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	settings := s.fetchSettings()
-	res := system.RunBenchmark(r.Context(), s.dataDir, settings["ai_server_url"], settings["ai_chat_model"])
-	if s.db != nil {
-		if raw, err := json.Marshal(res); err == nil {
-			_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('last_benchmark_json', ?)`, string(raw))
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(res)
-}
 
 var onlineTimeProbeURL = "https://www.google.com/generate_204"
 
@@ -598,18 +583,6 @@ func (s *Server) handleAPISystemInstallRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": msg, "runtime": "Podman"})
-}
-
-func (s *Server) loadLastBenchmark() *system.BenchmarkResult {
-	raw := s.fetchSettings()["last_benchmark_json"]
-	if raw == "" {
-		return nil
-	}
-	var res system.BenchmarkResult
-	if err := json.Unmarshal([]byte(raw), &res); err != nil {
-		return nil
-	}
-	return &res
 }
 
 // ---------------------------------------------------------------------------
@@ -741,6 +714,9 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 func (s *Server) loadAnyManifest(appID string) (*apps.AppManifest, error) {
 	catDir := findCatalogDir()
 	if m, err := apps.LoadManifest(filepath.Join(catDir, appID, "app.yaml")); err == nil {
+		return m, nil
+	}
+	if m, err := apps.LoadManifestFS(catalog.FS, appID+"/app.yaml"); err == nil {
 		return m, nil
 	}
 	return apps.LoadCustomManifest(s.dataDir, appID)
