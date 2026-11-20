@@ -177,9 +177,18 @@ func TestStopAllStopsLabeledContainersConcurrently(t *testing.T) {
 }
 
 func TestPodmanRuntimeAndBundledExtraction(t *testing.T) {
-	c := &Client{host: "unix:///run/user/1000/podman/podman.sock", runtime: "Podman"}
+	rawCli, err := client.NewClientWithOpts(client.WithHost("tcp://127.0.0.1:1"))
+	if err != nil {
+		t.Fatalf("create dummy client: %v", err)
+	}
+	defer rawCli.Close()
+	c := &Client{cli: rawCli, host: "unix:///run/user/1000/podman/podman.sock", runtime: "Podman"}
 	if got := c.RuntimeName(); got != "Podman" {
 		t.Errorf("expected RuntimeName() == Podman, got %q", got)
+	}
+	var nilCli *Client
+	if got := nilCli.RuntimeName(); got != "None" {
+		t.Errorf("expected nil RuntimeName() == None, got %q", got)
 	}
 
 	tmpDir := t.TempDir()
