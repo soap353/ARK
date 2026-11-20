@@ -313,6 +313,7 @@ var activeSessionID = '';
 var activeSessionPinned = false;
 var activeAskScope = 'all';
 var activeTriageType = '';
+var activeChatHistory = [];
 var lastContextUsed = 0;
 var preloadZIM = {{ .AskPreloadZIM }};
 var preloadArticle = {{ .AskPreloadArticle }};
@@ -550,6 +551,7 @@ function resetChatWelcome() {
 function startNewChat() {
   activeSessionID = '';
   activeSessionPinned = false;
+  activeChatHistory = [];
   var sel = document.getElementById('ask-session-select');
   if (sel) sel.value = '';
   updateSessionButtons();
@@ -638,10 +640,14 @@ function switchAskSession(id) {
       if (!data.ok || !data.session) return;
       activeSessionID = data.session.id;
       activeSessionPinned = !!data.session.pinned;
+      activeChatHistory = [];
       updateSessionButtons();
       var box = document.getElementById('chat-messages');
       box.innerHTML = '';
       (data.messages || []).forEach(function(m) {
+        if ((m.role === 'user' || m.role === 'assistant') && m.content) {
+          activeChatHistory.push({ role: m.role, content: m.content });
+        }
         if (m.role === 'user') {
           var uDiv = document.createElement('div');
           uDiv.className = 'user-msg-compact';
@@ -810,6 +816,7 @@ async function sendAsk(ev) {
 
   try {
     let resp;
+    const priorHistory = activeChatHistory.slice(-16);
     if (filesToSend.length > 0) {
       const fd = new FormData();
       fd.append('question', q);
@@ -820,6 +827,7 @@ async function sendAsk(ev) {
       fd.append('zim', preloadZIM);
       fd.append('article', preloadArticle);
       fd.append('stream', '1');
+      fd.append('history', JSON.stringify(priorHistory));
       if (activeSessionID) fd.append('session_id', activeSessionID);
       filesToSend.forEach(f => fd.append('files', f, f.name));
       resp = await fetch('/api/ai/chat', { method: 'POST', body: fd });
@@ -830,6 +838,7 @@ async function sendAsk(ev) {
         body: JSON.stringify({
           question: q,
           session_id: activeSessionID,
+          history: priorHistory,
           scope: activeAskScope,
           sources_only: sourcesOnly,
           protocol_mode: protocolMode,
@@ -841,6 +850,11 @@ async function sendAsk(ev) {
       });
     }
 
+    const hdrSess = resp.headers.get('X-Ark-Session-Id');
+    if (hdrSess) {
+      activeSessionID = hdrSess;
+    }
+
     const rct = (resp.headers.get('Content-Type') || '').toLowerCase();
     if (rct.includes('text/event-stream') && resp.body) {
       const reader = resp.body.getReader();
@@ -848,36 +862,52 @@ async function sendAsk(ev) {
       let sseBuf = '';
       let liveText = '';
       let finalPayload = null;
+      const processSSEEvent = (ev) => {
+        let evType = 'message';
+        let evData = '';
+        for (const ln of ev.split('\n')) {
+          if (ln.startsWith('event:')) evType = ln.slice(6).trim();
+          else if (ln.startsWith('data:')) evData += ln.slice(5).trim();
+        }
+        if (!evData) return;
+        try {
+          const parsed = JSON.parse(evData);
+          if (evType === 'token' && parsed.token) {
+            liveText += parsed.token;
+            ansSpan.textContent = liveText;
+            box.scrollTop = box.scrollHeight;
+          } else if (evType === 'done') {
+            finalPayload = parsed;
+          } else if (evType === 'error') {
+            ansSpan.textContent = parsed.error || 'Stream error';
+          }
+        } catch (e) {}
+      };
       while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          sseBuf += decoder.decode();
+          if (sseBuf.trim()) {
+            for (const ev of sseBuf.split('\n\n')) {
+              processSSEEvent(ev);
+            }
+          }
+          break;
+        }
         sseBuf += decoder.decode(value, { stream: true });
         const events = sseBuf.split('\n\n');
         sseBuf = events.pop() || '';
         for (const ev of events) {
-          let evType = 'message';
-          let evData = '';
-          for (const ln of ev.split('\n')) {
-            if (ln.startsWith('event:')) evType = ln.slice(6).trim();
-            else if (ln.startsWith('data:')) evData += ln.slice(5).trim();
-          }
-          if (!evData) continue;
-          try {
-            const parsed = JSON.parse(evData);
-            if (evType === 'token' && parsed.token) {
-              liveText += parsed.token;
-              ansSpan.textContent = liveText;
-              box.scrollTop = box.scrollHeight;
-            } else if (evType === 'done') {
-              finalPayload = parsed;
-            } else if (evType === 'error') {
-              ansSpan.textContent = parsed.error || 'Stream error';
-            }
-          } catch (e) {}
+          processSSEEvent(ev);
         }
       }
+      const finalAns = (finalPayload && finalPayload.answer) || liveText || '';
+      if (finalAns) {
+        activeChatHistory.push({ role: 'user', content: q || '[Attachment]' });
+        activeChatHistory.push({ role: 'assistant', content: finalAns });
+      }
       if (finalPayload) {
-        renderMarkdownAndMath(ansSpan, finalPayload.answer || liveText || '');
+        renderMarkdownAndMath(ansSpan, finalAns);
         renderReferencesAndMapActions(refList, finalPayload.citations || [], finalPayload.map_actions || []);
         updateContextGauge(finalPayload.context_used || 0, finalPayload.context_max || defaultContextMax);
         if (finalPayload.session_id) {
@@ -892,7 +922,12 @@ async function sendAsk(ev) {
       if (!resp.ok || data.error) {
         ansSpan.textContent = data.error || ('Request error ' + resp.status);
       } else {
-        renderMarkdownAndMath(ansSpan, data.answer || '');
+        const finalAns = data.answer || '';
+        if (finalAns) {
+          activeChatHistory.push({ role: 'user', content: q || '[Attachment]' });
+          activeChatHistory.push({ role: 'assistant', content: finalAns });
+        }
+        renderMarkdownAndMath(ansSpan, finalAns);
         renderReferencesAndMapActions(refList, data.citations || [], data.map_actions || []);
         updateContextGauge(data.context_used || 0, data.context_max || defaultContextMax);
         if (data.session_id) {

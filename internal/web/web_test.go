@@ -1925,3 +1925,75 @@ func TestStorageSpacePrecheckAndBlocking(t *testing.T) {
 		t.Errorf("expected HTTP 507 insufficient for oversized download, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestAskMultiTurnContextAndBottomSpacer(t *testing.T) {
+	var lastChatReqBody string
+	aiMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v0/models":
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"test-llm","type":"llm","state":"loaded","max_context_length":16384,"loaded_context_length":16384}]}`))
+		case "/v1/chat/completions":
+			var b bytes.Buffer
+			_, _ = b.ReadFrom(r.Body)
+			lastChatReqBody = b.String()
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"Camp Water\",\"answer\":\"Use Sawyer squeeze first.\",\"references\":[]}"}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer aiMock.Close()
+
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`INSERT INTO settings (key, value) VALUES ('ai_server_url', ?), ('ai_chat_model', 'test-llm')`, aiMock.URL)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// Turn 1
+	req1 := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"question":"What filter is in my camp checklist?"}`))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("turn 1 status = %d: %s", w1.Code, w1.Body.String())
+	}
+	sessID := w1.Header().Get("X-Ark-Session-Id")
+	if sessID == "" {
+		t.Fatalf("expected X-Ark-Session-Id header on turn 1")
+	}
+
+	// Turn 2 using session_id -> must include Turn 1 question & answer in multi-turn context
+	req2 := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(fmt.Sprintf(`{"question":"How do I backflush it?","session_id":%q}`, sessID)))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("turn 2 status = %d: %s", w2.Code, w2.Body.String())
+	}
+	for _, want := range []string{"Prior conversation history in this chat:", "What filter is in my camp checklist?", "Use Sawyer squeeze first."} {
+		if !strings.Contains(lastChatReqBody, want) {
+			t.Errorf("turn 2 LLM request missing prior context %q; got:\n%s", want, lastChatReqBody)
+		}
+	}
+
+	// Also verify bottom whitespace CSS rules on #chat-messages
+	cssReq := httptest.NewRequest(http.MethodGet, "/static/ark.css", nil)
+	cssW := httptest.NewRecorder()
+	mux.ServeHTTP(cssW, cssReq)
+	if !strings.Contains(cssW.Body.String(), "#chat-messages::after") {
+		t.Errorf("expected /static/ark.css to include #chat-messages::after bottom spacer")
+	}
+}

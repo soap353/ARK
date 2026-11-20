@@ -877,6 +877,18 @@ tr:hover td {
   margin-top: 0.2rem;
 }
 
+#chat-messages {
+  padding-bottom: 4.5rem;
+  scroll-padding-bottom: 4.5rem;
+}
+
+#chat-messages::after {
+  content: "";
+  display: block;
+  min-height: 4.5rem;
+  flex-shrink: 0;
+}
+
 .ai-msg-open {
   padding: 0.2rem 0 0.5rem;
   border-bottom: 1px solid var(--color-border);

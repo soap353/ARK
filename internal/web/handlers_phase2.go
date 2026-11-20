@@ -660,6 +660,11 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 	var attachedNames []string
 	var attachedText strings.Builder
 	var imageParts []ai.ContentPart
+	type historyTurn struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	var clientHistory []historyTurn
 
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -678,6 +683,9 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		sourcesOnly = r.FormValue("sources_only") == "1" || r.FormValue("sources_only") == "true"
 		protocolMode = r.FormValue("protocol_mode") == "1" || r.FormValue("protocol_mode") == "true"
 		wantStream = r.FormValue("stream") == "1" || r.FormValue("stream") == "true"
+		if rawHist := strings.TrimSpace(r.FormValue("history")); rawHist != "" {
+			_ = json.Unmarshal([]byte(rawHist), &clientHistory)
+		}
 		if r.MultipartForm != nil {
 			for _, fh := range r.MultipartForm.File["files"] {
 				attachedNames = append(attachedNames, fh.Filename)
@@ -736,17 +744,18 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var reqBody struct {
-			Question     string `json:"question"`
-			SessionID    string `json:"session_id"`
-			Scope        string `json:"scope"`
-			SourcesOnly  bool   `json:"sources_only"`
-			ProtocolMode bool   `json:"protocol_mode"`
-			TriageType   string `json:"triage_type"`
-			ZIM          string `json:"zim"`
-			Article      string `json:"article"`
-			Stream       bool   `json:"stream"`
+			Question     string        `json:"question"`
+			SessionID    string        `json:"session_id"`
+			Scope        string        `json:"scope"`
+			SourcesOnly  bool          `json:"sources_only"`
+			ProtocolMode bool          `json:"protocol_mode"`
+			TriageType   string        `json:"triage_type"`
+			ZIM          string        `json:"zim"`
+			Article      string        `json:"article"`
+			Stream       bool          `json:"stream"`
+			History      []historyTurn `json:"history"`
 		}
-		_ = json.NewDecoder(io.LimitReader(r.Body, 32*1024)).Decode(&reqBody)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 128*1024)).Decode(&reqBody)
 		q = strings.TrimSpace(reqBody.Question)
 		sessionID = strings.TrimSpace(reqBody.SessionID)
 		scope = strings.ToLower(strings.TrimSpace(reqBody.Scope))
@@ -756,6 +765,7 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		preZIM = strings.TrimSpace(reqBody.ZIM)
 		preArticle = strings.TrimSpace(reqBody.Article)
 		wantStream = reqBody.Stream
+		clientHistory = reqBody.History
 	}
 	if scope == "" {
 		scope = "all"
@@ -784,8 +794,8 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 				isFirstTurn = false
 			}
 			startIdx := 0
-			if len(prior) > 10 {
-				startIdx = len(prior) - 10
+			if len(prior) > 16 {
+				startIdx = len(prior) - 16
 			}
 			for _, m := range prior[startIdx:] {
 				historyMsgs = append(historyMsgs, ai.Msg{Role: m.Role, Content: m.Content})
@@ -799,6 +809,26 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 			sessionID = newID
 			existingTitle = "New Chat"
 		}
+	}
+	if len(historyMsgs) == 0 && len(clientHistory) > 0 {
+		isFirstTurn = false
+		startIdx := 0
+		if len(clientHistory) > 16 {
+			startIdx = len(clientHistory) - 16
+		}
+		for _, ht := range clientHistory[startIdx:] {
+			role := strings.ToLower(strings.TrimSpace(ht.Role))
+			content := strings.TrimSpace(ht.Content)
+			if (role == "user" || role == "assistant") && content != "" {
+				historyMsgs = append(historyMsgs, ai.Msg{Role: role, Content: content})
+				if sessionID != "" && s.db != nil {
+					_ = ai.AppendChatMessage(r.Context(), s.db, sessionID, role, content, "")
+				}
+			}
+		}
+	}
+	if sessionID != "" {
+		w.Header().Set("X-Ark-Session-Id", sessionID)
 	}
 
 	conn := ai.LoadConnFromDB(r.Context(), s.db)
@@ -865,9 +895,18 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #13: Scoped & federated retrieval (#1 ZIMs, #2 Remedy, #3 Drug Labels, #4 Indexed notes/docs)
+	ragQuery := q
+	if len(historyMsgs) > 0 {
+		for i := len(historyMsgs) - 1; i >= 0; i-- {
+			if historyMsgs[i].Role == "user" && strings.TrimSpace(historyMsgs[i].Content) != "" {
+				ragQuery = historyMsgs[i].Content + " " + q
+				break
+			}
+		}
+	}
 	if scope != "attached" {
 		if scope == "all" || scope == "notes" || scope == "zim" {
-			hits, _ := ai.SearchKnowledge(r.Context(), s.db, conn, qdrant, ai.DefaultCollection, q, 3)
+			hits, _ := ai.SearchKnowledge(r.Context(), s.db, conn, qdrant, ai.DefaultCollection, ragQuery, 3)
 			for _, h := range hits {
 				if scope == "notes" && strings.Contains(strings.ToLower(h.SourcePath), ".zim") {
 					continue
@@ -875,23 +914,23 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 				if scope == "zim" && !strings.Contains(strings.ToLower(h.SourcePath), ".zim") {
 					continue
 				}
-				citeURL, snippet := s.buildCitationLink(h.SourcePath, h.Text, q)
+				citeURL, snippet := s.buildCitationLink(h.SourcePath, h.Text, ragQuery)
 				cleanTitle := strings.TrimSpace(strings.Split(h.Title, " (")[0])
 				addCandidate(h.Title, cleanTitle, h.SourcePath, citeURL, h.Text, snippet)
 			}
 		}
 		if scope == "all" || scope == "zim" {
-			for _, zHit := range s.searchLiveZIMs(q, 2) {
+			for _, zHit := range s.searchLiveZIMs(ragQuery, 2) {
 				addCandidate(zHit.Title, zHit.CleanTitle, zHit.SourcePath, zHit.URL, zHit.Text, zHit.Snippet)
 			}
 		}
 		if scope == "all" || scope == "remedy" || triageType == "symptom" {
-			for _, rHit := range searchRemedyGuide(q, 2) {
+			for _, rHit := range searchRemedyGuide(ragQuery, 2) {
 				addCandidate(rHit.Title, rHit.CleanTitle, rHit.SourcePath, rHit.URL, rHit.Text, rHit.Snippet)
 			}
 		}
 		if scope == "all" || scope == "druglabels" || triageType == "pill" || triageType == "symptom" {
-			for _, dHit := range s.searchDrugLabels(r.Context(), q, 2) {
+			for _, dHit := range s.searchDrugLabels(r.Context(), ragQuery, 2) {
 				addCandidate(dHit.Title, dHit.CleanTitle, dHit.SourcePath, dHit.URL, dHit.Text, dHit.Snippet)
 			}
 		}
@@ -963,6 +1002,7 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	systemPrompt := `You are Ark AI, a focused offline reference assistant. Stay strictly on the user's question, ignore unrelated context snippets, and give concise direct answers (2-4 short sentences or brief bullets).
+Maintain multi-turn conversation continuity: use the prior conversation history to answer follow-up questions, resolve pronouns (it, that, they, this), and remember facts established in earlier turns of this chat.
 Respond ONLY with a valid JSON object matching this exact schema:
 {
   "title": "1 to 4 word title based strictly on the user's query",
@@ -991,6 +1031,21 @@ Only list sources in "references" that you actually used to answer the question.
 	}
 
 	var promptBuilder strings.Builder
+	if len(historyMsgs) > 0 {
+		promptBuilder.WriteString("Prior conversation history in this chat:\n")
+		for _, hm := range historyMsgs {
+			roleLbl := "User"
+			if hm.Role == "assistant" {
+				roleLbl = "Ark AI"
+			}
+			snippet := strings.TrimSpace(hm.Content)
+			if len([]rune(snippet)) > 700 {
+				snippet = string([]rune(snippet)[:700]) + "..."
+			}
+			fmt.Fprintf(&promptBuilder, "%s: %s\n", roleLbl, snippet)
+		}
+		promptBuilder.WriteByte('\n')
+	}
 	if extraToolCtx.Len() > 0 {
 		promptBuilder.WriteString(extraToolCtx.String())
 		promptBuilder.WriteByte('\n')
@@ -1011,7 +1066,19 @@ Only list sources in "references" that you actually used to answer the question.
 
 	chatMsgs := make([]ai.Msg, 0, len(historyMsgs)+2)
 	chatMsgs = append(chatMsgs, ai.Msg{Role: "system", Content: systemPrompt})
-	chatMsgs = append(chatMsgs, historyMsgs...)
+	for _, hm := range historyMsgs {
+		if hm.Role == "assistant" && !strings.HasPrefix(strings.TrimSpace(hm.Content), "{") {
+			b, _ := json.Marshal(map[string]any{
+				"title":       existingTitle,
+				"answer":      hm.Content,
+				"references":  []any{},
+				"map_actions": []any{},
+			})
+			chatMsgs = append(chatMsgs, ai.Msg{Role: "assistant", Content: string(b)})
+		} else {
+			chatMsgs = append(chatMsgs, hm)
+		}
+	}
 	chatMsgs = append(chatMsgs, userMsg)
 
 	var flusher http.Flusher
