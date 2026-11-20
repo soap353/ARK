@@ -239,7 +239,34 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		proxy:        apps.NewProxyManager(),
 		sessionStart: time.Now().UTC().Truncate(time.Second),
 	}
+	s.seedDefaultApps()
 	return s, nil
+}
+
+func (s *Server) seedDefaultApps() {
+	if s.db == nil {
+		return
+	}
+	var seeded string
+	_ = s.db.QueryRow(`SELECT value FROM settings WHERE key = 'apps_seeded'`).Scan(&seeded)
+	if seeded == "1" {
+		return
+	}
+	catDir := findCatalogDir()
+	manifests, err := apps.LoadAllManifests(catDir)
+	if err != nil || len(manifests) == 0 {
+		manifests, _ = apps.LoadAllManifestsFS(catalog.FS)
+	}
+	for _, m := range manifests {
+		if m.ID == "qdrant" {
+			continue
+		}
+		_, _ = s.db.Exec(`
+			INSERT OR IGNORE INTO app_states (id, name, category, image, status, proxy_mode, auto_start, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'stopped', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, m.ID, m.Name, m.Category, m.Image, m.Proxy)
+	}
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('apps_seeded', '1')`)
 }
 
 // SetDockerClient attaches the Docker client used to manage app containers.

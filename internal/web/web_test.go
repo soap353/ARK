@@ -66,7 +66,7 @@ func TestNewServerAndRoutes(t *testing.T) {
 		contains     string
 	}{
 		{"/healthz", http.StatusOK, `"status":"ok"`},
-		{"/", http.StatusOK, "Zero Pre-installed Apps"},
+		{"/", http.StatusOK, "AI Assistant"},
 		{"/library", http.StatusOK, "Check ZIM Updates"},
 		{"/kiwix", http.StatusOK, "Open Local ZIM Reader"},
 		{"/get-content", http.StatusOK, "Open Local ZIM Reader"},
@@ -95,6 +95,9 @@ func TestNewServerAndRoutes(t *testing.T) {
 				t.Errorf("GET %s expected body to contain %q, got %q", rt.path, rt.contains, body)
 			}
 		})
+	}
+	if instApps, _ := server.fetchApps(); len(instApps) < 9 {
+		t.Errorf("expected fresh DB to pre-install all 9 built-in apps, got %d", len(instApps))
 	}
 }
 
