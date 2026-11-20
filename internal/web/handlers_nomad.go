@@ -17,6 +17,7 @@ import (
 
 	"ark/internal/ai"
 	"ark/internal/apps"
+	"ark/internal/docker"
 	"ark/internal/fieldguide"
 	"ark/internal/jobs"
 	"ark/internal/kiwix"
@@ -576,6 +577,27 @@ func (s *Server) handleAPISystemTime(w http.ResponseWriter, r *http.Request) {
 		"iso":     now.Format(time.RFC3339),
 		"source":  source,
 	})
+}
+
+func (s *Server) handleAPISystemInstallRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	msg, err := docker.InstallPodmanRuntime(r.Context(), s.dataDir)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if cli, cerr := docker.NewClient(); cerr == nil {
+		_ = cli.EnsureDaemonRunning(r.Context())
+		s.SetDockerClient(cli)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": msg, "runtime": cli.RuntimeName()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": msg, "runtime": "Podman"})
 }
 
 func (s *Server) loadLastBenchmark() *system.BenchmarkResult {

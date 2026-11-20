@@ -10,6 +10,17 @@
 </div>
 {{ end }}
 
+{{ if not .DockerOnline }}
+<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:0.85rem 1.25rem;">
+  <div class="secondary-text" style="font-size:13px;">
+    <strong>Native Mode Active</strong> &mdash; Core Ark tools (Library, ZIMs, Maps, Remedy, Ask AI) work with zero Docker. Install Podman or Docker to run optional containerized modules below.
+  </div>
+  {{ if .CanInstallRuntime }}
+  <button type="button" class="btn btn-primary" style="min-height:34px;padding:0.25rem 0.85rem;font-size:13px;white-space:nowrap;" onclick="installAppsRuntime(this)">Install Podman (No Docker)</button>
+  {{ end }}
+</div>
+{{ end }}
+
 <div class="card">
   <div class="table-wrapper">
     <table>
@@ -239,5 +250,26 @@ function openAppModal(btn) {
 document.getElementById('app-modal').addEventListener('click', function(ev) {
   if (ev.target === this) closeAppModal();
 });
+
+function installAppsRuntime(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Downloading Podman...';
+  fetch('/api/system/install-runtime', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        alert(data.error || 'Could not install Podman runtime.');
+        btn.disabled = false;
+        btn.textContent = 'Install Podman (No Docker)';
+        return;
+      }
+      location.reload();
+    })
+    .catch(function(err) {
+      alert('Install error: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Install Podman (No Docker)';
+    });
+}
 </script>
 {{ end }}

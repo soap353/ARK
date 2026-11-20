@@ -125,6 +125,8 @@ type PageData struct {
 	SystemMetrics       *SystemView
 	Containers          []ContainerView
 	DockerOnline        bool
+	RuntimeLabel        string
+	CanInstallRuntime   bool
 	FlashMsg            string
 	FlashErr            string
 	USBDrives           []USBDriveView
@@ -330,6 +332,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
 	mux.HandleFunc("/api/system/benchmark", s.handleAPISystemBenchmark)
 	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
+	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
 	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
@@ -508,15 +511,30 @@ func (s *Server) listFileNamesLower(dir string) []string {
 	return out
 }
 
+func (s *Server) runtimeStatus(ctx context.Context) (online bool, label string, canInstall bool) {
+	if s.docker != nil && s.docker.IsAvailable(ctx) {
+		rt := s.docker.RuntimeName()
+		if rt == "" || rt == "None" {
+			rt = "Docker"
+		}
+		return true, rt + " Online", false
+	}
+	return false, "Native Mode", docker.CanInstallPodmanRuntime()
+}
+
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 	installedApps, availableApps := s.fetchApps()
+	online, label, canInstall := s.runtimeStatus(r.Context())
 	data := PageData{
-		Title:         "Apps",
-		ActiveNav:     "apps",
-		InstalledApps: installedApps,
-		AvailableApps: availableApps,
-		FlashMsg:      strings.TrimSpace(r.URL.Query().Get("msg")),
-		FlashErr:      strings.TrimSpace(r.URL.Query().Get("err")),
+		Title:             "Apps",
+		ActiveNav:         "apps",
+		InstalledApps:     installedApps,
+		AvailableApps:     availableApps,
+		DockerOnline:      online,
+		RuntimeLabel:      label,
+		CanInstallRuntime: canInstall,
+		FlashMsg:          strings.TrimSpace(r.URL.Query().Get("msg")),
+		FlashErr:          strings.TrimSpace(r.URL.Query().Get("err")),
 	}
 	s.render(w, "apps.html", data)
 }

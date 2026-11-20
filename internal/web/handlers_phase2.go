@@ -189,13 +189,17 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 
 	jobsList := s.fetchRecentSessionJobs(5)
 	freeGB, totalGB, usedGB, pct, arkPct, otherPct, arkUsedText := s.getStorageBreakdown(r.Context())
+	rtOnline, rtLabel, canInstallRt := s.runtimeStatus(r.Context())
+	_ = dockerOnline
 
 	data := PageData{
 		Title:               "System",
 		ActiveNav:           "system",
 		SystemMetrics:       sv,
 		Containers:          containers,
-		DockerOnline:        dockerOnline,
+		DockerOnline:        rtOnline,
+		RuntimeLabel:        rtLabel,
+		CanInstallRuntime:   canInstallRt,
 		LastBenchmark:       s.loadLastBenchmark(),
 		LastDowntime:        system.GetDowntimeInfo(r.Context(), s.db),
 		StorageFreeGB:       freeGB,

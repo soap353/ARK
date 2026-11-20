@@ -65,44 +65,141 @@ type ContainerStats struct {
 	NetworkTxBytes uint64  `json:"network_tx_bytes"`
 }
 
-// Client wraps the Docker SDK client with Ark-specific operations.
+// Client wraps the Docker-compatible SDK client (Docker or Podman) with Ark-specific operations.
 type Client struct {
-	cli *client.Client
+	cli     *client.Client
+	host    string
+	runtime string
 }
 
-// NewClient initializes a new Docker client using environment configuration.
-// It supports both Unix domain sockets (/var/run/docker.sock) and Windows named pipes.
+// NewClient initializes a new Docker or Podman client using environment and local socket detection.
+// It supports Docker sockets/named pipes as well as rootless/rootful Podman sockets.
 func NewClient() (*Client, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, fmt.Errorf("failed to create docker client: %w", err)
+	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
+	host, rt := detectRuntimeSocket()
+	if host != "" && strings.TrimSpace(os.Getenv("DOCKER_HOST")) == "" {
+		opts = append(opts, client.WithHost(host))
+	} else {
+		host = os.Getenv("DOCKER_HOST")
 	}
-	return &Client{cli: cli}, nil
+	cli, err := client.NewClientWithOpts(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container client: %w", err)
+	}
+	return &Client{cli: cli, host: host, runtime: rt}, nil
 }
 
-// Ping checks if the Docker daemon is reachable.
+func detectRuntimeSocket() (host, rt string) {
+	if envHost := strings.TrimSpace(os.Getenv("DOCKER_HOST")); envHost != "" {
+		if strings.Contains(strings.ToLower(envHost), "podman") {
+			return envHost, "Podman"
+		}
+		return envHost, "Docker"
+	}
+	if runtime.GOOS == "windows" {
+		return "", "Docker"
+	}
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+		return "unix:///var/run/docker.sock", "Docker"
+	}
+	for _, cand := range podmanSocketCandidates() {
+		if _, err := os.Stat(cand); err == nil {
+			return "unix://" + cand, "Podman"
+		}
+	}
+	if _, err := exec.LookPath("podman"); err == nil {
+		if _, derr := exec.LookPath("docker"); derr != nil {
+			if cand := preferredPodmanSocket(); cand != "" {
+				return "unix://" + cand, "Podman"
+			}
+		}
+	}
+	return "", ""
+}
+
+func podmanSocketCandidates() []string {
+	var list []string
+	if xdg := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR")); xdg != "" {
+		list = append(list, filepath.Join(xdg, "podman", "podman.sock"))
+	}
+	if uid := os.Getuid(); uid >= 0 {
+		list = append(list, fmt.Sprintf("/run/user/%d/podman/podman.sock", uid))
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		list = append(list, filepath.Join(home, ".local", "share", "ark", "podman.sock"))
+	}
+	list = append(list, "/run/podman/podman.sock")
+	return list
+}
+
+func preferredPodmanSocket() string {
+	cands := podmanSocketCandidates()
+	if len(cands) > 0 {
+		return cands[0]
+	}
+	return ""
+}
+
+func containerCLI() string {
+	if _, err := exec.LookPath("docker"); err == nil {
+		return "docker"
+	}
+	if _, err := exec.LookPath("podman"); err == nil {
+		return "podman"
+	}
+	return "docker"
+}
+
+// RuntimeName returns "Podman", "Docker", or "None" depending on the active engine.
+func (c *Client) RuntimeName() string {
+	if c == nil || c.cli == nil {
+		return "None"
+	}
+	if c.runtime == "Podman" || strings.Contains(strings.ToLower(c.host), "podman") {
+		return "Podman"
+	}
+	if ver, err := c.cli.ServerVersion(context.Background()); err == nil {
+		if strings.Contains(strings.ToLower(ver.Platform.Name), "podman") {
+			return "Podman"
+		}
+		for _, comp := range ver.Components {
+			if strings.Contains(strings.ToLower(comp.Name), "podman") {
+				return "Podman"
+			}
+		}
+		return "Docker"
+	}
+	if c.runtime != "" {
+		return c.runtime
+	}
+	return "Docker"
+}
+
+// Ping checks if the container engine (Docker or Podman) is reachable.
 func (c *Client) Ping(ctx context.Context) error {
 	if c.cli == nil {
-		return errors.New("docker client is nil")
+		return errors.New("container client is nil")
 	}
 	_, err := c.cli.Ping(ctx)
 	return err
 }
 
-// IsAvailable returns true if the Docker daemon responds to ping.
+// IsAvailable returns true if the container engine responds to ping.
 func (c *Client) IsAvailable(ctx context.Context) bool {
 	return c.Ping(ctx) == nil
 }
 
-// EnsureDaemonRunning starts Docker Desktop / Podman / systemd docker when offline and waits briefly for it to respond.
+// EnsureDaemonRunning starts Docker Desktop / Podman service / systemd docker when offline.
+// Returns immediately when no container runtime binary or socket exists on the host.
 func (c *Client) EnsureDaemonRunning(ctx context.Context) error {
 	if c == nil || c.cli == nil {
-		return errors.New("docker client is nil")
+		return errors.New("container client is nil")
 	}
 	if c.IsAvailable(ctx) {
 		return nil
 	}
 
+	attempted := false
 	switch runtime.GOOS {
 	case "windows":
 		for _, candidate := range []string{
@@ -111,29 +208,56 @@ func (c *Client) EnsureDaemonRunning(ctx context.Context) error {
 		} {
 			if _, err := os.Stat(candidate); err == nil {
 				_ = exec.Command(candidate).Start()
+				attempted = true
 				break
 			}
 		}
 		if _, err := exec.LookPath("podman"); err == nil {
 			_ = exec.Command("podman", "machine", "start").Start()
+			attempted = true
 		}
 	case "darwin":
 		if _, err := os.Stat("/Applications/Docker.app"); err == nil {
 			_ = exec.Command("open", "-a", "Docker").Start()
+			attempted = true
 		} else if _, err := exec.LookPath("podman"); err == nil {
 			_ = exec.Command("podman", "machine", "start").Start()
+			attempted = true
 		}
 	default:
-		if _, err := exec.LookPath("systemctl"); err == nil {
-			_ = exec.Command("systemctl", "start", "docker").Start()
-		} else if _, err := exec.LookPath("podman"); err == nil {
-			_ = exec.Command("podman", "system", "service", "--time=0").Start()
+		if _, err := exec.LookPath("podman"); err == nil && (c.runtime == "Podman" || func() bool { _, derr := exec.LookPath("docker"); return derr != nil }()) {
+			sock := strings.TrimPrefix(c.host, "unix://")
+			if sock == "" || !strings.Contains(sock, "podman") {
+				sock = preferredPodmanSocket()
+			}
+			if sock != "" {
+				_ = os.MkdirAll(filepath.Dir(sock), 0o755)
+				_ = exec.Command("podman", "system", "service", "--time=0", "unix://"+sock).Start()
+				if c.host == "" || !strings.Contains(c.host, "podman") {
+					if cli, cerr := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation(), client.WithHost("unix://"+sock)); cerr == nil {
+						_ = c.cli.Close()
+						c.cli = cli
+						c.host = "unix://" + sock
+						c.runtime = "Podman"
+					}
+				}
+				attempted = true
+			}
+		} else if _, err := exec.LookPath("docker"); err == nil {
+			if _, serr := exec.LookPath("systemctl"); serr == nil {
+				_ = exec.Command("systemctl", "start", "docker").Start()
+			}
+			attempted = true
 		}
 	}
 
-	waitDeadline := time.NewTimer(90 * time.Second)
+	if !attempted {
+		return errors.New("no container runtime installed (Docker or Podman)")
+	}
+
+	waitDeadline := time.NewTimer(25 * time.Second)
 	defer waitDeadline.Stop()
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -294,15 +418,19 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 	hostConfig := &container.HostConfig{
 		Binds:        binds,
 		PortBindings: portBindings,
-		ExtraHosts:   []string{"host.docker.internal:host-gateway"},
 		RestartPolicy: container.RestartPolicy{
 			Name: "no",
 		},
 	}
+	if c.runtime != "Podman" {
+		hostConfig.ExtraHosts = []string{"host.docker.internal:host-gateway"}
+	}
 	if app.MemoryMB > 0 {
 		limit := int64(app.MemoryMB) * 1024 * 1024
 		hostConfig.Resources.Memory = limit
-		hostConfig.Resources.MemorySwap = limit // no swap thrash
+		if c.runtime != "Podman" {
+			hostConfig.Resources.MemorySwap = limit // no swap thrash
+		}
 	}
 
 	netConfig := &network.NetworkingConfig{
@@ -317,6 +445,10 @@ func (c *Client) EnsureRunning(ctx context.Context, app *apps.AppManifest, dataD
 	_ = c.cli.ContainerRemove(ctx, containerName, container.RemoveOptions{Force: true})
 
 	created, err := c.cli.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, nil, containerName)
+	if err != nil && netConfig != nil {
+		// Retry without custom network (e.g. minimal rootless Podman slirp4netns setup without netavark bridge)
+		created, err = c.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, containerName)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container %s: %w", containerName, err)
 	}
@@ -578,6 +710,7 @@ func (c *Client) IsCoreRunning(ctx context.Context) bool {
 }
 
 func buildLocalArkImage(ctx context.Context, imageName string) error {
+	cliBin := containerCLI()
 	short := strings.TrimPrefix(imageName, "ark/")
 	if idx := strings.Index(short, ":"); idx != -1 {
 		short = short[:idx]
@@ -586,7 +719,7 @@ func buildLocalArkImage(ctx context.Context, imageName string) error {
 		for _, rel := range []string{".", filepath.Join("..", "..")} {
 			df := filepath.Join(rel, "images", short, "Dockerfile")
 			if fi, err := os.Stat(df); err == nil && !fi.IsDir() {
-				cmd := exec.CommandContext(ctx, "docker", "build", "-f", df, "-t", imageName, rel)
+				cmd := exec.CommandContext(ctx, cliBin, "build", "-f", df, "-t", imageName, rel)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 				}
@@ -600,7 +733,7 @@ func buildLocalArkImage(ctx context.Context, imageName string) error {
 	}
 	for _, dir := range candidates {
 		if fi, err := os.Stat(filepath.Join(dir, "Dockerfile")); err == nil && !fi.IsDir() {
-			cmd := exec.CommandContext(ctx, "docker", "build", "-t", imageName, dir)
+			cmd := exec.CommandContext(ctx, cliBin, "build", "-t", imageName, dir)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 			}

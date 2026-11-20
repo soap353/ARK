@@ -158,6 +158,9 @@ func main() {
 		case "uninstall":
 			handleUninstall(os.Args[2:])
 			return
+		case "setup-runtime":
+			handleSetupRuntime(os.Args[2:])
+			return
 		case "help", "-h", "--help":
 			printUsage()
 			return
@@ -177,12 +180,13 @@ Usage:
   ark [command] [options]
 
 Commands:
-  run          Start the Ark Command Center service (default)
-  update       Update Ark binary and app containers
-  rollback     Roll back to previous Ark binary and database snapshot
-  usb          Export selected archives and containers to USB drive
-  move-data    Relocate ArkData directory
-  uninstall    Remove Ark containers, images, volumes, and service
+  run            Start the Ark Command Center service natively (default; no Docker required)
+  setup-runtime  Download & configure rootless Podman runtime on Intel Linux (optional, for containerized apps)
+  update         Update Ark binary and app containers
+  rollback       Roll back to previous Ark binary and database snapshot
+  usb            Export selected archives and containers to USB drive
+  move-data      Relocate ArkData directory
+  uninstall      Remove Ark containers, images, volumes, and service
 
 Options for 'run':
   -port string
@@ -193,8 +197,10 @@ Options for 'run':
         Do not automatically open the homepage in the default browser
   -foreground
         Keep running attached to the terminal window instead of detaching on Windows
+  -container
+        Run Ark web UI inside the ark-core container (requires Docker or Podman)
   -no-container
-        Run Ark web UI natively on host instead of inside the ark-core Docker container
+        Run Ark web UI natively on host (default)
 `)
 }
 
@@ -204,7 +210,8 @@ func runServer(args []string) {
 	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to Ark data directory")
 	noBrowserFlag := fs.Bool("no-browser", false, "Do not automatically open the homepage in the default browser")
 	foregroundFlag := fs.Bool("foreground", false, "Keep running attached to the terminal window")
-	noContainerFlag := fs.Bool("no-container", false, "Run natively on host instead of launching ark-core container")
+	containerFlag := fs.Bool("container", false, "Run inside the ark-core container (requires Docker or Podman)")
+	noContainerFlag := fs.Bool("no-container", false, "Run natively on host (default)")
 	backgroundChildFlag := fs.Bool("background-child", false, "Internal flag for detached background service")
 	_ = fs.Parse(args)
 
@@ -249,6 +256,7 @@ func runServer(args []string) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("[Ark] Failed to create data directory: %v", err)
 	}
+	docker.AttachBundledRuntimeEnv(dataDir)
 
 	if *backgroundChildFlag {
 		if logFile, lerr := os.OpenFile(filepath.Join(dataDir, "ark.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); lerr == nil {
@@ -258,7 +266,7 @@ func runServer(args []string) {
 	}
 
 	inContainer := os.Getenv("ARK_IN_CONTAINER") == "1"
-	useContainerHost := !inContainer && !*noContainerFlag && os.Getenv("ARK_NO_CONTAINER") != "1"
+	useContainerHost := !inContainer && !*noContainerFlag && os.Getenv("ARK_NO_CONTAINER") != "1" && (*containerFlag || os.Getenv("ARK_CONTAINER") == "1")
 	if useContainerHost {
 		if runContainerizedHost(port, dataDir, openUI) {
 			return
@@ -870,6 +878,30 @@ func handleUninstall(args []string) {
 		fmt.Printf("[Ark] Removed ArkData directory: %s\n", dataDir)
 	} else {
 		fmt.Println("[Ark] Kept ArkData content directory (--keep-data).")
+	}
+}
+
+func handleSetupRuntime(args []string) {
+	fs := flag.NewFlagSet("setup-runtime", flag.ContinueOnError)
+	dataDirFlag := fs.String("data-dir", "./ArkData", "Path to Ark data directory")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	exePath, _ := os.Executable()
+	dataDir := resolveDefaultDataDir(exePath, *dataDirFlag, false)
+	fmt.Printf("[Ark] Setting up rootless Podman container runtime in %s...\n", docker.RuntimeRootDir(dataDir))
+	msg, err := docker.InstallPodmanRuntime(context.Background(), dataDir)
+	if err != nil {
+		log.Fatalf("[Ark] Runtime setup failed: %v", err)
+	}
+	fmt.Printf("[Ark] %s\n", msg)
+	if cli, cerr := docker.NewClient(); cerr == nil {
+		defer cli.Close()
+		if err := cli.EnsureDaemonRunning(context.Background()); err != nil {
+			fmt.Printf("[Ark] Note: Podman installed cleanly; background socket start will activate when Ark launches (%v).\n", err)
+		} else {
+			fmt.Printf("[Ark] Container runtime verified: %s is online.\n", cli.RuntimeName())
+		}
 	}
 }
 

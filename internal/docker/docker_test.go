@@ -1,10 +1,15 @@
 package docker
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -168,5 +173,50 @@ func TestStopAllStopsLabeledContainersConcurrently(t *testing.T) {
 	}
 	if n != 2 || !stoppedIDs["cnt-1"] || !stoppedIDs["cnt-2"] {
 		t.Errorf("expected 2 containers stopped (cnt-1, cnt-2), got count=%d stopped=%v", n, stoppedIDs)
+	}
+}
+
+func TestPodmanRuntimeAndBundledExtraction(t *testing.T) {
+	c := &Client{host: "unix:///run/user/1000/podman/podman.sock", runtime: "Podman"}
+	if got := c.RuntimeName(); got != "Podman" {
+		t.Errorf("expected RuntimeName() == Podman, got %q", got)
+	}
+
+	tmpDir := t.TempDir()
+	root := RuntimeRootDir(tmpDir)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	payload := []byte("#!/bin/sh\necho podman-test\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "usr/local/bin/podman", Mode: 0o755, Size: int64(len(payload)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatalf("write tar header: %v", err)
+	}
+	if _, err := tw.Write(payload); err != nil {
+		t.Fatalf("write tar body: %v", err)
+	}
+	// Traversal attempt must be ignored safely
+	if err := tw.WriteHeader(&tar.Header{Name: "../../evil.txt", Mode: 0o644, Size: 3, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatalf("write evil header: %v", err)
+	}
+	_, _ = tw.Write([]byte("bad"))
+	_ = tw.Close()
+	_ = gw.Close()
+
+	if err := extractTarGzSafe(&buf, root); err != nil {
+		t.Fatalf("extractTarGzSafe: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "usr", "local", "bin", "podman")); err != nil {
+		t.Errorf("expected extracted podman binary, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "evil.txt")); err == nil {
+		t.Errorf("path traversal entry should have been skipped")
+	}
+
+	ensurePodmanUserConfigs(root)
+	if _, err := os.Stat(filepath.Join(root, "etc", "containers", "policy.json")); err != nil {
+		t.Errorf("expected default policy.json, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "containers", "registries.conf")); err != nil {
+		t.Errorf("expected default registries.conf, got %v", err)
 	}
 }
