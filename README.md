@@ -25,6 +25,17 @@ Ark archives essential human knowledge, reference manuals, education, medical do
 
 ## Quick Start
 
+### Release Assets
+Prebuilt standalone binaries are published on the [GitHub Releases](https://github.com/soap353/ARK/releases) page:
+
+| Asset | Target Platform |
+| :--- | :--- |
+| `ark-linux-amd64` | Intel / AMD 64-bit Linux (`x86_64`) |
+| `ark-linux-arm64` | ARM 64-bit Linux (`aarch64`, e.g. Raspberry Pi 4/5) |
+| `ark-darwin-arm64` | macOS Apple Silicon (M1–M4) |
+| `ark-windows-amd64.exe` | Windows 64-bit (Intel / AMD) |
+| `checksums.txt` | SHA-256 checksums for verifying binary integrity |
+
 ### Prerequisites
 - [Go 1.27+](https://go.dev/) (to build from source)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux)
