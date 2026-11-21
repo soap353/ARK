@@ -977,6 +977,22 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	if !strings.Contains(libBody, `href="/read/zim/mini_wiki/"`) || !strings.Contains(libBody, `target="_blank"`) {
 		t.Errorf("expected /library ZIM card to link to /read/zim/mini_wiki/ with target=\"_blank\"")
 	}
+	if !strings.Contains(libBody, `action="/read/zim/mini_wiki/"`) {
+		t.Errorf("expected /library ZIM card to include inline book search form")
+	}
+
+	// Verify GET /read/zim/mini_wiki/?q=penicillin and streaming v6.3 fallback scanTitlesStreaming both return hits
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/mini_wiki/?q=penicillin", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Penicillin") {
+		t.Errorf("expected /read/zim/mini_wiki/?q=penicillin to render matching Penicillin result, got %d", w.Code)
+	}
+	if arc, aerr := getZIMArchive(filepath.Join(tmpDir, "zim", "mini_wiki.zim"), "mini_wiki"); aerr != nil {
+		t.Fatalf("getZIMArchive: %v", aerr)
+	} else if hits := arc.scanTitlesStreaming("penicillin", []string{"penicillin"}, 10); len(hits) == 0 || !strings.Contains(hits[0].title, "Penicillin") {
+		t.Errorf("expected scanTitlesStreaming to find Penicillin, got %+v", hits)
+	}
 
 	// 2. /a/kiwix/ redirects cleanly to /library
 	req = httptest.NewRequest(http.MethodGet, "/a/kiwix/", nil)

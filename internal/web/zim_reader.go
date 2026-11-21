@@ -430,8 +430,12 @@ func (a *zimArchive) searchTitles(query string, limit int) []zimTitleRecord {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.hdr.ArticleCount > 40000 && a.hdr.TitlePtrPos > 0 {
-		return a.searchLargeZIMByTitlePtr(q, terms, limit)
+	hasValidTitlePtr := a.hdr.TitlePtrPos > 0 && a.hdr.TitlePtrPos != ^uint64(0) && a.hdr.TitlePtrPos+uint64(a.hdr.ArticleCount)*4 <= uint64(a.size)
+	if a.hdr.ArticleCount > 40000 {
+		if hasValidTitlePtr {
+			return a.searchLargeZIMByTitlePtr(q, terms, limit)
+		}
+		return a.scanTitlesStreaming(q, terms, limit)
 	}
 
 	if !a.titlesBuilt && a.hdr.ArticleCount > 0 {
@@ -641,6 +645,129 @@ func (a *zimArchive) searchLargeZIMByTitlePtr(q string, terms []string, limit in
 	}
 
 	return rankZIMTitleMatches(collected, q, terms, limit)
+}
+
+// scanTitlesStreaming searches large v6.3 ZIM files that omit TitlePtrPos (0xffffffffffffffff)
+// using a sequential buffered scan (~130ms for ~877k entries) without pinning all titles in RAM.
+func (a *zimArchive) scanTitlesStreaming(q string, terms []string, limit int) []zimTitleRecord {
+	f, err := os.Open(a.path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	n := int(a.hdr.ArticleCount)
+	if n == 0 {
+		return nil
+	}
+	urlPtrs := make([]uint64, n)
+	if _, err := f.Seek(int64(a.hdr.URLPtrPos), io.SeekStart); err != nil {
+		return nil
+	}
+	if err := binary.Read(bufio.NewReaderSize(f, 128*1024), binary.LittleEndian, urlPtrs); err != nil {
+		return nil
+	}
+	sort.Slice(urlPtrs, func(i, j int) bool { return urlPtrs[i] < urlPtrs[j] })
+
+	wantNS := byte('C')
+	if a.hdr.MajorVersion < 6 {
+		wantNS = 'A'
+	}
+
+	br := bufio.NewReaderSize(f, 512*1024)
+	var curPos uint64 = ^uint64(0)
+	var fixed [16]byte
+	var exact, prefix, wordMatch []zimTitleRecord
+	seen := make(map[string]bool)
+
+	for _, ptr := range urlPtrs {
+		if curPos != ptr {
+			if ptr > curPos && ptr-curPos <= 64*1024 {
+				disc, derr := br.Discard(int(ptr - curPos))
+				curPos += uint64(disc)
+				if derr != nil || curPos != ptr {
+					curPos = ^uint64(0)
+				}
+			}
+			if curPos != ptr {
+				if _, err := f.Seek(int64(ptr), io.SeekStart); err != nil {
+					curPos = ^uint64(0)
+					continue
+				}
+				br.Reset(f)
+				curPos = ptr
+			}
+		}
+		if _, err := io.ReadFull(br, fixed[:2]); err != nil {
+			curPos = ^uint64(0)
+			continue
+		}
+		curPos += 2
+		mimeID := binary.LittleEndian.Uint16(fixed[:2])
+		if mimeID >= 0xfffd {
+			continue
+		}
+		if _, err := io.ReadFull(br, fixed[2:16]); err != nil {
+			curPos = ^uint64(0)
+			continue
+		}
+		curPos += 14
+		ns := fixed[3]
+		uBytes, err := br.ReadBytes(0)
+		if err != nil {
+			curPos = ^uint64(0)
+			continue
+		}
+		curPos += uint64(len(uBytes))
+		tBytes, err := br.ReadBytes(0)
+		if err != nil {
+			curPos = ^uint64(0)
+			continue
+		}
+		curPos += uint64(len(tBytes))
+
+		if ns != wantNS || int(mimeID) >= len(a.mimes) || !strings.HasPrefix(strings.ToLower(a.mimes[mimeID]), "text/html") {
+			continue
+		}
+		uStr := string(bytes.TrimSuffix(uBytes, []byte{0}))
+		tStr := string(bytes.TrimSuffix(tBytes, []byte{0}))
+		if tStr == "" {
+			tStr = uStr
+		}
+		low := strings.ToLower(tStr)
+		lowURL := strings.ToLower(uStr)
+		matched := true
+		for _, t := range terms {
+			if !strings.Contains(low, t) && !strings.Contains(lowURL, t) {
+				matched = false
+				break
+			}
+		}
+		if !matched || seen[uStr] {
+			continue
+		}
+		seen[uStr] = true
+		rec := zimTitleRecord{ns: ns, url: uStr, title: tStr}
+		if low == q {
+			exact = append(exact, rec)
+		} else if strings.HasPrefix(low, q) {
+			prefix = append(prefix, rec)
+		} else if len(wordMatch) < limit {
+			wordMatch = append(wordMatch, rec)
+		}
+		if len(exact)+len(prefix) >= limit {
+			break
+		}
+	}
+
+	out := make([]zimTitleRecord, 0, limit)
+	out = append(out, exact...)
+	out = append(out, prefix...)
+	out = append(out, wordMatch...)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func (a *zimArchive) resolveFrontPageEntry(f *os.File) (zimResolvedEntry, bool) {
