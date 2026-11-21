@@ -2299,6 +2299,19 @@ func TestRealWikipediaZIMSearchIfPresent(t *testing.T) {
 	if len(pages) != 20 || total < 1000 || !hasMore {
 		t.Errorf("unexpected wikipedia listPages(0,20): len=%d total=%d hasMore=%v", len(pages), total, hasMore)
 	}
+	zimGlob, _ := filepath.Glob(filepath.Join("..", "..", "data", "zim", "*.zim"))
+	for _, zp := range zimGlob {
+		stem := strings.TrimSuffix(filepath.Base(zp), ".zim")
+		a, aerr := getZIMArchive(zp, stem)
+		if aerr != nil {
+			t.Errorf("getZIMArchive(%s): %v", stem, aerr)
+			continue
+		}
+		pgs, tot, hm := a.listPages(0, 50, "")
+		if len(pgs) == 0 || tot == 0 {
+			t.Errorf("ZIM %s returned 0 pages from listPages (count=%d, hasMore=%v)", stem, a.hdr.ArticleCount, hm)
+		}
+	}
 }
 
 func TestAskAIQueryNeedsLocalKnowledge(t *testing.T) {

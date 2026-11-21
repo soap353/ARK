@@ -1537,6 +1537,19 @@ html body { padding-top: 46px !important; }
 #ark-page-pager a, #ark-page-pager a * { color: #F5F2EB !important; }
 #ark-proxy-nav input, #ark-proxy-nav select { background-color: #12201A !important; color: #F5F2EB !important; caret-color: #F5F2EB !important; border-color: #436153 !important; -webkit-text-fill-color: #F5F2EB !important; }
 #ark-proxy-nav input::placeholder { color: #A9BEB3 !important; opacity: 1 !important; -webkit-text-fill-color: #A9BEB3 !important; }
+#ark-toc-panel { position: fixed !important; top: 46px !important; left: 0 !important; bottom: 0 !important; width: 290px !important; max-width: 85vw !important; box-sizing: border-box !important; z-index: 2147483646 !important; background: #16261F !important; color: #F5F2EB !important; border-right: 1px solid #2A4338 !important; box-shadow: 4px 0 18px rgba(0,0,0,.28) !important; flex-direction: column !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; font-size: 13px !important; line-height: 1.4 !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
+#ark-toc-panel * { box-sizing: border-box !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
+#ark-toc-panel #ark-toc-head, #ark-toc-panel #ark-toc-search-wrap { flex: 0 0 auto !important; }
+#ark-toc-panel #ark-toc-title { font-size: 13px !important; font-weight: 700 !important; color: #F5F2EB !important; line-height: 1.3 !important; margin: 0 !important; }
+#ark-toc-panel #ark-toc-count { font-size: 11px !important; color: #9BB5A8 !important; line-height: 1.3 !important; margin: 2px 0 0 !important; }
+#ark-toc-panel #ark-toc-close { flex: 0 0 auto !important; background: transparent !important; color: #C9DAD1 !important; border: 1px solid #436153 !important; border-radius: 6px !important; padding: 3px 9px !important; font-size: 14px !important; line-height: 1.2 !important; cursor: pointer !important; }
+#ark-toc-panel #ark-toc-filter { width: 100% !important; padding: 6px 9px !important; margin: 0 !important; border-radius: 6px !important; border: 1px solid #436153 !important; background-color: #12201A !important; color: #F5F2EB !important; caret-color: #F5F2EB !important; -webkit-text-fill-color: #F5F2EB !important; font-size: 12px !important; line-height: 1.3 !important; height: auto !important; }
+#ark-toc-panel #ark-toc-filter::placeholder { color: #9BB5A8 !important; opacity: 1 !important; -webkit-text-fill-color: #9BB5A8 !important; }
+#ark-toc-list { display: block !important; flex: 1 1 auto !important; min-height: 0 !important; overflow-y: auto !important; overflow-x: hidden !important; padding: 6px !important; margin: 0 !important; }
+#ark-toc-list a { display: block !important; width: 100% !important; padding: 7px 10px !important; margin: 0 0 3px 0 !important; border-radius: 5px !important; text-decoration: none !important; font-size: 13px !important; line-height: 1.4 !important; height: auto !important; min-height: 0 !important; max-height: none !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; color: #DCE8E1 !important; background: transparent !important; border: none !important; }
+#ark-toc-list a:hover { background: #233A2F !important; color: #FDFBF7 !important; }
+#ark-toc-list a.ark-toc-active, #ark-toc-list a.ark-toc-active:hover { background: #C25E28 !important; color: #FDFBF7 !important; font-weight: 600 !important; }
+#ark-toc-panel #ark-toc-more { flex: 0 0 auto !important; margin: 8px 10px !important; padding: 7px 10px !important; background: #2A4338 !important; color: #F5F2EB !important; border: 1px solid #436153 !important; border-radius: 6px !important; font-size: 12px !important; font-weight: 600 !important; line-height: 1.3 !important; cursor: pointer !important; }
 </style>`
 }
 
@@ -1580,14 +1593,15 @@ func themeRule(bg, surface, fg, link, border string, isDark bool) string {
 	return fmt.Sprintf(
 		":root,html,html.skin-theme-clientpref-day,html.skin-theme-clientpref-night,html.skin-theme-clientpref-os{color-scheme:%s;--background-color-base:%s;--background-color-base-fixed:%s;--background-color-neutral:%s;--background-color-neutral-subtle:%s;--background-color-interactive:%s;--background-color-interactive-subtle:%s;--color-base:%s;--color-emphasized:%s;--color-subtle:%s;--color-progressive:%s;--color-link:%s;--border-color-base:%s;--border-color-subtle:%s;}"+
 			"html,body,#content,.mw-body,.mw-page-container,.mw-body-content,main,article{background:%s!important;color:%s!important;}"+
-			"body :not(#ark-proxy-nav):not(#ark-proxy-nav *){color:%s;}"+
+			"body :not(#ark-proxy-nav):not(#ark-proxy-nav *):not(#ark-toc-panel):not(#ark-toc-panel *){color:%s;}"+
 			"h1,h2,h3,h4,h5,h6,.mw-heading,.mw-heading *{background:transparent!important;color:%s!important;}"+
-			"a:not(#ark-proxy-nav a):not(#ark-page-pager a){color:%s!important;}"+
+			"a:not(#ark-proxy-nav a):not(#ark-page-pager a):not(#ark-toc-panel a){color:%s!important;}"+
 			"#ark-proxy-nav a,#ark-page-pager a{color:#F5F2EB!important;}"+
-			"#ark-proxy-nav input,#ark-proxy-nav select{background-color:#12201A!important;color:#F5F2EB!important;caret-color:#F5F2EB!important;border-color:#436153!important;-webkit-text-fill-color:#F5F2EB!important;}"+
-			"#ark-proxy-nav input::placeholder{color:#A9BEB3!important;opacity:1!important;-webkit-text-fill-color:#A9BEB3!important;}"+
-			"html body input:not(#ark-proxy-nav input),html body select:not(#ark-proxy-nav select),html body textarea:not(#ark-proxy-nav textarea),html body .form-control{background-color:%s!important;color:%s!important;caret-color:%s!important;border-color:%s!important;-webkit-text-fill-color:%s!important;}"+
-			"html body input:not(#ark-proxy-nav input)::placeholder,html body textarea:not(#ark-proxy-nav textarea)::placeholder{color:%s!important;opacity:0.72!important;-webkit-text-fill-color:%s!important;}"+
+			"#ark-toc-list a{color:#DCE8E1!important;}#ark-toc-list a.ark-toc-active{color:#FDFBF7!important;}"+
+			"#ark-proxy-nav input,#ark-proxy-nav select,#ark-toc-panel input{background-color:#12201A!important;color:#F5F2EB!important;caret-color:#F5F2EB!important;border-color:#436153!important;-webkit-text-fill-color:#F5F2EB!important;}"+
+			"#ark-proxy-nav input::placeholder,#ark-toc-panel input::placeholder{color:#A9BEB3!important;opacity:1!important;-webkit-text-fill-color:#A9BEB3!important;}"+
+			"html body input:not(#ark-proxy-nav input):not(#ark-toc-panel input),html body select:not(#ark-proxy-nav select),html body textarea:not(#ark-proxy-nav textarea),html body .form-control{background-color:%s!important;color:%s!important;caret-color:%s!important;border-color:%s!important;-webkit-text-fill-color:%s!important;}"+
+			"html body input:not(#ark-proxy-nav input):not(#ark-toc-panel input)::placeholder,html body textarea:not(#ark-proxy-nav textarea)::placeholder{color:%s!important;opacity:0.72!important;-webkit-text-fill-color:%s!important;}"+
 			"html body table,html body .infobox,html body .infobox *,html body .sidebar,html body .sidebar *,html body .navbox,html body .navbox-title,html body .sidebar-title,html body .sidebar-list-title,html body .hatnote,html body div.hatnote,html body .toc,html body th,html body td,html body caption,html body pre,html body code{background-color:%s!important;color:%s!important;border-color:%s!important;}"+
 			"html body .sidebar a,html body .infobox a,html body .hatnote a{color:%s!important;}"+
 			"html body .item figcaption,html body .item figcaption *{color:#FFFFFF!important;text-shadow:0 1px 3px rgba(0,0,0,0.85)!important;}"+
@@ -1929,7 +1943,8 @@ func arkThemeScriptTag(initialTheme string) string {
 
     function renderPages(pages, append) {
       if (!append) listEl.innerHTML = '';
-      var curPath = decodeURIComponent(location.pathname || '');
+      var curPath = '';
+      try { curPath = decodeURIComponent(window.location.pathname || ''); } catch (e) { curPath = window.location.pathname || ''; }
       if (!append && (!pages || pages.length === 0)) {
         var empty = document.createElement('div');
         empty.textContent = 'No pages found.';
@@ -1946,13 +1961,9 @@ func arkThemeScriptTag(initialTheme string) string {
         a.title = p.title || p.url;
         var decodedHref = p.url;
         try { decodedHref = decodeURIComponent(p.url); } catch (e) {}
-        var isCur = curPath === decodedHref || location.pathname === p.url;
-        a.style.cssText = 'display:block;padding:6px 10px;border-radius:5px;text-decoration:none;font-size:13px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
-          (isCur ? 'background:#C25E28;color:#FDFBF7;font-weight:600;' : 'color:#DCE8E1;');
-        if (!isCur) {
-          a.onmouseenter = function() { this.style.background = '#233A2F'; };
-          a.onmouseleave = function() { this.style.background = 'transparent'; };
-        } else {
+        var isCur = curPath === decodedHref || window.location.pathname === p.url;
+        if (isCur) {
+          a.className = 'ark-toc-active';
           activeEl = a;
         }
         listEl.appendChild(a);
@@ -1968,11 +1979,15 @@ func arkThemeScriptTag(initialTheme string) string {
       var offset = append ? nextOffset : 0;
       if (!append && countEl) countEl.textContent = 'Loading...';
       if (moreBtn) moreBtn.style.display = 'none';
-      var reqUrl = location.origin + '/api/zim/pages?stem=' + encodeURIComponent(stem) +
+      var reqUrl = '/api/zim/pages?stem=' + encodeURIComponent(stem) +
         '&offset=' + offset + '&limit=200' +
         (activeFilter ? '&q=' + encodeURIComponent(activeFilter) : '');
-      fetch(reqUrl)
-        .then(function(r) { return r.json(); })
+      var doFetch = window.__arkFetch || window.fetch;
+      doFetch.call(window, reqUrl, { credentials: 'same-origin' })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
         .then(function(d) {
           var pages = (d && d.pages) || [];
           renderPages(pages, append);
@@ -1986,7 +2001,7 @@ func arkThemeScriptTag(initialTheme string) string {
           }
         })
         .catch(function() {
-          if (countEl) countEl.textContent = 'Error';
+          if (countEl) countEl.textContent = 'Error loading pages';
         })
         .finally(function() {
           loading = false;
@@ -2036,7 +2051,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 	safeStemAttr := html.EscapeString(stem)
 	addBtn := ""
 	if !hideAddToAI {
-		addBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);fetch(location.origin+'/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Add to AI</button>`
+		addBtn = `<button type="button" onclick="var b=this;b.disabled=true;b.textContent='Adding...';var c=document.body.cloneNode(true);var n=c.querySelector('#ark-proxy-nav');if(n)n.remove();var txt=(c.innerText||'').trim().slice(0,800000);(window.__arkFetch||window.fetch).call(window,'/api/ai/index-article',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:location.pathname,title:document.title,text:txt})}).then(async r=>{if(r.ok){var d=await r.json().catch(()=>({}));b.textContent='Added to AI'+(d.indexed_chunks?' ('+d.indexed_chunks+')':'');}else{var t=await r.text();b.textContent='Error';b.title=t;b.disabled=false;}}).catch(e=>{b.textContent='Error';b.title=e.message;b.disabled=false;});" style="background:#C25E28;color:#FDFBF7;border:none;border-radius:6px;padding:4px 12px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Add to AI</button>`
 	}
 	return `<nav id="ark-proxy-nav" style="position:fixed;top:0;left:0;right:0;width:100%;height:46px;max-height:46px;box-sizing:border-box;flex:none;align-self:flex-start;z-index:2147483647;background:#1B2E26;border-bottom:1px solid #2A4338;padding:6px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:12px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
 		`<button id="ark-toc-toggle" type="button" aria-expanded="false" aria-controls="ark-toc-panel" data-stem="` + safeStemAttr + `" style="display:inline-flex;align-items:center;gap:5px;background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">&#9776; Pages</button>` +
@@ -2047,20 +2062,20 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<a id="ark-ask-link" href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
 		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value,true)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
 		`<form action="/read/zim/` + escStem + `/" method="GET" style="display:flex;gap:6px;margin:0;">` +
-		`<input type="search" name="q" list="ark-zim-suggest-list" placeholder="Search ` + safeStemAttr + `..." oninput="clearTimeout(window._azt);window._azt=setTimeout(()=>{var v=this.value.trim();if(v.length<2)return;fetch('/api/zim/suggest?stem=` + escStem + `&q='+encodeURIComponent(v)).then(r=>r.json()).then(d=>{var dl=document.getElementById('ark-zim-suggest-list');if(!dl)return;dl.innerHTML='';(d.hits||[]).forEach(h=>{var o=document.createElement('option');o.value=h.title;dl.appendChild(o);});}).catch(()=>{});},180)" style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required><datalist id="ark-zim-suggest-list"></datalist>` +
+		`<input type="search" name="q" list="ark-zim-suggest-list" placeholder="Search ` + safeStemAttr + `..." oninput="clearTimeout(window._azt);window._azt=setTimeout(()=>{var v=this.value.trim();if(v.length<2)return;(window.__arkFetch||window.fetch).call(window,'/api/zim/suggest?stem=` + escStem + `&q='+encodeURIComponent(v)).then(r=>r.json()).then(d=>{var dl=document.getElementById('ark-zim-suggest-list');if(!dl)return;dl.innerHTML='';(d.hits||[]).forEach(h=>{var o=document.createElement('option');o.value=h.title;dl.appendChild(o);});}).catch(()=>{});},180)" style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required><datalist id="ark-zim-suggest-list"></datalist>` +
 		`<button type="submit" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;">Search</button>` +
 		`</form>` +
 		`<a id="ark-download-html" href="?download=1" onclick="var u=new URL(location.href);u.searchParams.set('download','1');this.href=u.toString();" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">&#8595; Download HTML</a>` +
 		addBtn +
 		`</nav>` +
 		`<aside id="ark-toc-panel" data-stem="` + safeStemAttr + `" style="position:fixed;top:46px;left:0;bottom:0;width:290px;max-width:85vw;box-sizing:border-box;z-index:2147483646;background:#16261F;color:#F5F2EB;border-right:1px solid #2A4338;box-shadow:4px 0 18px rgba(0,0,0,.28);display:none;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">` +
-		`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #2A4338;">` +
-		`<div style="min-width:0;"><div style="font-size:13px;font-weight:700;color:#F5F2EB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Table of Contents</div><div id="ark-toc-count" style="font-size:11px;color:#9BB5A8;">Collapsed</div></div>` +
+		`<div id="ark-toc-head" style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #2A4338;">` +
+		`<div style="min-width:0;"><div id="ark-toc-title" style="font-size:13px;font-weight:700;color:#F5F2EB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Table of Contents</div><div id="ark-toc-count" style="font-size:11px;color:#9BB5A8;">Collapsed</div></div>` +
 		`<button id="ark-toc-close" type="button" title="Collapse" style="background:transparent;color:#C9DAD1;border:1px solid #436153;border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;">&times;</button>` +
 		`</div>` +
-		`<div style="padding:8px 10px;border-bottom:1px solid #2A4338;"><input id="ark-toc-filter" type="search" placeholder="Filter pages..." style="width:100%;box-sizing:border-box;padding:6px 9px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:12px;"></div>` +
-		`<div id="ark-toc-list" style="flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:2px;"></div>` +
-		`<button id="ark-toc-more" type="button" style="display:none;margin:8px 10px;padding:6px 10px;background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Load more pages</button>` +
+		`<div id="ark-toc-search-wrap" style="flex:0 0 auto;padding:8px 10px;border-bottom:1px solid #2A4338;"><input id="ark-toc-filter" type="search" placeholder="Filter pages..." style="width:100%;box-sizing:border-box;padding:6px 9px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:12px;"></div>` +
+		`<div id="ark-toc-list" style="display:block;flex:1 1 auto;min-height:0;overflow-y:auto;padding:6px;"></div>` +
+		`<button id="ark-toc-more" type="button" style="display:none;flex:0 0 auto;margin:8px 10px;padding:6px 10px;background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Load more pages</button>` +
 		`</aside>`
 }
 
@@ -2179,9 +2194,15 @@ func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool, prev
 	}
 	if headClose != -1 && headClose >= pos {
 		out = append(out, htmlBytes[pos:headClose]...)
+		if headOpen == -1 {
+			out = append(out, []byte(`<script>window.__arkFetch=window.__arkFetch||window.fetch;</script>`)...)
+		}
 		out = append(out, []byte(headSnippet)...)
 		pos = headClose
 	} else {
+		if headOpen == -1 {
+			out = append(out, []byte(`<script>window.__arkFetch=window.__arkFetch||window.fetch;</script>`)...)
+		}
 		out = append(out, []byte(headSnippet)...)
 	}
 
