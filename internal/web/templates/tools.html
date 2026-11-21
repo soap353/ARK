@@ -9,7 +9,8 @@
   </div>
 
   <div id="calc-tabs" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
-    <button type="button" class="btn btn-primary calc-tab-btn" data-tab="dosage" onclick="showCalcTab('dosage')">Dosage</button>
+    <button type="button" class="btn btn-primary calc-tab-btn" data-tab="graph" onclick="showCalcTab('graph')">Graphing Calculator</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="dosage" onclick="showCalcTab('dosage')">Dosage</button>
     <button type="button" class="btn calc-tab-btn" data-tab="solar" onclick="showCalcTab('solar')">Solar &amp; Battery</button>
     <button type="button" class="btn calc-tab-btn" data-tab="radio" onclick="showCalcTab('radio')">Radio &amp; Antenna</button>
     <button type="button" class="btn calc-tab-btn" data-tab="coords" onclick="showCalcTab('coords')">Coordinates &amp; Bearing</button>
@@ -17,8 +18,126 @@
   </div>
 </div>
 
+<!-- 0. Full Graphing & Scientific Calculator -->
+<div id="tab-graph" class="card calc-panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.85rem;">
+    <div>
+      <h2 style="margin:0;">Graphing &amp; Scientific Calculator</h2>
+      <p class="secondary-text" style="margin:0.2rem 0 0;font-size:13px;">Supports <code>y=f(x)</code>, inequalities (<code>y&lt;x</code>), implicit equations (<code>x^2+y^2=25</code>), polar (<code>r=2*sin(3*theta)</code>), parametric (<code>(cos(t), sin(t))</code>), scatter points, derivatives, &amp; integrals.</p>
+    </div>
+    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+      <button type="button" id="gc-ang-btn" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcToggleAngleMode()">RAD</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcToggleTrigGrid()">&pi; Grid</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcResetView()">Reset View</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcZoom(0.75)">Zoom +</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcZoom(1.333)">Zoom &minus;</button>
+    </div>
+  </div>
+
+  <!-- Scientific Scratchpad Evaluator -->
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:0.9rem;padding:0.65rem 0.85rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);">
+    <label for="gc-sci-input" style="font-weight:700;font-size:13px;white-space:nowrap;">Compute:</label>
+    <input id="gc-sci-input" type="text" class="form-control tabular" style="flex:1;min-width:220px;min-height:36px;" value="integral(sin(x), 0, pi)" placeholder="e.g. 2^10 * cos(pi/3), nCr(10,3), deriv(x^3, 2), integral(x^2, 0, 3)" oninput="gcEvalScratchpad()">
+    <div id="gc-sci-out" class="tabular" style="font-weight:700;font-size:15px;padding:0.25rem 0.65rem;border-radius:6px;background:var(--color-surface, #fff);border:1px solid var(--color-border);min-width:110px;text-align:right;">= 2</div>
+  </div>
+
+  <!-- Presets -->
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.85rem;">
+    <span class="secondary-text" style="font-size:12px;align-self:center;">Presets:</span>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('trig')">Damped Wave</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('intersect')">Parabola &amp; Line</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('circle')">Circle &amp; Hyperbola</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('polar')">Polar Rose</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('param')">Lissajous Parametric</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('heart')">Heart Implicit</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('ineq')">Linear Inequality</button>
+    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('scatter')">Data + Regression</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(290px, 380px) minmax(0, 1fr);gap:1rem;align-items:start;">
+    <!-- Left Column: Equations, Sliders, Keypad, Analysis -->
+    <div style="display:flex;flex-direction:column;gap:0.75rem;">
+      <div id="gc-expr-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" style="min-height:36px;padding:0.3rem 0.85rem;font-size:13px;" onclick="gcAddExpr('')">+ Add Expression</button>
+        <button type="button" class="btn" style="min-height:36px;padding:0.3rem 0.75rem;font-size:13px;" onclick="gcAddSlider()">+ Add Slider (a/b/c)</button>
+      </div>
+
+      <!-- Sliders -->
+      <div id="gc-sliders-wrap" style="display:none;flex-direction:column;gap:0.45rem;padding:0.65rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);"></div>
+
+      <!-- Scientific Keypad -->
+      <div style="padding:0.6rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
+        <div class="secondary-text" style="font-size:11px;margin-bottom:0.35rem;font-weight:600;">Quick Insert Keypad (inserts into active row)</div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.3rem;">
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('sin(')">sin</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('cos(')">cos</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('tan(')">tan</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('sqrt(')">&radic;</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('^2')">x&sup2;</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('^')">x^y</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('ln(')">ln</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('log(')">log</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('abs(')">|x|</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('pi')">&pi;</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('e')">e</button>
+          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('theta')">&theta;</button>
+        </div>
+      </div>
+
+      <!-- Bounds + Analysis Tools -->
+      <div style="padding:0.7rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
+        <div style="font-weight:700;font-size:13px;margin-bottom:0.45rem;">Window Bounds &amp; Calculus / Table</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.35rem;margin-bottom:0.55rem;">
+          <label style="font-size:11px;">X min<input id="gc-xmin" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label style="font-size:11px;">X max<input id="gc-xmax" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label style="font-size:11px;">Y min<input id="gc-ymin" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label style="font-size:11px;">Y max<input id="gc-ymax" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+        </div>
+
+        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.45rem;">
+          <select id="gc-analyze-target" class="form-control" style="flex:1;min-width:120px;min-height:32px;padding:0.2rem 0.4rem;font-size:12px;" onchange="gcAnalyzeSelected()"></select>
+          <button type="button" class="btn" style="min-height:32px;padding:0.2rem 0.6rem;font-size:12px;" onclick="gcAnalyzeSelected()">Roots &amp; Extrema</button>
+          <button type="button" class="btn" style="min-height:32px;padding:0.2rem 0.6rem;font-size:12px;" onclick="gcFindIntersections()">Intersections</button>
+        </div>
+
+        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.45rem;">
+          <span style="font-size:12px;">Integral &int; a:</span>
+          <input id="gc-int-a" type="number" step="any" value="0" class="form-control tabular" style="width:66px;min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" oninput="gcUpdateIntegral()">
+          <span style="font-size:12px;">b:</span>
+          <input id="gc-int-b" type="number" step="any" value="3.14159" class="form-control tabular" style="width:74px;min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" oninput="gcUpdateIntegral()">
+          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><input id="gc-int-show" type="checkbox" onchange="gcUpdateIntegral()"> Shade Area</label>
+        </div>
+
+        <div id="gc-analysis-out" class="tabular" style="font-size:12px;line-height:1.55;max-height:150px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <!-- Right Column: Interactive Canvas + Values Table -->
+    <div style="display:flex;flex-direction:column;gap:0.75rem;">
+      <div style="position:relative;border:1px solid var(--color-border);border-radius:10px;overflow:hidden;background:#FDFBF7;">
+        <canvas id="gc-canvas" style="display:block;width:100%;height:500px;cursor:crosshair;touch-action:none;"></canvas>
+        <div id="gc-hud" class="tabular" style="position:absolute;left:10px;bottom:10px;background:rgba(27,46,38,0.88);color:#F5F2EB;padding:4px 9px;border-radius:6px;font-size:12px;pointer-events:none;">x: 0.00, y: 0.00</div>
+      </div>
+
+      <!-- Function Table -->
+      <div style="padding:0.7rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
+          <strong style="font-size:13px;">Table of Values (x, f(x), f&prime;(x))</strong>
+          <div style="display:flex;gap:0.35rem;align-items:center;">
+            <label style="font-size:12px;">Start <input id="gc-tbl-start" type="number" step="any" value="-3" class="form-control tabular" style="display:inline-block;width:62px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
+            <label style="font-size:12px;">Step <input id="gc-tbl-step" type="number" step="any" value="1" min="0.0001" class="form-control tabular" style="display:inline-block;width:58px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
+            <label style="font-size:12px;">Rows <input id="gc-tbl-count" type="number" step="1" min="2" max="40" value="9" class="form-control tabular" style="display:inline-block;width:54px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
+          </div>
+        </div>
+        <div id="gc-table-wrap" style="overflow-x:auto;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 1. Dosage -->
-<div id="tab-dosage" class="card calc-panel">
+<div id="tab-dosage" class="card calc-panel" style="display:none;">
   <h2 style="margin-top:0;">Weight-Based Dosage Calculator</h2>
   <p class="secondary-text">Arithmetic helper only — always verify age limits, maximum daily doses, and contraindications in <a href="/a/druglabels/" target="_blank">Drug Labels</a> or <a href="/field-guide">Remedy</a>.</p>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;">
@@ -191,6 +310,9 @@ function showCalcTab(name) {
     if (b.dataset.tab === name) b.classList.add('btn-primary');
     else b.classList.remove('btn-primary');
   });
+  if (name === 'graph' && window.gcDraw) {
+    setTimeout(window.gcDraw, 10);
+  }
 }
 
 function statBox(label, val, sub) {
@@ -455,5 +577,1228 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     wrap.style.display = 'block';
   });
 }).catch(function() {});
+
+/* =========================================================================
+   Full Offline Graphing & Scientific Calculator Engine (Canvas + RPN Parser)
+   ========================================================================= */
+(function initGraphingCalculator() {
+  var canvas = document.getElementById('gc-canvas');
+  var exprListEl = document.getElementById('gc-expr-list');
+  if (!canvas || !exprListEl) return;
+  var ctx = canvas.getContext('2d');
+
+  var PALETTE = ['#C25E28', '#1D4ED8', '#15803D', '#9333EA', '#B45309', '#0F766E', '#BE123C'];
+  var state = {
+    xmin: -10, xmax: 10, ymin: -6.5, ymax: 6.5,
+    angleMode: 'RAD',
+    trigGrid: false,
+    exprs: [
+      { id: 1, text: 'a * sin(x)', color: PALETTE[0], visible: true, showDeriv: false },
+      { id: 2, text: 'x^2 / 4 - 2', color: PALETTE[1], visible: true, showDeriv: false }
+    ],
+    sliders: { a: { val: 2, min: -5, max: 5, step: 0.1, playing: false } },
+    activeExprId: 1,
+    nextId: 3,
+    markers: [],
+    hover: null,
+    dragging: false,
+    dragStart: null,
+    integral: { show: false, a: 0, b: Math.PI, value: null }
+  };
+
+  // --- Safe Tokenizer + Shunting-Yard Math Compiler (no eval) ---
+  var FUNCS = {
+    sin: 1, cos: 1, tan: 1, csc: 1, sec: 1, cot: 1,
+    asin: 1, acos: 1, atan: 1, atan2: 2,
+    sinh: 1, cosh: 1, tanh: 1, asinh: 1, acosh: 1, atanh: 1,
+    sqrt: 1, cbrt: 1, abs: 1, ln: 1, log: 1, log2: 1, exp: 1,
+    floor: 1, ceil: 1, round: 1, sign: 1, fact: 1,
+    min: -1, max: -1, mod: 2, ncr: 2, npr: 2, root: 2,
+    deriv: 2, integral: 3
+  };
+  var ALIASES = { arcsin: 'asin', arccos: 'acos', arctan: 'atan', tg: 'tan', lg: 'log' };
+
+  function fact(n) {
+    if (!isFinite(n) || n < 0 || n > 170) return NaN;
+    if (Math.abs(n - Math.round(n)) < 1e-9) {
+      var k = Math.round(n), r = 1;
+      for (var i = 2; i <= k; i++) r *= i;
+      return r;
+    }
+    // Lanczos Gamma(n+1)
+    var g = 7;
+    var p = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+      771.32342877765313, -176.61502916214059, 12.507343278686905,
+      -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    var z = n;
+    var y = 0.99999999999980993;
+    for (var j = 1; j < g + 2; j++) y += p[j] / (z + j);
+    var t = z + g + 0.5;
+    return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * y;
+  }
+
+  function tokenizeMath(src) {
+    // Expand |...| into abs(...) cleanly via balanced depth tracking
+    var s = String(src || '').replace(/\u03C0/g, 'pi').replace(/\u03B8/g, 'theta').replace(/\u221A/g, 'sqrt').replace(/\u00D7/g, '*').replace(/\u00F7/g, '/').replace(/\u2212/g, '-');
+    var barExp = '';
+    var barOpen = [];
+    for (var bi = 0; bi < s.length; bi++) {
+      var ch = s[bi];
+      if (ch === '|') {
+        var prev = bi > 0 ? s[bi - 1] : '';
+        if (barOpen.length === 0 || /[\(\+\-\*\/\^%,]/.test(prev) || prev === '') {
+          barOpen.push(true);
+          barExp += 'abs(';
+        } else {
+          barOpen.pop();
+          barExp += ')';
+        }
+      } else {
+        barExp += ch;
+      }
+    }
+    s = barExp;
+
+    var raw = [];
+    var i = 0;
+    while (i < s.length) {
+      var c = s[i];
+      if (/\s/.test(c)) { i++; continue; }
+      if ((c >= '0' && c <= '9') || (c === '.' && i + 1 < s.length && s[i + 1] >= '0' && s[i + 1] <= '9')) {
+        var num = '';
+        while (i < s.length && ((s[i] >= '0' && s[i] <= '9') || s[i] === '.')) num += s[i++];
+        if (i < s.length && (s[i] === 'e' || s[i] === 'E') && ((s[i + 1] >= '0' && s[i + 1] <= '9') || s[i + 1] === '+' || s[i + 1] === '-')) {
+          num += s[i++];
+          if (s[i] === '+' || s[i] === '-') num += s[i++];
+          while (i < s.length && s[i] >= '0' && s[i] <= '9') num += s[i++];
+        }
+        raw.push({ type: 'num', val: parseFloat(num) });
+        continue;
+      }
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_') {
+        var id = '';
+        while (i < s.length && ((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= '0' && s[i] <= '9') || s[i] === '_')) id += s[i++];
+        var low = id.toLowerCase();
+        if (ALIASES[low]) low = ALIASES[low];
+        raw.push({ type: 'id', val: low });
+        continue;
+      }
+      if ('+-*/^%(),!'.indexOf(c) !== -1) {
+        raw.push({ type: 'op', val: c });
+        i++;
+        continue;
+      }
+      throw new Error('Unexpected char: ' + c);
+    }
+
+    // Insert implicit multiplication tokens
+    var out = [];
+    for (var k = 0; k < raw.length; k++) {
+      var cur = raw[k];
+      if (out.length > 0) {
+        var prevTok = out[out.length - 1];
+        var prevCanMul = prevTok.type === 'num' || prevTok.type === 'id' || (prevTok.type === 'op' && (prevTok.val === ')' || prevTok.val === '!'));
+        var curCanMul = cur.type === 'num' || cur.type === 'id' || (cur.type === 'op' && cur.val === '(');
+        if (prevCanMul && curCanMul) {
+          var isFuncCall = prevTok.type === 'id' && FUNCS.hasOwnProperty(prevTok.val) && cur.type === 'op' && cur.val === '(';
+          if (!isFuncCall) {
+            out.push({ type: 'op', val: '*' });
+          }
+        }
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
+  var PREC = { '+': 2, '-': 2, '*': 3, '/': 3, '%': 3, 'u-': 4, '^': 5, '!': 6 };
+
+  function compileExpr(src) {
+    var toks = tokenizeMath(src);
+    if (toks.length === 0) return null;
+    // Extract raw subexpressions for deriv(expr, x0) / integral(expr, a, b) cleanly by handling AST/evaluator nodes:
+    var out = [];
+    var stack = [];
+    var argCounts = [];
+
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i];
+      if (t.type === 'num') {
+        out.push(t);
+      } else if (t.type === 'id') {
+        var nextIsCall = i + 1 < toks.length && toks[i + 1].type === 'op' && toks[i + 1].val === '(';
+        if (nextIsCall && FUNCS.hasOwnProperty(t.val)) {
+          stack.push({ type: 'fn', val: t.val });
+          argCounts.push(1);
+        } else {
+          out.push(t);
+        }
+      } else if (t.type === 'op') {
+        if (t.val === '(') {
+          stack.push({ type: 'op', val: '(' });
+        } else if (t.val === ',') {
+          while (stack.length && !(stack[stack.length - 1].type === 'op' && stack[stack.length - 1].val === '(')) {
+            out.push(stack.pop());
+          }
+          if (!stack.length) throw new Error('Misplaced comma');
+          if (argCounts.length) argCounts[argCounts.length - 1]++;
+        } else if (t.val === ')') {
+          while (stack.length && !(stack[stack.length - 1].type === 'op' && stack[stack.length - 1].val === '(')) {
+            out.push(stack.pop());
+          }
+          if (!stack.length) throw new Error('Mismatched parentheses');
+          stack.pop();
+          if (stack.length && stack[stack.length - 1].type === 'fn') {
+            var fnTok = stack.pop();
+            fnTok.argc = argCounts.pop() || 1;
+            out.push(fnTok);
+          }
+        } else if (t.val === '!') {
+          out.push({ type: 'op', val: '!' });
+        } else {
+          var prevTok = i > 0 ? toks[i - 1] : null;
+          var isUnary = !prevTok || (prevTok.type === 'op' && prevTok.val !== ')' && prevTok.val !== '!');
+          var opVal = t.val;
+          if (isUnary && opVal === '-') opVal = 'u-';
+          else if (isUnary && opVal === '+') continue;
+          while (stack.length) {
+            var top = stack[stack.length - 1];
+            if (top.type !== 'op' || top.val === '(') break;
+            var pTop = PREC[top.val] || 0, pCur = PREC[opVal] || 0;
+            var rightAssoc = (opVal === '^' || opVal === 'u-');
+            if ((!rightAssoc && pTop >= pCur) || (rightAssoc && pTop > pCur)) {
+              out.push(stack.pop());
+            } else break;
+          }
+          stack.push({ type: 'op', val: opVal });
+        }
+      }
+    }
+    while (stack.length) {
+      var rem = stack.pop();
+      if (rem.val === '(') throw new Error('Unclosed parenthesis');
+      out.push(rem);
+    }
+
+    // Return evaluator fn(vars)
+    return function(vars) {
+      var st = [];
+      var angScale = state.angleMode === 'DEG' ? (Math.PI / 180) : 1;
+      for (var i = 0; i < out.length; i++) {
+        var tk = out[i];
+        if (tk.type === 'num') {
+          st.push(tk.val);
+        } else if (tk.type === 'id') {
+          if (tk.val === 'pi') st.push(Math.PI);
+          else if (tk.val === 'tau') st.push(Math.PI * 2);
+          else if (tk.val === 'e') st.push(Math.E);
+          else if (tk.val === 'phi') st.push((1 + Math.sqrt(5)) / 2);
+          else if (vars && vars.hasOwnProperty(tk.val)) st.push(vars[tk.val]);
+          else if (state.sliders.hasOwnProperty(tk.val)) st.push(state.sliders[tk.val].val);
+          else st.push(NaN);
+        } else if (tk.type === 'op') {
+          if (tk.val === 'u-') { st.push(-st.pop()); continue; }
+          if (tk.val === '!') { st.push(fact(st.pop())); continue; }
+          var b = st.pop(), a = st.pop();
+          switch (tk.val) {
+            case '+': st.push(a + b); break;
+            case '-': st.push(a - b); break;
+            case '*': st.push(a * b); break;
+            case '/': st.push(a / b); break;
+            case '%': st.push(a % b); break;
+            case '^': st.push(Math.pow(a, b)); break;
+          }
+        } else if (tk.type === 'fn') {
+          var argc = tk.argc || 1;
+          var args = [];
+          for (var ai = 0; ai < argc; ai++) args.unshift(st.pop());
+          var x0 = args[0], x1 = args[1];
+          switch (tk.val) {
+            case 'sin': st.push(Math.sin(x0 * angScale)); break;
+            case 'cos': st.push(Math.cos(x0 * angScale)); break;
+            case 'tan': st.push(Math.tan(x0 * angScale)); break;
+            case 'csc': st.push(1 / Math.sin(x0 * angScale)); break;
+            case 'sec': st.push(1 / Math.cos(x0 * angScale)); break;
+            case 'cot': st.push(1 / Math.tan(x0 * angScale)); break;
+            case 'asin': st.push(Math.asin(x0) / angScale); break;
+            case 'acos': st.push(Math.acos(x0) / angScale); break;
+            case 'atan': st.push(Math.atan(x0) / angScale); break;
+            case 'atan2': st.push(Math.atan2(x0, x1) / angScale); break;
+            case 'sinh': st.push(Math.sinh(x0)); break;
+            case 'cosh': st.push(Math.cosh(x0)); break;
+            case 'tanh': st.push(Math.tanh(x0)); break;
+            case 'asinh': st.push(Math.asinh(x0)); break;
+            case 'acosh': st.push(Math.acosh(x0)); break;
+            case 'atanh': st.push(Math.atanh(x0)); break;
+            case 'sqrt': st.push(Math.sqrt(x0)); break;
+            case 'cbrt': st.push(Math.cbrt(x0)); break;
+            case 'root': st.push(Math.pow(x1, 1 / x0)); break;
+            case 'abs': st.push(Math.abs(x0)); break;
+            case 'ln': st.push(Math.log(x0)); break;
+            case 'log': st.push(Math.log10(x0)); break;
+            case 'log2': st.push(Math.log2(x0)); break;
+            case 'exp': st.push(Math.exp(x0)); break;
+            case 'floor': st.push(Math.floor(x0)); break;
+            case 'ceil': st.push(Math.ceil(x0)); break;
+            case 'round': st.push(Math.round(x0)); break;
+            case 'sign': st.push(Math.sign(x0)); break;
+            case 'fact': st.push(fact(x0)); break;
+            case 'min': st.push(Math.min.apply(null, args)); break;
+            case 'max': st.push(Math.max.apply(null, args)); break;
+            case 'mod': st.push(((x0 % x1) + x1) % x1); break;
+            case 'ncr': st.push(Math.round(fact(x0) / (fact(x1) * fact(x0 - x1)))); break;
+            case 'npr': st.push(Math.round(fact(x0) / fact(x0 - x1))); break;
+            default: st.push(NaN);
+          }
+        }
+      }
+      return st.length ? st[st.length - 1] : NaN;
+    };
+  }
+
+  // Handle scratchpad symbolic calculus wrappers deriv(expr, x0) & integral(expr, a, b) cleanly
+  function splitTopArgs(str) {
+    var parts = [], cur = '', depth = 0;
+    for (var i = 0; i < str.length; i++) {
+      var c = str[i];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      if (c === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+      else cur += c;
+    }
+    if (cur.trim()) parts.push(cur.trim());
+    return parts;
+  }
+
+  function simpsonIntegral(fn, a, b) {
+    var N = 512;
+    var h = (b - a) / N;
+    var sum = fn({ x: a }) + fn({ x: b });
+    for (var i = 1; i < N; i++) {
+      sum += (i % 2 === 0 ? 2 : 4) * fn({ x: a + i * h });
+    }
+    return (h / 3) * sum;
+  }
+
+  window.gcEvalScratchpad = function() {
+    var inp = document.getElementById('gc-sci-input');
+    var out = document.getElementById('gc-sci-out');
+    if (!inp || !out) return;
+    var raw = inp.value.trim();
+    if (!raw) { out.textContent = '= —'; return; }
+    try {
+      var val;
+      var dm = raw.match(/^deriv\((.*)\)$/i);
+      var im = raw.match(/^integral\((.*)\)$/i);
+      if (dm) {
+        var dp = splitTopArgs(dm[1]);
+        if (dp.length !== 2) throw new Error('Use deriv(expr, x0)');
+        var fn = compileExpr(dp[0]);
+        var x0 = compileExpr(dp[1])({});
+        var h = 1e-6 * Math.max(1, Math.abs(x0));
+        val = (fn({ x: x0 + h }) - fn({ x: x0 - h })) / (2 * h);
+      } else if (im) {
+        var ip = splitTopArgs(im[1]);
+        if (ip.length !== 3) throw new Error('Use integral(expr, a, b)');
+        var fnI = compileExpr(ip[0]);
+        var a = compileExpr(ip[1])({});
+        var b = compileExpr(ip[2])({});
+        val = simpsonIntegral(fnI, a, b);
+      } else {
+        val = compileExpr(raw)({});
+      }
+      if (!isFinite(val)) out.textContent = '= Undefined';
+      else {
+        var rounded = Math.abs(val) < 1e-12 ? 0 : val;
+        out.textContent = '= ' + Number(rounded.toPrecision(10)).toString();
+      }
+    } catch (e) {
+      out.textContent = 'Syntax err';
+    }
+  };
+
+  // --- Parse an expression row into a plottable descriptor ---
+  function parsePlotSpec(rawText) {
+    var s = String(rawText || '').trim();
+    if (!s) return { kind: 'empty' };
+
+    // 1. Data points list: (1,2), (3,4), ...
+    var ptMatches = s.match(/\(\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\)/g);
+    if (ptMatches && s.replace(/\(\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\)/g, '').replace(/[,\s]/g, '') === '') {
+      var pts = ptMatches.map(function(m) {
+        var inner = m.slice(1, -1).split(',');
+        return { x: parseFloat(inner[0]), y: parseFloat(inner[1]) };
+      });
+      var reg = null;
+      if (pts.length >= 2) {
+        var sx = 0, sy = 0, sxx = 0, sxy = 0, n = pts.length;
+        pts.forEach(function(p) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; });
+        var denom = n * sxx - sx * sx;
+        if (Math.abs(denom) > 1e-12) {
+          var slope = (n * sxy - sx * sy) / denom;
+          var intercept = (sy - slope * sx) / n;
+          var yMean = sy / n, ssTot = 0, ssRes = 0;
+          pts.forEach(function(p) {
+            ssTot += Math.pow(p.y - yMean, 2);
+            ssRes += Math.pow(p.y - (slope * p.x + intercept), 2);
+          });
+          var r2 = ssTot > 0 ? 1 - ssRes / ssTot : 1;
+          reg = { m: slope, b: intercept, r2: r2 };
+        }
+      }
+      return { kind: 'scatter', pts: pts, reg: reg };
+    }
+
+    // 2. Parametric: (fx(t), fy(t))
+    if (s[0] === '(' && s[s.length - 1] === ')') {
+      var parts = splitTopArgs(s.slice(1, -1));
+      if (parts.length === 2) {
+        return { kind: 'parametric', fx: compileExpr(parts[0]), fy: compileExpr(parts[1]), label: s };
+      }
+    }
+
+    // 3. Inequality or Equality
+    var cmpMatch = s.match(/^(.*?)(<=|>=|<|>|=)(.*)$/);
+    if (cmpMatch) {
+      var lhs = cmpMatch[1].trim(), op = cmpMatch[2], rhs = cmpMatch[3].trim();
+      var lowL = lhs.toLowerCase();
+      if (op === '=' && (lowL === 'y' || lowL === 'f(x)')) {
+        return { kind: 'explicit', fn: compileExpr(rhs), label: rhs };
+      }
+      if (op === '=' && lowL === 'r') {
+        return { kind: 'polar', fn: compileExpr(rhs), label: rhs };
+      }
+      if (op === '=' && lowL === 'x') {
+        return { kind: 'vertical', fn: compileExpr(rhs), label: rhs };
+      }
+      if (op !== '=' && (lowL === 'y' || lowL === 'f(x)')) {
+        return { kind: 'ineq', op: op, fn: compileExpr(rhs), label: s };
+      }
+      // General implicit relation lhs = rhs (or lhs < rhs -> boundary)
+      var fnL = compileExpr(lhs), fnR = compileExpr(rhs);
+      return { kind: 'implicit', fn: function(v) { return fnL(v) - fnR(v); }, op: op, label: s };
+    }
+
+    // Default: explicit expression of x
+    return { kind: 'explicit', fn: compileExpr(s), label: s };
+  }
+
+  // --- Coordinate Mapping ---
+  function worldToPxX(x, W) { return ((x - state.xmin) / (state.xmax - state.xmin)) * W; }
+  function worldToPxY(y, H) { return ((state.ymax - y) / (state.ymax - state.ymin)) * H; }
+  function pxToWorldX(px, W) { return state.xmin + (px / W) * (state.xmax - state.xmin); }
+  function pxToWorldY(py, H) { return state.ymax - (py / H) * (state.ymax - state.ymin); }
+
+  function niceStep(span, targetTicks) {
+    var raw = span / Math.max(2, targetTicks);
+    var pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    var norm = raw / pow;
+    var step = norm < 1.5 ? 1 : (norm < 3.5 ? 2 : (norm < 7.5 ? 5 : 10));
+    return step * pow;
+  }
+
+  function formatTick(v, step) {
+    if (Math.abs(v) < step * 1e-4) return '0';
+    if (state.trigGrid) {
+      var ratio = v / (Math.PI / 2);
+      if (Math.abs(ratio - Math.round(ratio)) < 1e-3) {
+        var r = Math.round(ratio);
+        if (r === 0) return '0';
+        if (r === 2) return 'π';
+        if (r === -2) return '-π';
+        if (r % 2 === 0) return (r / 2) + 'π';
+        if (r === 1) return 'π/2';
+        if (r === -1) return '-π/2';
+        return r + 'π/2';
+      }
+    }
+    var mag = Math.abs(v);
+    if (mag >= 1e5 || (mag > 0 && mag < 1e-4)) return v.toExponential(1);
+    var dec = Math.max(0, -Math.floor(Math.log10(step)) + 1);
+    return Number(v.toFixed(Math.min(6, dec))).toString();
+  }
+
+  function drawGrid(W, H) {
+    ctx.fillStyle = '#FDFBF7';
+    ctx.fillRect(0, 0, W, H);
+
+    var xStep = state.trigGrid ? (Math.PI / 2) : niceStep(state.xmax - state.xmin, W / 85);
+    var yStep = niceStep(state.ymax - state.ymin, H / 70);
+
+    // Minor grid
+    ctx.strokeStyle = 'rgba(27,46,38,0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    var xStartM = Math.floor(state.xmin / (xStep / 4)) * (xStep / 4);
+    for (var xm = xStartM; xm <= state.xmax; xm += xStep / 4) {
+      var pxm = worldToPxX(xm, W);
+      ctx.moveTo(pxm, 0); ctx.lineTo(pxm, H);
+    }
+    var yStartM = Math.floor(state.ymin / (yStep / 4)) * (yStep / 4);
+    for (var ym = yStartM; ym <= state.ymax; ym += yStep / 4) {
+      var pym = worldToPxY(ym, H);
+      ctx.moveTo(0, pym); ctx.lineTo(W, pym);
+    }
+    ctx.stroke();
+
+    // Major grid
+    ctx.strokeStyle = 'rgba(27,46,38,0.14)';
+    ctx.beginPath();
+    var xStart = Math.floor(state.xmin / xStep) * xStep;
+    for (var x = xStart; x <= state.xmax + xStep * 0.1; x += xStep) {
+      var px = worldToPxX(x, W);
+      ctx.moveTo(px, 0); ctx.lineTo(px, H);
+    }
+    var yStart = Math.floor(state.ymin / yStep) * yStep;
+    for (var y = yStart; y <= state.ymax + yStep * 0.1; y += yStep) {
+      var py = worldToPxY(y, H);
+      ctx.moveTo(0, py); ctx.lineTo(W, py);
+    }
+    ctx.stroke();
+
+    // Axes
+    var axX = worldToPxX(0, W);
+    var axY = worldToPxY(0, H);
+    ctx.strokeStyle = '#1B2E26';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    if (axX >= 0 && axX <= W) { ctx.moveTo(axX, 0); ctx.lineTo(axX, H); }
+    if (axY >= 0 && axY <= H) { ctx.moveTo(0, axY); ctx.lineTo(W, axY); }
+    ctx.stroke();
+
+    // Tick labels
+    ctx.fillStyle = '#3B5246';
+    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    var lblY = Math.min(H - 16, Math.max(14, axY + 14));
+    ctx.textAlign = 'center';
+    for (var xt = xStart; xt <= state.xmax + xStep * 0.1; xt += xStep) {
+      if (Math.abs(xt) < xStep * 1e-4) continue;
+      var pxt = worldToPxX(xt, W);
+      if (pxt > 14 && pxt < W - 14) ctx.fillText(formatTick(xt, xStep), pxt, lblY);
+    }
+    var lblX = Math.min(W - 34, Math.max(6, axX + 6));
+    ctx.textAlign = axX < 42 ? 'left' : 'right';
+    if (axX >= 42) lblX = Math.min(W - 8, axX - 6);
+    for (var yt = yStart; yt <= state.ymax + yStep * 0.1; yt += yStep) {
+      if (Math.abs(yt) < yStep * 1e-4) continue;
+      var pyt = worldToPxY(yt, H);
+      if (pyt > 12 && pyt < H - 10) ctx.fillText(formatTick(yt, yStep), lblX, pyt + 4);
+    }
+  }
+
+  function plotExplicitCurve(fn, color, dashed, W, H, derivOverlay) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.4;
+    if (dashed) ctx.setLineDash([6, 5]);
+    else ctx.setLineDash([]);
+
+    var steps = Math.max(500, Math.round(W * 1.4));
+    var dx = (state.xmax - state.xmin) / steps;
+    var ySpan = state.ymax - state.ymin;
+    ctx.beginPath();
+    var drawing = false, prevY = NaN;
+    for (var i = 0; i <= steps; i++) {
+      var x = state.xmin + i * dx;
+      var y = fn({ x: x });
+      if (!isFinite(y)) { drawing = false; prevY = NaN; continue; }
+      if (drawing && Math.abs(y - prevY) > ySpan * 1.6 && ((y > state.ymax && prevY < state.ymin) || (y < state.ymin && prevY > state.ymax))) {
+        drawing = false;
+      }
+      var px = worldToPxX(x, W), py = worldToPxY(y, H);
+      if (py < -H * 2 || py > H * 3) { drawing = false; prevY = y; continue; }
+      if (!drawing) { ctx.moveTo(px, py); drawing = true; }
+      else ctx.lineTo(px, py);
+      prevY = y;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (derivOverlay) {
+      var h = dx * 0.25;
+      plotExplicitCurve(function(v) { return (fn({ x: v.x + h }) - fn({ x: v.x - h })) / (2 * h); }, color, true, W, H, false);
+    }
+  }
+
+  function plotInequality(spec, color, W, H) {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    var steps = Math.max(300, Math.round(W));
+    var dx = (state.xmax - state.xmin) / steps;
+    var isLess = spec.op === '<' || spec.op === '<=';
+    var edgeY = isLess ? H : 0;
+    ctx.moveTo(0, edgeY);
+    for (var i = 0; i <= steps; i++) {
+      var x = state.xmin + i * dx;
+      var y = spec.fn({ x: x });
+      var py = isFinite(y) ? Math.max(-10, Math.min(H + 10, worldToPxY(y, H))) : edgeY;
+      ctx.lineTo(worldToPxX(x, W), py);
+    }
+    ctx.lineTo(W, edgeY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    plotExplicitCurve(spec.fn, color, spec.op === '<' || spec.op === '>', W, H, false);
+  }
+
+  function plotImplicit(spec, color, W, H) {
+    // Marching squares zero contour
+    var cols = 130, rows = 95;
+    var dx = (state.xmax - state.xmin) / cols;
+    var dy = (state.ymax - state.ymin) / rows;
+    var grid = new Float64Array((cols + 1) * (rows + 1));
+    for (var r = 0; r <= rows; r++) {
+      var y = state.ymin + r * dy;
+      for (var c = 0; c <= cols; c++) {
+        var x = state.xmin + c * dx;
+        grid[r * (cols + 1) + c] = spec.fn({ x: x, y: y });
+      }
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    for (var r = 0; r < rows; r++) {
+      var y0 = state.ymin + r * dy, y1 = y0 + dy;
+      for (var c = 0; c < cols; c++) {
+        var x0 = state.xmin + c * dx, x1 = x0 + dx;
+        var v00 = grid[r * (cols + 1) + c];
+        var v10 = grid[r * (cols + 1) + c + 1];
+        var v11 = grid[(r + 1) * (cols + 1) + c + 1];
+        var v01 = grid[(r + 1) * (cols + 1) + c];
+        if (!isFinite(v00) || !isFinite(v10) || !isFinite(v11) || !isFinite(v01)) continue;
+        var pts = [];
+        if ((v00 < 0) !== (v10 < 0)) pts.push({ x: x0 + dx * (Math.abs(v00) / (Math.abs(v00) + Math.abs(v10))), y: y0 });
+        if ((v10 < 0) !== (v11 < 0)) pts.push({ x: x1, y: y0 + dy * (Math.abs(v10) / (Math.abs(v10) + Math.abs(v11))) });
+        if ((v11 < 0) !== (v01 < 0)) pts.push({ x: x0 + dx * (Math.abs(v01) / (Math.abs(v01) + Math.abs(v11))), y: y1 });
+        if ((v01 < 0) !== (v00 < 0)) pts.push({ x: x0, y: y0 + dy * (Math.abs(v00) / (Math.abs(v00) + Math.abs(v01))) });
+        if (pts.length >= 2) {
+          ctx.moveTo(worldToPxX(pts[0].x, W), worldToPxY(pts[0].y, H));
+          ctx.lineTo(worldToPxX(pts[1].x, W), worldToPxY(pts[1].y, H));
+          if (pts.length === 4) {
+            ctx.moveTo(worldToPxX(pts[2].x, W), worldToPxY(pts[2].y, H));
+            ctx.lineTo(worldToPxX(pts[3].x, W), worldToPxY(pts[3].y, H));
+          }
+        }
+      }
+    }
+    ctx.stroke();
+  }
+
+  function plotPolar(fn, color, W, H) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    var maxT = state.angleMode === 'DEG' ? 360 * 2 : Math.PI * 4;
+    var steps = 1200;
+    var angScale = state.angleMode === 'DEG' ? Math.PI / 180 : 1;
+    var drawing = false;
+    for (var i = 0; i <= steps; i++) {
+      var th = (i / steps) * maxT;
+      var r = fn({ theta: th, t: th, x: th });
+      if (!isFinite(r)) { drawing = false; continue; }
+      var x = r * Math.cos(th * angScale), y = r * Math.sin(th * angScale);
+      var px = worldToPxX(x, W), py = worldToPxY(y, H);
+      if (!drawing) { ctx.moveTo(px, py); drawing = true; }
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  function plotParametric(spec, color, W, H) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    var maxT = state.angleMode === 'DEG' ? 360 * 2 : Math.PI * 2;
+    var steps = 900;
+    var drawing = false;
+    for (var i = 0; i <= steps; i++) {
+      var t = (i / steps) * maxT;
+      var x = spec.fx({ t: t, theta: t, x: t });
+      var y = spec.fy({ t: t, theta: t, x: t });
+      if (!isFinite(x) || !isFinite(y)) { drawing = false; continue; }
+      var px = worldToPxX(x, W), py = worldToPxY(y, H);
+      if (!drawing) { ctx.moveTo(px, py); drawing = true; }
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  function plotScatter(spec, color, W, H) {
+    if (spec.reg) {
+      plotExplicitCurve(function(v) { return spec.reg.m * v.x + spec.reg.b; }, color, true, W, H, false);
+    }
+    ctx.fillStyle = color;
+    spec.pts.forEach(function(p) {
+      var px = worldToPxX(p.x, W), py = worldToPxY(p.y, H);
+      ctx.beginPath();
+      ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FDFBF7';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
+  }
+
+  function getActiveExplicitSpec() {
+    var sel = document.getElementById('gc-analyze-target');
+    var targetId = sel ? parseInt(sel.value, 10) : state.activeExprId;
+    var row = state.exprs.find(function(e) { return e.id === targetId; }) || state.exprs[0];
+    if (!row) return null;
+    try {
+      var sp = parsePlotSpec(row.text);
+      if (sp.kind === 'explicit' || sp.kind === 'ineq') return { row: row, spec: sp };
+    } catch (e) {}
+    return null;
+  }
+
+  window.gcDraw = function() {
+    var rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var W = rect.width, H = rect.height;
+
+    drawGrid(W, H);
+
+    // Optional shaded definite integral under active curve
+    if (state.integral.show) {
+      var active = getActiveExplicitSpec();
+      if (active) {
+        var ia = Math.min(state.integral.a, state.integral.b);
+        var ib = Math.max(state.integral.a, state.integral.b);
+        ctx.save();
+        ctx.fillStyle = active.row.color;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath();
+        var zeroY = worldToPxY(0, H);
+        ctx.moveTo(worldToPxX(ia, W), zeroY);
+        var steps = 160;
+        for (var i = 0; i <= steps; i++) {
+          var xi = ia + ((ib - ia) * i) / steps;
+          var yi = active.spec.fn({ x: xi });
+          ctx.lineTo(worldToPxX(xi, W), isFinite(yi) ? worldToPxY(yi, H) : zeroY);
+        }
+        ctx.lineTo(worldToPxX(ib, W), zeroY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    state.exprs.forEach(function(item) {
+      if (!item.visible || !item.text.trim()) { item.error = ''; item.meta = ''; return; }
+      try {
+        var spec = parsePlotSpec(item.text);
+        item.error = '';
+        item.meta = '';
+        if (spec.kind === 'explicit') plotExplicitCurve(spec.fn, item.color, false, W, H, item.showDeriv);
+        else if (spec.kind === 'ineq') plotInequality(spec, item.color, W, H);
+        else if (spec.kind === 'implicit') plotImplicit(spec, item.color, W, H);
+        else if (spec.kind === 'polar') plotPolar(spec.fn, item.color, W, H);
+        else if (spec.kind === 'parametric') plotParametric(spec, item.color, W, H);
+        else if (spec.kind === 'vertical') {
+          var xv = spec.fn({});
+          if (isFinite(xv)) {
+            var pxv = worldToPxX(xv, W);
+            ctx.strokeStyle = item.color; ctx.lineWidth = 2.4;
+            ctx.beginPath(); ctx.moveTo(pxv, 0); ctx.lineTo(pxv, H); ctx.stroke();
+          }
+        } else if (spec.kind === 'scatter') {
+          plotScatter(spec, item.color, W, H);
+          if (spec.reg) {
+            item.meta = 'Fit: y = ' + spec.reg.m.toFixed(3) + 'x + ' + spec.reg.b.toFixed(3) + ' (R²=' + spec.reg.r2.toFixed(4) + ')';
+          }
+        }
+      } catch (err) {
+        item.error = err.message || 'Invalid syntax';
+      }
+    });
+
+    // Markers (roots, extrema, intersections)
+    state.markers.forEach(function(m) {
+      var mx = worldToPxX(m.x, W), my = worldToPxY(m.y, H);
+      if (mx < -10 || mx > W + 10 || my < -10 || my > H + 10) return;
+      ctx.fillStyle = m.color || '#1B2E26';
+      ctx.beginPath(); ctx.arc(mx, my, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#FDFBF7'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (m.label) {
+        ctx.fillStyle = '#1B2E26';
+        ctx.font = 'bold 11px ui-monospace, monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(m.label, mx + 7, my - 6);
+      }
+    });
+
+    // Hover crosshair
+    if (state.hover) {
+      ctx.strokeStyle = 'rgba(27,46,38,0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(state.hover.px, 0); ctx.lineTo(state.hover.px, H);
+      ctx.moveTo(0, state.hover.py); ctx.lineTo(W, state.hover.py);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    syncBoundsInputs();
+  };
+
+  function syncBoundsInputs() {
+    var fm = function(v) { return Number(v.toFixed(4)).toString(); };
+    var xi = document.getElementById('gc-xmin'); if (xi) xi.value = fm(state.xmin);
+    var xa = document.getElementById('gc-xmax'); if (xa) xa.value = fm(state.xmax);
+    var yi = document.getElementById('gc-ymin'); if (yi) yi.value = fm(state.ymin);
+    var ya = document.getElementById('gc-ymax'); if (ya) ya.value = fm(state.ymax);
+  }
+
+  function renderExprRows() {
+    var html = '';
+    state.exprs.forEach(function(item, idx) {
+      var activeBorder = item.id === state.activeExprId ? 'border-color:var(--color-accent);box-shadow:0 0 0 2px rgba(194,94,40,0.14);' : '';
+      html += '<div style="border:1px solid var(--color-border);border-radius:8px;padding:0.45rem 0.55rem;background:var(--color-surface,#fff);' + activeBorder + '">' +
+        '<div style="display:flex;align-items:center;gap:0.4rem;">' +
+          '<input type="color" value="' + item.color + '" title="Color" style="width:26px;height:26px;border:none;padding:0;background:none;cursor:pointer;" onchange="gcSetColor(' + item.id + ',this.value)">' +
+          '<input type="text" class="form-control tabular" value="' + item.text.replace(/"/g, '&quot;') + '" placeholder="e.g. x^2 - 4, sin(x), x^2+y^2=25" style="flex:1;min-height:34px;padding:0.25rem 0.5rem;font-size:13px;" onfocus="gcSetActive(' + item.id + ')" oninput="gcUpdateText(' + item.id + ',this.value)">' +
+          '<button type="button" class="btn" title="Toggle derivative f\'(x)" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;' + (item.showDeriv ? 'background:var(--color-accent);color:#fff;' : '') + '" onclick="gcToggleDeriv(' + item.id + ')">f&prime;</button>' +
+          '<button type="button" class="btn" title="Show/Hide" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;opacity:' + (item.visible ? '1' : '0.45') + ';" onclick="gcToggleVis(' + item.id + ')">' + (item.visible ? 'On' : 'Off') + '</button>' +
+          '<button type="button" class="btn" title="Remove" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;" onclick="gcRemoveExpr(' + item.id + ')">&times;</button>' +
+        '</div>' +
+        '<div id="gc-err-' + item.id + '" style="font-size:11px;color:#b91c1c;margin-top:2px;"></div>' +
+      '</div>';
+    });
+    exprListEl.innerHTML = html;
+    syncAnalyzeSelect();
+  }
+
+  function syncExprNotes() {
+    state.exprs.forEach(function(item) {
+      var el = document.getElementById('gc-err-' + item.id);
+      if (!el) return;
+      if (item.error) { el.style.color = '#b91c1c'; el.textContent = item.error; }
+      else if (item.meta) { el.style.color = '#15803D'; el.textContent = item.meta; }
+      else el.textContent = '';
+    });
+  }
+
+  function syncAnalyzeSelect() {
+    var sel = document.getElementById('gc-analyze-target');
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = '';
+    state.exprs.forEach(function(item, idx) {
+      var opt = document.createElement('option');
+      opt.value = item.id;
+      opt.textContent = 'f' + (idx + 1) + ': ' + (item.text || '(empty)');
+      sel.appendChild(opt);
+    });
+    if (cur) sel.value = cur;
+  }
+
+  function renderSliders() {
+    var wrap = document.getElementById('gc-sliders-wrap');
+    if (!wrap) return;
+    var keys = Object.keys(state.sliders);
+    if (keys.length === 0) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+    wrap.style.display = 'flex';
+    var html = '';
+    keys.forEach(function(k) {
+      var sl = state.sliders[k];
+      html += '<div style="display:flex;align-items:center;gap:0.45rem;">' +
+        '<strong class="tabular" style="width:18px;font-size:13px;">' + k + '</strong>' +
+        '<input type="range" min="' + sl.min + '" max="' + sl.max + '" step="' + sl.step + '" value="' + sl.val + '" style="flex:1;" oninput="gcSetSlider(\'' + k + '\',this.value)">' +
+        '<span id="gc-slval-' + k + '" class="tabular" style="width:42px;text-align:right;font-size:12px;">' + Number(sl.val).toFixed(1) + '</span>' +
+        '<button type="button" class="btn" style="min-height:26px;padding:0.1rem 0.45rem;font-size:11px;" onclick="gcTogglePlay(\'' + k + '\')">' + (sl.playing ? 'Pause' : 'Play') + '</button>' +
+      '</div>';
+    });
+    wrap.innerHTML = html;
+  }
+
+  var sliderTimer = null;
+  function tickSliders() {
+    var anyPlaying = false;
+    Object.keys(state.sliders).forEach(function(k) {
+      var sl = state.sliders[k];
+      if (!sl.playing) return;
+      anyPlaying = true;
+      sl.val += sl.step;
+      if (sl.val > sl.max) sl.val = sl.min;
+      var valEl = document.getElementById('gc-slval-' + k);
+      if (valEl) valEl.textContent = Number(sl.val).toFixed(1);
+    });
+    if (anyPlaying) {
+      gcDraw();
+      gcRenderTable();
+      sliderTimer = setTimeout(tickSliders, 60);
+    } else {
+      sliderTimer = null;
+    }
+  }
+
+  window.gcSetActive = function(id) { state.activeExprId = id; };
+  window.gcUpdateText = function(id, val) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (item) item.text = val;
+    state.markers = [];
+    gcDraw();
+    syncExprNotes();
+    syncAnalyzeSelect();
+    gcRenderTable();
+  };
+  window.gcSetColor = function(id, c) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (item) item.color = c;
+    gcDraw();
+  };
+  window.gcToggleDeriv = function(id) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (item) item.showDeriv = !item.showDeriv;
+    renderExprRows();
+    gcDraw();
+  };
+  window.gcToggleVis = function(id) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (item) item.visible = !item.visible;
+    renderExprRows();
+    gcDraw();
+  };
+  window.gcRemoveExpr = function(id) {
+    state.exprs = state.exprs.filter(function(e) { return e.id !== id; });
+    if (state.exprs.length === 0) state.exprs.push({ id: state.nextId++, text: '', color: PALETTE[0], visible: true, showDeriv: false });
+    state.activeExprId = state.exprs[0].id;
+    state.markers = [];
+    renderExprRows();
+    gcDraw();
+    gcRenderTable();
+  };
+  window.gcAddExpr = function(txt) {
+    var id = state.nextId++;
+    state.exprs.push({ id: id, text: txt || '', color: PALETTE[(id - 1) % PALETTE.length], visible: true, showDeriv: false });
+    state.activeExprId = id;
+    renderExprRows();
+    gcDraw();
+    syncExprNotes();
+  };
+  window.gcAddSlider = function() {
+    var names = ['a', 'b', 'c', 'k', 'm'];
+    for (var i = 0; i < names.length; i++) {
+      if (!state.sliders[names[i]]) {
+        state.sliders[names[i]] = { val: 1, min: -5, max: 5, step: 0.1, playing: false };
+        renderSliders();
+        gcDraw();
+        return;
+      }
+    }
+  };
+  window.gcSetSlider = function(k, v) {
+    if (!state.sliders[k]) return;
+    state.sliders[k].val = parseFloat(v);
+    var lbl = document.getElementById('gc-slval-' + k);
+    if (lbl) lbl.textContent = Number(state.sliders[k].val).toFixed(1);
+    gcDraw();
+    gcRenderTable();
+  };
+  window.gcTogglePlay = function(k) {
+    if (!state.sliders[k]) return;
+    state.sliders[k].playing = !state.sliders[k].playing;
+    renderSliders();
+    if (!sliderTimer && state.sliders[k].playing) tickSliders();
+  };
+  window.gcInsertToken = function(tok) {
+    var item = state.exprs.find(function(e) { return e.id === state.activeExprId; }) || state.exprs[0];
+    if (!item) return;
+    item.text = (item.text || '') + tok;
+    renderExprRows();
+    gcDraw();
+    syncExprNotes();
+  };
+  window.gcToggleAngleMode = function() {
+    state.angleMode = state.angleMode === 'RAD' ? 'DEG' : 'RAD';
+    var b = document.getElementById('gc-ang-btn');
+    if (b) b.textContent = state.angleMode;
+    gcDraw();
+    gcEvalScratchpad();
+    gcRenderTable();
+  };
+  window.gcToggleTrigGrid = function() {
+    state.trigGrid = !state.trigGrid;
+    if (state.trigGrid) {
+      state.xmin = -2 * Math.PI; state.xmax = 2 * Math.PI;
+      state.ymin = -4; state.ymax = 4;
+    }
+    gcDraw();
+  };
+  window.gcResetView = function() {
+    state.trigGrid = false;
+    state.xmin = -10; state.xmax = 10; state.ymin = -6.5; state.ymax = 6.5;
+    gcDraw();
+  };
+  window.gcZoom = function(factor, cx, cy) {
+    var mx = (cx !== undefined) ? cx : (state.xmin + state.xmax) / 2;
+    var my = (cy !== undefined) ? cy : (state.ymin + state.ymax) / 2;
+    state.xmin = mx + (state.xmin - mx) * factor;
+    state.xmax = mx + (state.xmax - mx) * factor;
+    state.ymin = my + (state.ymin - my) * factor;
+    state.ymax = my + (state.ymax - my) * factor;
+    gcDraw();
+  };
+  window.gcApplyBounds = function() {
+    var x0 = parseFloat(document.getElementById('gc-xmin').value);
+    var x1 = parseFloat(document.getElementById('gc-xmax').value);
+    var y0 = parseFloat(document.getElementById('gc-ymin').value);
+    var y1 = parseFloat(document.getElementById('gc-ymax').value);
+    if (isFinite(x0) && isFinite(x1) && x1 > x0) { state.xmin = x0; state.xmax = x1; }
+    if (isFinite(y0) && isFinite(y1) && y1 > y0) { state.ymin = y0; state.ymax = y1; }
+    gcDraw();
+  };
+
+  window.gcLoadPreset = function(name) {
+    state.markers = [];
+    state.integral.show = false;
+    var chk = document.getElementById('gc-int-show'); if (chk) chk.checked = false;
+    var aOut = document.getElementById('gc-analysis-out'); if (aOut) aOut.innerHTML = '';
+    if (name === 'trig') {
+      state.exprs = [
+        { id: 1, text: 'a * exp(-0.15*x^2) * cos(3*x)', color: PALETTE[0], visible: true, showDeriv: false },
+        { id: 2, text: 'a * exp(-0.15*x^2)', color: PALETTE[1], visible: true, showDeriv: false }
+      ];
+      state.sliders = { a: { val: 3, min: -5, max: 5, step: 0.1, playing: false } };
+      state.xmin = -8; state.xmax = 8; state.ymin = -5; state.ymax = 5;
+    } else if (name === 'intersect') {
+      state.exprs = [
+        { id: 1, text: 'x^2 - 3', color: PALETTE[0], visible: true, showDeriv: false },
+        { id: 2, text: 'x + 3', color: PALETTE[1], visible: true, showDeriv: false }
+      ];
+      state.xmin = -6; state.xmax = 6; state.ymin = -5; state.ymax = 8;
+    } else if (name === 'circle') {
+      state.exprs = [
+        { id: 1, text: 'x^2 + y^2 = 25', color: PALETTE[0], visible: true, showDeriv: false },
+        { id: 2, text: 'x^2 - y^2 = 7', color: PALETTE[3], visible: true, showDeriv: false }
+      ];
+      state.xmin = -9; state.xmax = 9; state.ymin = -6; state.ymax = 6;
+    } else if (name === 'polar') {
+      state.exprs = [
+        { id: 1, text: 'r = 4 * sin(3 * theta)', color: PALETTE[6], visible: true, showDeriv: false }
+      ];
+      state.xmin = -6; state.xmax = 6; state.ymin = -4.5; state.ymax = 4.5;
+    } else if (name === 'param') {
+      state.exprs = [
+        { id: 1, text: '(4 * sin(3*t), 3 * cos(2*t))', color: PALETTE[3], visible: true, showDeriv: false }
+      ];
+      state.xmin = -6; state.xmax = 6; state.ymin = -4.5; state.ymax = 4.5;
+    } else if (name === 'heart') {
+      state.exprs = [
+        { id: 1, text: '(x^2 + y^2 - 4)^3 - 10*x^2*y^3 = 0', color: PALETTE[6], visible: true, showDeriv: false }
+      ];
+      state.xmin = -4.2; state.xmax = 4.2; state.ymin = -3.2; state.ymax = 4.2;
+    } else if (name === 'ineq') {
+      state.exprs = [
+        { id: 1, text: 'y <= 0.5*x + 2', color: PALETTE[2], visible: true, showDeriv: false },
+        { id: 2, text: 'y > -x - 1', color: PALETTE[1], visible: true, showDeriv: false }
+      ];
+      state.xmin = -8; state.xmax = 8; state.ymin = -5; state.ymax = 5;
+    } else if (name === 'scatter') {
+      state.exprs = [
+        { id: 1, text: '(-3,-1.2), (-1,0.5), (1,2.1), (3,3.8), (5,5.9)', color: PALETTE[0], visible: true, showDeriv: false }
+      ];
+      state.xmin = -6; state.xmax = 8; state.ymin = -4; state.ymax = 8;
+    }
+    state.nextId = state.exprs.length + 1;
+    state.activeExprId = state.exprs[0].id;
+    renderSliders();
+    renderExprRows();
+    gcDraw();
+    syncExprNotes();
+    gcRenderTable();
+  };
+
+  function bisectZero(fn, a, b) {
+    var fa = fn(a), fb = fn(b);
+    for (var i = 0; i < 32; i++) {
+      var m = (a + b) / 2, fm = fn(m);
+      if (Math.abs(fm) < 1e-9) return m;
+      if ((fa <= 0 && fm <= 0) || (fa >= 0 && fm >= 0)) { a = m; fa = fm; }
+      else { b = m; fb = fm; }
+    }
+    return (a + b) / 2;
+  }
+
+  window.gcAnalyzeSelected = function() {
+    var active = getActiveExplicitSpec();
+    var out = document.getElementById('gc-analysis-out');
+    if (!active) { if (out) out.textContent = 'Select a y=f(x) expression to find roots & extrema.'; return; }
+    var fn = function(x) { return active.spec.fn({ x: x }); };
+    var N = 360, dx = (state.xmax - state.xmin) / N;
+    var roots = [], extrema = [];
+    var prevX = state.xmin, prevY = fn(prevX), prevD = NaN;
+    var h = dx * 0.1;
+    for (var i = 1; i <= N; i++) {
+      var x = state.xmin + i * dx;
+      var y = fn(x);
+      var d = (fn(x + h) - fn(x - h)) / (2 * h);
+      if (isFinite(prevY) && isFinite(y) && ((prevY < 0 && y > 0) || (prevY > 0 && y < 0) || y === 0)) {
+        var r = y === 0 ? x : bisectZero(fn, prevX, x);
+        if (roots.length < 8 && (roots.length === 0 || Math.abs(r - roots[roots.length - 1]) > dx)) roots.push(r);
+      }
+      if (isFinite(prevD) && isFinite(d) && ((prevD > 0 && d < 0) || (prevD < 0 && d > 0))) {
+        var ex = bisectZero(function(v) { return (fn(v + h) - fn(v - h)) / (2 * h); }, prevX, x);
+        var ey = fn(ex);
+        if (isFinite(ey) && extrema.length < 8) extrema.push({ x: ex, y: ey, kind: prevD > 0 ? 'Max' : 'Min' });
+      }
+      prevX = x; prevY = y; prevD = d;
+    }
+
+    state.markers = [];
+    var lines = [];
+    var yInt = fn(0);
+    if (isFinite(yInt)) {
+      lines.push('<strong>y-intercept:</strong> (0, ' + yInt.toFixed(4) + ')');
+      state.markers.push({ x: 0, y: yInt, color: active.row.color, label: '(0, ' + yInt.toFixed(2) + ')' });
+    }
+    if (roots.length > 0) {
+      lines.push('<strong>Roots:</strong> ' + roots.map(function(r) {
+        state.markers.push({ x: r, y: 0, color: '#15803D', label: '(' + r.toFixed(2) + ', 0)' });
+        return '(' + r.toFixed(4) + ', 0)';
+      }).join(', '));
+    } else lines.push('<strong>Roots:</strong> None in window');
+    if (extrema.length > 0) {
+      lines.push('<strong>Extrema:</strong> ' + extrema.map(function(e) {
+        state.markers.push({ x: e.x, y: e.y, color: '#9333EA', label: e.kind + '(' + e.x.toFixed(2) + ',' + e.y.toFixed(2) + ')' });
+        return e.kind + ' (' + e.x.toFixed(3) + ', ' + e.y.toFixed(3) + ')';
+      }).join(', '));
+    }
+    if (out) out.innerHTML = lines.join('<br>');
+    gcDraw();
+  };
+
+  window.gcFindIntersections = function() {
+    var out = document.getElementById('gc-analysis-out');
+    var expls = [];
+    state.exprs.forEach(function(item) {
+      if (!item.visible || !item.text.trim()) return;
+      try {
+        var sp = parsePlotSpec(item.text);
+        if (sp.kind === 'explicit' || sp.kind === 'ineq') expls.push({ item: item, fn: sp.fn });
+      } catch (e) {}
+    });
+    if (expls.length < 2) { if (out) out.textContent = 'Need at least 2 visible y=f(x) curves to find intersections.'; return; }
+    var diff = function(x) { return expls[0].fn({ x: x }) - expls[1].fn({ x: x }); };
+    var N = 400, dx = (state.xmax - state.xmin) / N;
+    var hits = [];
+    var prevX = state.xmin, prevY = diff(prevX);
+    for (var i = 1; i <= N; i++) {
+      var x = state.xmin + i * dx, y = diff(x);
+      if (isFinite(prevY) && isFinite(y) && ((prevY < 0 && y > 0) || (prevY > 0 && y < 0) || y === 0)) {
+        var xi = y === 0 ? x : bisectZero(diff, prevX, x);
+        var yi = expls[0].fn({ x: xi });
+        if (isFinite(yi) && hits.length < 8) hits.push({ x: xi, y: yi });
+      }
+      prevX = x; prevY = y;
+    }
+    state.markers = hits.map(function(h) { return { x: h.x, y: h.y, color: '#BE123C', label: '(' + h.x.toFixed(2) + ', ' + h.y.toFixed(2) + ')' }; });
+    if (out) {
+      out.innerHTML = hits.length > 0
+        ? '<strong>Intersections (f1 &cap; f2):</strong><br>' + hits.map(function(h) { return '(' + h.x.toFixed(4) + ', ' + h.y.toFixed(4) + ')'; }).join(' &middot; ')
+        : '<strong>Intersections:</strong> None in current window.';
+    }
+    gcDraw();
+  };
+
+  window.gcUpdateIntegral = function() {
+    var chk = document.getElementById('gc-int-show');
+    var aEl = document.getElementById('gc-int-a');
+    var bEl = document.getElementById('gc-int-b');
+    var out = document.getElementById('gc-analysis-out');
+    state.integral.show = !!(chk && chk.checked);
+    state.integral.a = aEl ? (parseFloat(aEl.value) || 0) : 0;
+    state.integral.b = bEl ? (parseFloat(bEl.value) || 0) : 0;
+    var active = getActiveExplicitSpec();
+    if (active && state.integral.show && out) {
+      var area = simpsonIntegral(active.spec.fn, state.integral.a, state.integral.b);
+      out.innerHTML = '<strong>Definite Integral &int;<sub>' + state.integral.a + '</sub><sup>' + state.integral.b + '</sup> f(x) dx =</strong> <code>' + area.toFixed(6) + '</code>';
+    }
+    gcDraw();
+  };
+
+  window.gcRenderTable = function() {
+    var wrap = document.getElementById('gc-table-wrap');
+    if (!wrap) return;
+    var active = getActiveExplicitSpec();
+    if (!active) { wrap.innerHTML = '<div class="secondary-text" style="font-size:12px;">Select a y=f(x) expression to generate a table of values.</div>'; return; }
+    var start = parseFloat(document.getElementById('gc-tbl-start').value);
+    var step = parseFloat(document.getElementById('gc-tbl-step').value) || 1;
+    var count = Math.min(40, Math.max(2, parseInt(document.getElementById('gc-tbl-count').value, 10) || 9));
+    if (!isFinite(start)) start = -3;
+    var h = Math.max(1e-6, Math.abs(step) * 1e-4);
+    var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;" class="tabular">' +
+      '<thead><tr style="border-bottom:1px solid var(--color-border);text-align:right;"><th style="padding:4px 8px;text-align:left;">x</th><th style="padding:4px 8px;">f(x)</th><th style="padding:4px 8px;">f&prime;(x)</th></tr></thead><tbody>';
+    for (var i = 0; i < count; i++) {
+      var xv = start + i * step;
+      var yv = active.spec.fn({ x: xv });
+      var dv = (active.spec.fn({ x: xv + h }) - active.spec.fn({ x: xv - h })) / (2 * h);
+      html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.06);text-align:right;"><td style="padding:3px 8px;text-align:left;">' + Number(xv.toFixed(4)) + '</td><td style="padding:3px 8px;">' + (isFinite(yv) ? Number(yv.toFixed(5)) : 'undef') + '</td><td style="padding:3px 8px;">' + (isFinite(dv) ? Number(dv.toFixed(5)) : 'undef') + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  };
+
+  // Mouse pan & zoom & hover
+  canvas.addEventListener('mousedown', function(ev) {
+    state.dragging = true;
+    state.dragStart = { px: ev.clientX, py: ev.clientY, xmin: state.xmin, xmax: state.xmax, ymin: state.ymin, ymax: state.ymax };
+  });
+  window.addEventListener('mouseup', function() { state.dragging = false; });
+  window.addEventListener('mousemove', function(ev) {
+    var rect = canvas.getBoundingClientRect();
+    if (state.dragging && state.dragStart) {
+      var dxPx = ev.clientX - state.dragStart.px;
+      var dyPx = ev.clientY - state.dragStart.py;
+      var xSpan = state.dragStart.xmax - state.dragStart.xmin;
+      var ySpan = state.dragStart.ymax - state.dragStart.ymin;
+      state.xmin = state.dragStart.xmin - (dxPx / rect.width) * xSpan;
+      state.xmax = state.dragStart.xmax - (dxPx / rect.width) * xSpan;
+      state.ymin = state.dragStart.ymin + (dyPx / rect.height) * ySpan;
+      state.ymax = state.dragStart.ymax + (dyPx / rect.height) * ySpan;
+      gcDraw();
+      return;
+    }
+    if (ev.target === canvas) {
+      var px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+      var wx = pxToWorldX(px, rect.width), wy = pxToWorldY(py, rect.height);
+      state.hover = { px: px, py: py, x: wx, y: wy };
+      var hud = document.getElementById('gc-hud');
+      if (hud) {
+        var extra = '';
+        var active = getActiveExplicitSpec();
+        if (active) {
+          var fx = active.spec.fn({ x: wx });
+          if (isFinite(fx)) extra = '  |  f(x): ' + fx.toFixed(3);
+        }
+        hud.textContent = 'x: ' + wx.toFixed(3) + ', y: ' + wy.toFixed(3) + extra;
+      }
+      gcDraw();
+    }
+  });
+  canvas.addEventListener('mouseleave', function() { state.hover = null; gcDraw(); });
+  canvas.addEventListener('wheel', function(ev) {
+    ev.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var wx = pxToWorldX(ev.clientX - rect.left, rect.width);
+    var wy = pxToWorldY(ev.clientY - rect.top, rect.height);
+    gcZoom(ev.deltaY > 0 ? 1.15 : 0.87, wx, wy);
+  }, { passive: false });
+  window.addEventListener('resize', function() {
+    var g = document.getElementById('tab-graph');
+    if (g && g.style.display !== 'none') gcDraw();
+  });
+
+  renderSliders();
+  renderExprRows();
+  gcEvalScratchpad();
+  setTimeout(function() { gcDraw(); syncExprNotes(); gcRenderTable(); }, 30);
+})();
 </script>
 {{ end }}

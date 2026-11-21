@@ -2444,7 +2444,7 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	toolsHTML := w.Body.String()
-	for _, want := range []string{"Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Offline Unit Converter"} {
+	for _, want := range []string{"Graphing &amp; Scientific Calculator", `id="gc-canvas"`, "Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Offline Unit Converter"} {
 		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
 			t.Errorf("expected /tools (status=%d) to contain %q", w.Code, want)
 		}
