@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -2102,10 +2103,14 @@ func writeWikiTestZIM(t *testing.T, zimPath string) {
 			html:  fmt.Sprintf("<html><body><h1>Water compound %02d</h1></body></html>", i),
 		})
 	}
-	// Exact match appears AFTER 15 prefix entries; Redirect USA appears at end.
+	// Exact match appears AFTER 15 prefix entries; Redirect USA, meta-refresh stub !Bang, and special-char URLs appear at end.
 	entries = append(entries,
 		testEntry{url: "Water", title: "Water", html: "<html><body><h1>Water</h1><p>H2O molecule.</p></body></html>"},
 		testEntry{url: "USA", title: "USA", isRedirect: true, targetIdx: 1},
+		testEntry{url: "!Bang", title: "!Bang", html: `<html><head><title>!Bang</title><meta http-equiv="refresh" content="0;URL='./United_States#Bangs'" /></head><body><a href="./United_States#Bangs">!Bang</a></body></html>`},
+		testEntry{url: "5%_Nation", title: "5% Nation", html: "<html><body><h1>5% Nation</h1></body></html>"},
+		testEntry{url: "What_Is_to_Be_Done?", title: "What Is to Be Done?", html: "<html><body><h1>What Is to Be Done?</h1></body></html>"},
+		testEntry{url: "C#_(programming_language)", title: "C# (programming language)", html: "<html><body><h1>C#</h1></body></html>"},
 	)
 
 	var blobData bytes.Buffer
@@ -2176,6 +2181,46 @@ func writeWikiTestZIM(t *testing.T, zimPath string) {
 	clusterPtrPos := urlPtrPos + uint64(len(entries)*8)
 	clusterDataPos := clusterPtrPos + 8
 
+	// Sort URLPtrPos indices by URL (as required by ZIM spec) while keeping physical entry offsets in insertion order.
+	sortedIdxs := make([]int, len(entries))
+	for i := range sortedIdxs {
+		sortedIdxs[i] = i
+	}
+	sort.Slice(sortedIdxs, func(i, j int) bool {
+		return entries[sortedIdxs[i]].url < entries[sortedIdxs[j]].url
+	})
+	mainPageSortedIdx := uint32(0)
+	targetSortedIdx := uint32(0)
+	for si, origIdx := range sortedIdxs {
+		if origIdx == 0 {
+			mainPageSortedIdx = uint32(si)
+		}
+		if origIdx == 1 {
+			targetSortedIdx = uint32(si)
+		}
+	}
+	// Patch redirect targetIdx to point to sorted index of United_States
+	dirBuf.Reset()
+	for i, e := range entries {
+		entryOffs[i] = dirStart + uint64(dirBuf.Len())
+		if e.isRedirect {
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint16(0xffff))
+			dirBuf.WriteByte(0)
+			dirBuf.WriteByte('C')
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, targetSortedIdx)
+		} else {
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint16(0))
+			dirBuf.WriteByte(0)
+			dirBuf.WriteByte('C')
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, entryBlobIdx[i])
+		}
+		dirBuf.WriteString(e.url + "\x00")
+		dirBuf.WriteString(e.title + "\x00")
+	}
+
 	var zimBuf bytes.Buffer
 	var hdr [80]byte
 	binary.LittleEndian.PutUint32(hdr[0:4], ai.ZIMMagic)
@@ -2187,13 +2232,13 @@ func writeWikiTestZIM(t *testing.T, zimPath string) {
 	binary.LittleEndian.PutUint64(hdr[40:48], ^uint64(0)) // v6.3 style: no TitlePtrPos
 	binary.LittleEndian.PutUint64(hdr[48:56], clusterPtrPos)
 	binary.LittleEndian.PutUint64(hdr[56:64], mimePos)
-	binary.LittleEndian.PutUint32(hdr[64:68], 0)
+	binary.LittleEndian.PutUint32(hdr[64:68], mainPageSortedIdx)
 	binary.LittleEndian.PutUint64(hdr[72:80], clusterDataPos+uint64(clusterBuf.Len()))
 	zimBuf.Write(hdr[:])
 	zimBuf.Write(mimeList)
 	zimBuf.Write(dirBuf.Bytes())
-	for _, off := range entryOffs {
-		_ = binary.Write(&zimBuf, binary.LittleEndian, off)
+	for _, origIdx := range sortedIdxs {
+		_ = binary.Write(&zimBuf, binary.LittleEndian, entryOffs[origIdx])
 	}
 	_ = binary.Write(&zimBuf, binary.LittleEndian, clusterDataPos)
 	zimBuf.Write(clusterBuf.Bytes())
@@ -2241,8 +2286,8 @@ func TestZIMSearchRedirectsPaginationAndTOC(t *testing.T) {
 		t.Fatalf("RegisterRoutes: %v", err)
 	}
 
-	// /api/zim/pages pagination + filter
-	req := httptest.NewRequest(http.MethodGet, "/api/zim/pages?stem=wiki_test&offset=0&limit=5", nil)
+	// /api/zim/pages pagination + filter (must exclude binary redirects like USA and meta-refresh stubs like !Bang)
+	req := httptest.NewRequest(http.MethodGet, "/api/zim/pages?stem=wiki_test&offset=0&limit=50", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -2257,8 +2302,27 @@ func TestZIMSearchRedirectsPaginationAndTOC(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &pgResp); err != nil {
 		t.Fatalf("decode /api/zim/pages: %v", err)
 	}
-	if len(pgResp.Pages) != 5 || !pgResp.HasMore || pgResp.Total < 18 {
-		t.Errorf("unexpected /api/zim/pages response: %+v", pgResp)
+	if pgResp.Total != 21 || len(pgResp.Pages) != 21 {
+		t.Errorf("expected 21 real visitable pages in /api/zim/pages (excluding USA and !Bang), got total=%d len=%d", pgResp.Total, len(pgResp.Pages))
+	}
+	for _, p := range pgResp.Pages {
+		if p.Title == "!Bang" || p.Title == "USA" {
+			t.Errorf("expected redirect/stub %q to be excluded from /api/zim/pages", p.Title)
+		}
+		// Every single URL returned in /api/zim/pages must resolve to HTTP 200 OK (including %, ?, # titles)
+		pReq := httptest.NewRequest(http.MethodGet, p.URL, nil)
+		pW := httptest.NewRecorder()
+		mux.ServeHTTP(pW, pReq)
+		if pW.Code != http.StatusOK {
+			t.Errorf("TOC page %q URL %q returned status %d instead of 200", p.Title, p.URL, pW.Code)
+		}
+	}
+	// Also verify unescaped trailing '?' fallback resolves cleanly
+	qReq := httptest.NewRequest(http.MethodGet, "/read/zim/wiki_test/C/What_Is_to_Be_Done?", nil)
+	qW := httptest.NewRecorder()
+	mux.ServeHTTP(qW, qReq)
+	if qW.Code != http.StatusOK {
+		t.Errorf("expected unescaped trailing '?' article URL to resolve 200 OK, got %d", qW.Code)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/zim/pages?stem=wiki_test&q=united", nil)
@@ -2307,9 +2371,21 @@ func TestRealWikipediaZIMSearchIfPresent(t *testing.T) {
 			t.Errorf("getZIMArchive(%s): %v", stem, aerr)
 			continue
 		}
-		pgs, tot, hm := a.listPages(0, 50, "")
+		pgs, tot, hm := a.listPages(0, 15, "")
 		if len(pgs) == 0 || tot == 0 {
 			t.Errorf("ZIM %s returned 0 pages from listPages (count=%d, hasMore=%v)", stem, a.hdr.ArticleCount, hm)
+		}
+		var sample []string
+		for i := 0; i < len(pgs) && i < 8; i++ {
+			sample = append(sample, fmt.Sprintf("%q (%s)", pgs[i].title, pgs[i].url))
+		}
+		t.Logf("ZIM %-34s totalPages=%-6d sample=%v", stem, tot, sample)
+		if strings.Contains(stem, "wikipedia") {
+			for _, p := range pgs {
+				if p.title == "!Bang" || p.title == "%CONFIG%" || p.title == "%APPEND%" || strings.Contains(p.title, "\"Crazy\"") {
+					t.Errorf("unexpected redirect stub in wikipedia TOC pages: %+v", p)
+				}
+			}
 		}
 	}
 }

@@ -50,6 +50,8 @@ type zimArchive struct {
 	clusters    []cachedZIMCluster
 	titles      []zimTitleRecord
 	titlesBuilt bool
+	tocPages    []zimTitleRecord
+	tocBuilt    bool
 	metaLoaded  bool
 	metaTitle   string
 	metaDesc    string
@@ -289,14 +291,10 @@ func (a *zimArchive) followRedirects(f *os.File, e zimResolvedEntry) (zimResolve
 	return e, nil
 }
 
-func (a *zimArchive) readBlob(f *os.File, clusterNum, blobNum uint32) ([]byte, error) {
+func (a *zimArchive) loadClusterBlobs(f *os.File, clusterNum uint32, cache bool) ([][]byte, error) {
 	for i := range a.clusters {
 		if a.clusters[i].id == clusterNum {
-			blobs := a.clusters[i].blobs
-			if int(blobNum) >= len(blobs) {
-				return nil, fmt.Errorf("blob index %d out of range", blobNum)
-			}
-			return blobs[blobNum], nil
+			return a.clusters[i].blobs, nil
 		}
 	}
 	if clusterNum >= a.hdr.ClusterCount {
@@ -331,12 +329,21 @@ func (a *zimArchive) readBlob(f *os.File, clusterNum, blobNum uint32) ([]byte, e
 		return nil, err
 	}
 
-	if len(a.clusters) >= 8 {
-		a.clusters = append(a.clusters[1:], cachedZIMCluster{id: clusterNum, blobs: blobs})
-	} else {
-		a.clusters = append(a.clusters, cachedZIMCluster{id: clusterNum, blobs: blobs})
+	if cache {
+		if len(a.clusters) >= 8 {
+			a.clusters = append(a.clusters[1:], cachedZIMCluster{id: clusterNum, blobs: blobs})
+		} else {
+			a.clusters = append(a.clusters, cachedZIMCluster{id: clusterNum, blobs: blobs})
+		}
 	}
+	return blobs, nil
+}
 
+func (a *zimArchive) readBlob(f *os.File, clusterNum, blobNum uint32) ([]byte, error) {
+	blobs, err := a.loadClusterBlobs(f, clusterNum, true)
+	if err != nil {
+		return nil, err
+	}
 	if int(blobNum) >= len(blobs) {
 		return nil, fmt.Errorf("blob index %d out of range", blobNum)
 	}
@@ -426,7 +433,7 @@ func isLikelyAssetURL(u string) bool {
 	if u == "" {
 		return true
 	}
-	if strings.HasPrefix(u, "-/") || strings.HasPrefix(u, "I/") || strings.HasPrefix(u, "M/") || strings.HasPrefix(u, "X/") || strings.HasPrefix(u, "_mw_") {
+	if strings.HasPrefix(u, "-/") || strings.HasPrefix(u, "I/") || strings.HasPrefix(u, "M/") || strings.HasPrefix(u, "X/") || strings.HasPrefix(u, "_") {
 		return true
 	}
 	low := strings.ToLower(u)
@@ -913,79 +920,190 @@ func (a *zimArchive) scanTitlesStreaming(q string, terms []string, limit int) []
 	return out
 }
 
-// listPages returns a paginated slice of real HTML pages in the archive (excluding redirects and assets).
-func (a *zimArchive) listPages(offset, limit int, filter string) ([]zimTitleRecord, int, bool) {
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 {
-		limit = 200
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	filter = strings.TrimSpace(filter)
-	if filter != "" {
-		hits := a.searchTitles(filter, offset+limit+1)
-		total := len(hits)
-		hasMore := total > offset+limit
-		if offset >= total {
-			return nil, total, false
-		}
-		end := offset + limit
-		if end > total {
-			end = total
-		}
-		return hits[offset:end], total, hasMore
-	}
+var zimPathSpecialReplacer = strings.NewReplacer(
+	"%", "%25",
+	"?", "%3F",
+	"#", "%23",
+	" ", "%20",
+	"\"", "%22",
+	"<", "%3C",
+	">", "%3E",
+)
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
+func escapeZIMURLPath(raw string) string {
+	raw = strings.TrimPrefix(raw, "/")
+	if raw == "" {
+		return ""
+	}
+	return zimPathSpecialReplacer.Replace(raw)
+}
 
-	if a.hdr.ArticleCount <= 40000 {
-		a.buildSmallTitleIndexLocked()
-		sorted := make([]zimTitleRecord, 0, len(a.titles))
-		for _, r := range a.titles {
-			if !isLikelyAssetURL(r.url) {
-				sorted = append(sorted, r)
+func buildZIMArticleHref(stem string, ns byte, entryURL string) string {
+	return fmt.Sprintf("/read/zim/%s/%c/%s", url.PathEscape(stem), ns, escapeZIMURLPath(entryURL))
+}
+
+func isNonMainTOCEntry(uStr, tStr string) bool {
+	if isLikelyAssetURL(uStr) {
+		return true
+	}
+	lowURL := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(uStr), "/"))
+	if lowURL == "" {
+		return true
+	}
+	for _, pref := range []string{"noscript/", "_zim_static/", "_res_/", "assets/", "static/", "_mw_/"} {
+		if strings.HasPrefix(lowURL, pref) || strings.Contains(lowURL, "/"+pref) {
+			return true
+		}
+	}
+	if lowURL == "404" || lowURL == "404.html" || strings.HasSuffix(lowURL, "/404.html") || strings.HasSuffix(lowURL, "/404") {
+		return true
+	}
+	lowTitle := strings.ToLower(strings.TrimSpace(tStr))
+	if lowTitle == "404" || lowTitle == "404 not found" || lowTitle == "page not found" || lowTitle == "not found" {
+		return true
+	}
+	return false
+}
+
+func isMetaRefreshRedirectBlob(blob []byte) bool {
+	if len(blob) == 0 || len(blob) >= 2048 {
+		return false
+	}
+	low := bytes.ToLower(blob)
+	return bytes.Contains(low, []byte("http-equiv=\"refresh\"")) ||
+		bytes.Contains(low, []byte("http-equiv='refresh'")) ||
+		bytes.Contains(low, []byte("http-equiv=refresh"))
+}
+
+func isWebFileOrGutenbergURL(u string) bool {
+	low := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(u), "/"))
+	for _, ext := range []string{".html", ".htm", ".php", ".xhtml"} {
+		if strings.HasSuffix(low, ext) {
+			return true
+		}
+	}
+	if slash := strings.IndexByte(low, '/'); slash > 0 && strings.Contains(low[:slash], ".") {
+		return true
+	}
+	if dot := strings.LastIndexByte(low, '.'); dot > 3 {
+		tail := low[dot+1:]
+		allDigits := len(tail) > 0
+		for i := 0; i < len(tail); i++ {
+			if tail[i] < '0' || tail[i] > '9' {
+				allDigits = false
+				break
 			}
 		}
-		sort.Slice(sorted, func(i, j int) bool {
-			ti, tj := strings.ToLower(sorted[i].title), strings.ToLower(sorted[j].title)
-			if ti != tj {
-				return ti < tj
-			}
-			return sorted[i].url < sorted[j].url
-		})
-		total := len(sorted)
-		if offset >= total {
-			return nil, total, false
+		if allDigits {
+			return true
 		}
-		end := offset + limit
-		hasMore := end < total
-		if end > total {
-			end = total
-		}
-		return sorted[offset:end], total, hasMore
 	}
+	return false
+}
 
-	// Large ZIM (> 40,000 entries): stream URLPtrPos sequentially in offset order without pinning all entries in RAM.
+func humanizeZIMURLTitle(rawURL string) string {
+	u := strings.TrimSuffix(strings.TrimSpace(rawURL), "/")
+	if idx := strings.IndexAny(u, "?#"); idx != -1 {
+		u = u[:idx]
+	}
+	parts := strings.Split(u, "/")
+	seg := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		p := strings.TrimSpace(parts[i])
+		if p == "" {
+			continue
+		}
+		low := strings.ToLower(p)
+		if (low == "index.html" || low == "index.htm" || low == "index.php" || low == "index") && i > 0 {
+			continue
+		}
+		seg = p
+		break
+	}
+	if seg == "" {
+		return "Main Page"
+	}
+	for _, ext := range []string{".html", ".htm", ".php", ".xhtml"} {
+		if strings.HasSuffix(strings.ToLower(seg), ext) {
+			seg = seg[:len(seg)-len(ext)]
+			break
+		}
+	}
+	// Strip trailing numeric Gutenberg ID suffix like ".50336" if preceded by a title
+	if dot := strings.LastIndexByte(seg, '.'); dot > 3 {
+		tail := seg[dot+1:]
+		allDigits := len(tail) > 0
+		for i := 0; i < len(tail); i++ {
+			if tail[i] < '0' || tail[i] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			seg = seg[:dot]
+		}
+	}
+	if unesc, err := url.PathUnescape(seg); err == nil && unesc != "" {
+		seg = unesc
+	}
+	seg = strings.ReplaceAll(seg, "_", " ")
+	seg = strings.ReplaceAll(seg, "-", " ")
+	seg = strings.TrimSpace(seg)
+	if seg == "" || strings.EqualFold(seg, "index") {
+		return "Main Page"
+	}
+	// Title-case if all lowercase
+	if seg == strings.ToLower(seg) {
+		words := strings.Fields(seg)
+		for i, w := range words {
+			if len(w) > 0 {
+				words[i] = strings.ToUpper(w[:1]) + w[1:]
+			}
+		}
+		seg = strings.Join(words, " ")
+	}
+	return seg
+}
+
+func tocSortCategory(title string, isFront bool) int {
+	if isFront {
+		return 0
+	}
+	s := strings.TrimSpace(title)
+	if s == "" {
+		return 3
+	}
+	c := s[0]
+	if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+		return 1
+	}
+	if c >= '0' && c <= '9' {
+		return 2
+	}
+	return 3
+}
+
+func (a *zimArchive) ensureTOCPagesLocked() {
+	if a.tocBuilt {
+		return
+	}
+	a.tocBuilt = true
+	if a.hdr.ArticleCount == 0 {
+		return
+	}
 	f, err := os.Open(a.path)
 	if err != nil {
-		return nil, 0, false
+		return
 	}
 	defer f.Close()
 
 	n := int(a.hdr.ArticleCount)
-	if n == 0 {
-		return nil, 0, false
-	}
 	urlPtrs := make([]uint64, n)
 	if _, err := f.Seek(int64(a.hdr.URLPtrPos), io.SeekStart); err != nil {
-		return nil, 0, false
+		return
 	}
 	if err := binary.Read(bufio.NewReaderSize(f, 128*1024), binary.LittleEndian, urlPtrs); err != nil {
-		return nil, 0, false
+		return
 	}
 	sort.Slice(urlPtrs, func(i, j int) bool { return urlPtrs[i] < urlPtrs[j] })
 
@@ -994,11 +1112,22 @@ func (a *zimArchive) listPages(offset, limit int, filter string) ([]zimTitleReco
 		wantNS = 'A'
 	}
 
+	type tocCandidate struct {
+		clusterNum uint32
+		blobNum    uint32
+		ns         byte
+		url        string
+		title      string
+		skip       bool
+	}
+
 	br := bufio.NewReaderSize(f, 512*1024)
 	var curPos uint64 = ^uint64(0)
 	var fixed [16]byte
-	pageIdx := 0
-	pages := make([]zimTitleRecord, 0, limit)
+	var candidates []tocCandidate
+	clusterHTMLCount := make(map[uint32]int)
+	clusterMaxBlob := make(map[uint32]uint32)
+
 	for _, ptr := range urlPtrs {
 		if curPos != ptr {
 			if ptr > curPos && ptr-curPos <= 64*1024 {
@@ -1032,6 +1161,9 @@ func (a *zimArchive) listPages(offset, limit int, filter string) ([]zimTitleReco
 		}
 		curPos += 14
 		ns := fixed[3]
+		clusterNum := binary.LittleEndian.Uint32(fixed[8:12])
+		blobNum := binary.LittleEndian.Uint32(fixed[12:16])
+
 		uBytes, err := br.ReadBytes(0)
 		if err != nil {
 			curPos = ^uint64(0)
@@ -1049,19 +1181,182 @@ func (a *zimArchive) listPages(offset, limit int, filter string) ([]zimTitleReco
 			continue
 		}
 		uStr := string(bytes.TrimSuffix(uBytes, []byte{0}))
-		if isLikelyAssetURL(uStr) {
+		tStr := string(bytes.TrimSuffix(tBytes, []byte{0}))
+		if isNonMainTOCEntry(uStr, tStr) {
 			continue
 		}
-		tStr := string(bytes.TrimSuffix(tBytes, []byte{0}))
-		if tStr == "" {
-			tStr = uStr
+		candidates = append(candidates, tocCandidate{
+			clusterNum: clusterNum,
+			blobNum:    blobNum,
+			ns:         ns,
+			url:        uStr,
+			title:      tStr,
+		})
+		clusterHTMLCount[clusterNum]++
+		if blobNum > clusterMaxBlob[clusterNum] {
+			clusterMaxBlob[clusterNum] = blobNum
 		}
-		if pageIdx >= offset && len(pages) < limit {
-			pages = append(pages, zimTitleRecord{ns: ns, url: uStr, title: tStr})
-		}
-		pageIdx++
 	}
-	return pages, pageIdx, offset+len(pages) < pageIdx
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Inspect clusters that may contain HTML <meta http-equiv="refresh"> redirect stubs.
+	// In small archives (<= 2000 HTML entries) we inspect all HTML clusters; in large archives
+	// (like Wikipedia/Wikibooks), libzim packs ~220-byte redirect stubs into high-density clusters.
+	inspectAll := len(candidates) <= 2000 || a.hdr.ClusterCount <= 16
+	byCluster := make(map[uint32][]int)
+	for idx := range candidates {
+		c := candidates[idx].clusterNum
+		if inspectAll || clusterMaxBlob[c] >= 200 || clusterHTMLCount[c] >= 150 || c+4 >= a.hdr.ClusterCount {
+			byCluster[c] = append(byCluster[c], idx)
+		}
+	}
+	for c, idxs := range byCluster {
+		blobs, berr := a.loadClusterBlobs(f, c, false)
+		if berr != nil {
+			continue
+		}
+		for _, idx := range idxs {
+			bNum := int(candidates[idx].blobNum)
+			if bNum < 0 || bNum >= len(blobs) || isMetaRefreshRedirectBlob(blobs[bNum]) {
+				candidates[idx].skip = true
+			}
+		}
+	}
+
+	frontEntry, hasFront := a.resolveFrontPageEntry(f)
+	frontNormURL := ""
+	if hasFront {
+		frontNormURL = strings.TrimSuffix(strings.TrimSuffix(frontEntry.url, "index.html"), "/")
+	}
+	titleFreq := make(map[string]int)
+	for i := range candidates {
+		if candidates[i].skip {
+			continue
+		}
+		t := strings.ToLower(strings.TrimSpace(candidates[i].title))
+		if t != "" {
+			titleFreq[t]++
+		}
+	}
+
+	pages := make([]zimTitleRecord, 0, len(candidates))
+	seenURL := make(map[string]bool, len(candidates))
+	for i := range candidates {
+		c := candidates[i]
+		if c.skip || seenURL[c.url] {
+			continue
+		}
+		isFront := hasFront && c.url == frontEntry.url
+		if !isFront && hasFront {
+			normC := strings.TrimSuffix(strings.TrimSuffix(c.url, "index.html"), "/")
+			if normC == frontNormURL && (strings.HasSuffix(strings.ToLower(c.url), "/index.html") || strings.HasSuffix(c.url, "/")) {
+				continue
+			}
+		}
+		seenURL[c.url] = true
+		title := strings.TrimSpace(c.title)
+		if title == "" && !isWebFileOrGutenbergURL(c.url) {
+			title = strings.TrimSpace(strings.ReplaceAll(c.url, "_", " "))
+		}
+		if strings.HasPrefix(title, "PHP: ") && strings.HasSuffix(title, " - Manual") {
+			title = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(title, "PHP: "), " - Manual"))
+		}
+		lowT := strings.ToLower(title)
+		badGenericTitle := title == "" ||
+			(title == c.url && isWebFileOrGutenbergURL(c.url)) ||
+			strings.HasSuffix(lowT, ".html") ||
+			strings.HasSuffix(lowT, ".htm") ||
+			strings.HasSuffix(lowT, ".php") ||
+			(titleFreq[lowT] > 1 && isSiteWideTitle(a.stem, title))
+
+		if isFront && (badGenericTitle || lowT == "index" || lowT == "main_page" || lowT == "main page") {
+			title = "Main Page"
+		} else if badGenericTitle {
+			title = humanizeZIMURLTitle(c.url)
+		} else {
+			uSpaces := strings.ReplaceAll(c.url, "_", " ")
+			if strings.Contains(c.url, "/") && !isWebFileOrGutenbergURL(c.url) && strings.HasSuffix(uSpaces, "/"+title) {
+				title = uSpaces
+			} else if strings.Contains(title, "_") && !strings.Contains(title, " ") && !strings.HasPrefix(title, "_") {
+				title = strings.TrimSpace(strings.ReplaceAll(title, "_", " "))
+			}
+		}
+		pages = append(pages, zimTitleRecord{
+			ns:    c.ns,
+			url:   c.url,
+			title: title,
+		})
+	}
+
+	frontURL := ""
+	if hasFront {
+		frontURL = frontEntry.url
+	}
+	sort.Slice(pages, func(i, j int) bool {
+		fi := frontURL != "" && pages[i].url == frontURL
+		fj := frontURL != "" && pages[j].url == frontURL
+		ci := tocSortCategory(pages[i].title, fi)
+		cj := tocSortCategory(pages[j].title, fj)
+		if ci != cj {
+			return ci < cj
+		}
+		ti := strings.ToLower(pages[i].title)
+		tj := strings.ToLower(pages[j].title)
+		if ti != tj {
+			return ti < tj
+		}
+		return pages[i].url < pages[j].url
+	})
+	a.tocPages = pages
+}
+
+// listPages returns a paginated slice of visitable main HTML pages in the archive (excluding redirects and assets).
+func (a *zimArchive) listPages(offset, limit int, filter string) ([]zimTitleRecord, int, bool) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	filter = strings.TrimSpace(filter)
+
+	a.mu.Lock()
+	a.ensureTOCPagesLocked()
+	toc := a.tocPages
+	a.mu.Unlock()
+
+	if filter != "" {
+		q := strings.ToLower(filter)
+		terms := strings.Fields(q)
+		hits := rankZIMTitleMatches(toc, q, terms, offset+limit+1)
+		total := len(hits)
+		hasMore := total > offset+limit
+		if offset >= total {
+			return nil, total, false
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		return hits[offset:end], total, hasMore
+	}
+
+	total := len(toc)
+	if offset >= total {
+		return nil, total, false
+	}
+	end := offset + limit
+	hasMore := end < total
+	if end > total {
+		end = total
+	}
+	return toc[offset:end], total, hasMore
 }
 
 func (a *zimArchive) resolveFrontPageEntry(f *os.File) (zimResolvedEntry, bool) {
@@ -1433,7 +1728,7 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetPath, targetFrag, hasFrag := strings.Cut(mainEntry.url, "#")
-		target := fmt.Sprintf("/read/zim/%s/%c/%s", url.PathEscape(stem), mainEntry.ns, targetPath)
+		target := buildZIMArticleHref(stem, mainEntry.ns, targetPath)
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
@@ -1446,6 +1741,19 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 
 	arc.mu.Lock()
 	entryIdx, entry, found := arc.findEntryFlexWithIndex(f, subPath)
+	if !found {
+		if r.URL.RawQuery != "" && r.URL.Query().Get("q") == "" && r.URL.Query().Get("download") == "" && r.URL.Query().Get("ark_hl") == "" {
+			entryIdx, entry, found = arc.findEntryFlexWithIndex(f, subPath+"?"+r.URL.RawQuery)
+			if !found {
+				if uq, uerr := url.PathUnescape(r.URL.RawQuery); uerr == nil && uq != r.URL.RawQuery {
+					entryIdx, entry, found = arc.findEntryFlexWithIndex(f, subPath+"?"+uq)
+				}
+			}
+		}
+		if !found {
+			entryIdx, entry, found = arc.findEntryFlexWithIndex(f, subPath+"?")
+		}
+	}
 	if !found {
 		arc.mu.Unlock()
 		http.NotFound(w, r)
@@ -1460,7 +1768,7 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetPath, targetFrag, hasFrag := strings.Cut(targetEntry.url, "#")
-		target := fmt.Sprintf("/read/zim/%s/%c/%s", url.PathEscape(stem), targetEntry.ns, targetPath)
+		target := buildZIMArticleHref(stem, targetEntry.ns, targetPath)
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
@@ -1506,6 +1814,9 @@ func (s *Server) handleZIMReader(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isHTML {
+		if len(blob) <= 4096 {
+			blob = sanitizeMetaRefreshURL(blob)
+		}
 		if r.URL.RawQuery != "" {
 			blob = preserveQueryInMetaRefresh(blob, r.URL.RawQuery)
 		}
@@ -1555,6 +1866,36 @@ html body { padding-top: 46px !important; }
 }
 
 var metaRefreshURLRe = regexp.MustCompile(`(?is)(<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["']?\d+\s*;\s*url=['"]?)([^"'>\s]+)`)
+
+func isHexByte(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+func escapeStrayPercentInURL(u string) string {
+	if !strings.Contains(u, "%") {
+		return u
+	}
+	var sb strings.Builder
+	sb.Grow(len(u) + 8)
+	for i := 0; i < len(u); i++ {
+		if u[i] == '%' && (i+2 >= len(u) || !isHexByte(u[i+1]) || !isHexByte(u[i+2])) {
+			sb.WriteString("%25")
+		} else {
+			sb.WriteByte(u[i])
+		}
+	}
+	return sb.String()
+}
+
+func sanitizeMetaRefreshURL(htmlBytes []byte) []byte {
+	return metaRefreshURLRe.ReplaceAllFunc(htmlBytes, func(match []byte) []byte {
+		sub := metaRefreshURLRe.FindSubmatch(match)
+		if len(sub) < 3 {
+			return match
+		}
+		return []byte(string(sub[1]) + escapeStrayPercentInURL(string(sub[2])))
+	})
+}
 
 func preserveQueryInMetaRefresh(htmlBytes []byte, rawQuery string) []byte {
 	if len(htmlBytes) > 4096 || rawQuery == "" {
@@ -1831,7 +2172,14 @@ func arkThemeScriptTag(initialTheme string) string {
   if (askLink) {
     var zi = parseZIMPath();
     if (zi.stem && zi.art) {
-      askLink.href = '/ask?zim=' + encodeURIComponent(zi.stem) + '&article=' + encodeURIComponent(zi.art);
+      var askHref = '/ask?zim=' + encodeURIComponent(zi.stem) + '&article=' + encodeURIComponent(zi.art);
+      askLink._no_rewrite = true;
+      askLink.setAttribute('data-ark-href', askHref);
+      if (window.__arkSetAttr) {
+        window.__arkSetAttr.call(askLink, 'href', askHref);
+      } else {
+        askLink.href = askHref;
+      }
     }
   }
   var pop = null;
@@ -1891,6 +2239,64 @@ func arkThemeScriptTag(initialTheme string) string {
   document.addEventListener('mousedown', function(ev) {
     if (pop && !pop.contains(ev.target)) hidePop();
   });
+  function setArkHref(a, url) {
+    a._no_rewrite = true;
+    if (window.__arkSetAttr) {
+      window.__arkSetAttr.call(a, 'data-ark-href', url);
+      window.__arkSetAttr.call(a, 'href', url);
+    } else {
+      a.setAttribute('data-ark-href', url);
+      a.setAttribute('href', url);
+    }
+  }
+  function cleanWombatDoubledPath(raw) {
+    if (!raw) return raw;
+    var second = raw.indexOf('/read/zim/', 10);
+    if (second !== -1) {
+      var first = raw.indexOf('/read/zim/');
+      if (first !== -1 && second > first) {
+        return raw.slice(second);
+      }
+    }
+    var m = raw.match(/\/read\/zim\/[^\/]+\/[A-Za-z]\/.*(\/(?:ask|library|get-content)(?:[?#].*)?)$/);
+    if (m && m[1]) return m[1];
+    return raw;
+  }
+  document.addEventListener('click', function(ev) {
+    var a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+    if (!a) return;
+    var arkTarget = a.getAttribute('data-ark-href') || '';
+    var inArkUI = !!(a.closest && (a.closest('#ark-toc-panel') || a.closest('#ark-proxy-nav') || a.closest('#ark-page-pager')));
+    if (inArkUI && a.id !== 'ark-download-html') {
+      var target = arkTarget || cleanWombatDoubledPath(a.getAttribute('href') || '');
+      if (target) {
+        setArkHref(a, target);
+        if (ev.button === 0 && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && !ev.altKey && !a.target) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          if (window.__arkLocAssign) {
+            window.__arkLocAssign(target);
+          } else {
+            window.location.href = target;
+          }
+          return;
+        }
+      }
+    }
+    var raw = a.getAttribute('href') || '';
+    if (!raw || raw.charAt(0) === '#' || /^javascript:/i.test(raw)) return;
+    var cleaned = cleanWombatDoubledPath(raw);
+    if (cleaned.indexOf('%') !== -1) {
+      cleaned = cleaned.replace(/%(?![0-9a-fA-F]{2})/g, '%25');
+    }
+    if (cleaned !== raw) {
+      if (window.__arkSetAttr) {
+        window.__arkSetAttr.call(a, 'href', cleaned);
+      } else {
+        a.setAttribute('href', cleaned);
+      }
+    }
+  }, true);
 
   // Per-item collapsible left Table of Contents / Pages panel (collapsed by default)
   (function initZIMTOC() {
@@ -1933,10 +2339,11 @@ func arkThemeScriptTag(initialTheme string) string {
       }
       if (persist) {
         try {
+          var st = window.__arkStorage || window.localStorage;
           if (open) {
-            localStorage.setItem(tocKey, '1');
+            st.setItem(tocKey, '1');
           } else {
-            localStorage.removeItem(tocKey);
+            st.removeItem(tocKey);
           }
         } catch (e) {}
       }
@@ -1961,7 +2368,7 @@ func arkThemeScriptTag(initialTheme string) string {
       for (var i = 0; i < pages.length; i++) {
         var p = pages[i];
         var a = document.createElement('a');
-        a.href = p.url;
+        setArkHref(a, p.url);
         a.textContent = p.title || p.url;
         a.title = p.title || p.url;
         var decodedHref = p.url;
@@ -2044,7 +2451,10 @@ func arkThemeScriptTag(initialTheme string) string {
     });
 
     var savedOpen = false;
-    try { savedOpen = localStorage.getItem(tocKey) === '1'; } catch (e) {}
+    try {
+      var st = window.__arkStorage || window.localStorage;
+      savedOpen = st.getItem(tocKey) === '1';
+    } catch (e) {}
     applyOpenState(savedOpen, false);
   })();
 })();
@@ -2150,18 +2560,17 @@ func formatSubpageLabel(stem string, entry zimResolvedEntry, htmlBytes []byte) s
 }
 
 func buildReaderPagerHTML(stem string, prev, next *zimTitleRecord, currentLabel string) string {
-	escStem := url.PathEscape(stem)
 	btnStyle := "display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;border:1px solid #436153;background:#1B2E26;color:#F5F2EB;font-size:20px;font-weight:700;text-decoration:none;box-shadow:0 2px 6px rgba(0,0,0,0.14);"
 	disabledStyle := "display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:999px;border:1px solid #2A4338;background:#1B2E26;color:#6E8579;font-size:20px;font-weight:700;opacity:0.4;cursor:default;"
 	prevHTML := `<span aria-disabled="true" style="` + disabledStyle + `">&#8592;</span>`
 	if prev != nil {
-		href := fmt.Sprintf("/read/zim/%s/%c/%s", escStem, prev.ns, prev.url)
+		href := buildZIMArticleHref(stem, prev.ns, prev.url)
 		prevHTML = fmt.Sprintf(`<a id="ark-prev-page" href="%s" aria-label="Previous page" style="%s">&#8592;</a>`,
 			html.EscapeString(href), btnStyle)
 	}
 	nextHTML := `<span aria-disabled="true" style="` + disabledStyle + `">&#8594;</span>`
 	if next != nil {
-		href := fmt.Sprintf("/read/zim/%s/%c/%s", escStem, next.ns, next.url)
+		href := buildZIMArticleHref(stem, next.ns, next.url)
 		nextHTML = fmt.Sprintf(`<a id="ark-next-page" href="%s" aria-label="Next page" style="%s">&#8594;</a>`,
 			html.EscapeString(href), btnStyle)
 	}
@@ -2188,25 +2597,26 @@ func injectZIMReaderNav(htmlBytes []byte, stem string, archiveIndexed bool, prev
 	headClose := bytes.Index(lower, []byte("</head>"))
 	bodyOpen := bytes.Index(lower, []byte("<body"))
 
+	const arkEarlyHook = `<script>window.__arkFetch=window.__arkFetch||window.fetch;window.__arkSetAttr=window.__arkSetAttr||(window.Element&&Element.prototype.setAttribute);window.__arkLocAssign=window.__arkLocAssign||(window.location&&window.location.assign?window.location.assign.bind(window.location):null);try{window.__arkStorage=window.__arkStorage||window.localStorage;}catch(e){}</script>`
 	pos := 0
 	if headOpen != -1 {
 		if hEnd := bytes.IndexByte(lower[headOpen:], '>'); hEnd != -1 {
 			insertHeadAt := headOpen + hEnd + 1
 			out = append(out, htmlBytes[:insertHeadAt]...)
-			out = append(out, []byte(`<script>window.__arkFetch=window.fetch;</script>`)...)
+			out = append(out, []byte(arkEarlyHook)...)
 			pos = insertHeadAt
 		}
 	}
 	if headClose != -1 && headClose >= pos {
 		out = append(out, htmlBytes[pos:headClose]...)
 		if headOpen == -1 {
-			out = append(out, []byte(`<script>window.__arkFetch=window.__arkFetch||window.fetch;</script>`)...)
+			out = append(out, []byte(arkEarlyHook)...)
 		}
 		out = append(out, []byte(headSnippet)...)
 		pos = headClose
 	} else {
 		if headOpen == -1 {
-			out = append(out, []byte(`<script>window.__arkFetch=window.__arkFetch||window.fetch;</script>`)...)
+			out = append(out, []byte(arkEarlyHook)...)
 		}
 		out = append(out, []byte(headSnippet)...)
 	}
@@ -2263,7 +2673,7 @@ func (s *Server) renderZIMSearchResults(w http.ResponseWriter, stem, query strin
 	} else {
 		list.WriteString(`<ul style="line-height:1.9;">`)
 		for _, h := range hits {
-			href := fmt.Sprintf("/read/zim/%s/%c/%s", escStem, h.ns, h.url)
+			href := buildZIMArticleHref(stem, h.ns, h.url)
 			fmt.Fprintf(&list, `<li><a href="%s">%s</a></li>`, html.EscapeString(href), html.EscapeString(h.title))
 		}
 		list.WriteString(`</ul>`)

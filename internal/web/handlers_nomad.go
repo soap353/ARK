@@ -701,11 +701,10 @@ func (s *Server) handleAPIZIMSuggest(w http.ResponseWriter, r *http.Request) {
 		URL   string `json:"url"`
 	}
 	hits := make([]suggestHit, 0, len(recs))
-	escStem := url.PathEscape(stem)
 	for _, rec := range recs {
 		hits = append(hits, suggestHit{
 			Title: rec.title,
-			URL:   fmt.Sprintf("/read/zim/%s/%c/%s", escStem, rec.ns, rec.url),
+			URL:   buildZIMArticleHref(stem, rec.ns, rec.url),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
@@ -749,11 +748,10 @@ func (s *Server) handleAPIZIMPages(w http.ResponseWriter, r *http.Request) {
 		URL   string `json:"url"`
 	}
 	pages := make([]pageHit, 0, len(recs))
-	escStem := url.PathEscape(stem)
 	for _, rec := range recs {
 		pages = append(pages, pageHit{
 			Title: rec.title,
-			URL:   fmt.Sprintf("/read/zim/%s/%c/%s", escStem, rec.ns, strings.TrimPrefix(rec.url, "/")),
+			URL:   buildZIMArticleHref(stem, rec.ns, rec.url),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
