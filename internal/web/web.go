@@ -159,6 +159,23 @@ type PageData struct {
 	GuideRemedies       []fieldguide.Remedy
 	LastDowntime        system.DowntimeInfo
 	GitHubRepo          string
+	LANDropEnabled      bool
+	OPDSEnabled         bool
+	LANDropPosts        []LANDropPostView
+	LANShareURLs        []string
+}
+
+// LANDropPostView represents a message or file drop on /lan-drop.
+type LANDropPostView struct {
+	ID         string `json:"id"`
+	Author     string `json:"author"`
+	Category   string `json:"category"`
+	Message    string `json:"message"`
+	FileName   string `json:"file_name,omitempty"`
+	FileURL    string `json:"file_url,omitempty"`
+	FileSize   string `json:"file_size,omitempty"`
+	RemoteAddr string `json:"remote_addr,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // WikipediaOptionView decorates a NOMAD Wikipedia option with local install status.
@@ -214,6 +231,8 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		"system.html",
 		"settings.html",
 		"maps.html",
+		"lan_drop.html",
+		"tools.html",
 	}
 
 	funcMap := template.FuncMap{
@@ -242,6 +261,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		sessionStart: time.Now().UTC().Truncate(time.Second),
 	}
 	s.seedDefaultApps()
+	s.ensureLANDropTable()
 	return s, nil
 }
 
@@ -340,6 +360,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/maps/tiles/", s.handleUnifiedMapTiles)
 	mux.HandleFunc("/read/zim", s.handleZIMReader)
 	mux.HandleFunc("/read/zim/", s.handleZIMReader)
+	mux.HandleFunc("/tools", s.handleToolsPage)
+	mux.HandleFunc("/lan-drop", s.handleLANDropPage)
+	mux.HandleFunc("/opds", s.handleOPDSRouter)
+	mux.HandleFunc("/opds/", s.handleOPDSRouter)
 
 	// API endpoints
 	mux.HandleFunc("/api/jobs", s.handleAPIJobs)
@@ -365,6 +389,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
 	mux.HandleFunc("/api/zim/suggest", s.handleAPIZIMSuggest)
 	mux.HandleFunc("/api/zim/pages", s.handleAPIZIMPages)
+	mux.HandleFunc("/api/lan-drop/posts", s.handleAPILANDropPosts)
+	mux.HandleFunc("/api/lan-drop/post", s.handleAPILANDropPost)
+	mux.HandleFunc("/api/lan-drop/delete", s.handleAPILANDropDelete)
+	mux.HandleFunc("/api/lan-drop/file/", s.handleAPILANDropFile)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
 	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)

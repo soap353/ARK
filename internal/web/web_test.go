@@ -2406,3 +2406,169 @@ func TestAskAIQueryNeedsLocalKnowledge(t *testing.T) {
 		}
 	}
 }
+
+func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
+	tmpDir := t.TempDir()
+	for _, sub := range []string{"zim", "media", "docs"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, sub), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+	}
+	writeWikiTestZIM(t, filepath.Join(tmpDir, "zim", "wiki_test.zim"))
+	if err := os.WriteFile(filepath.Join(tmpDir, "media", "survival_manual.epub"), []byte("FAKE_EPUB_BYTES"), 0o644); err != nil {
+		t.Fatalf("write epub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "docs", "water_guide.pdf"), []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, metadata TEXT, error TEXT, created_at DATETIME, updated_at DATETIME)`)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. Calculators page (#35) renders offline with all 5 tabs and zero CDN links
+	req := httptest.NewRequest(http.MethodGet, "/tools", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	toolsHTML := w.Body.String()
+	for _, want := range []string{"Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Offline Unit Converter"} {
+		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
+			t.Errorf("expected /tools (status=%d) to contain %q", w.Code, want)
+		}
+	}
+	if strings.Contains(toolsHTML, "cdn.jsdelivr.net") || strings.Contains(toolsHTML, "unpkg.com") {
+		t.Errorf("/tools must not reference external CDNs")
+	}
+
+	// 2. Settings renders toggles for LAN Drop and OPDS Feed
+	req = httptest.NewRequest(http.MethodGet, "/settings", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `name="lan_drop_enabled"`) || !strings.Contains(w.Body.String(), `name="opds_enabled"`) {
+		t.Errorf("expected /settings to render lan_drop_enabled and opds_enabled toggles")
+	}
+
+	// 3. LAN Drop (#41): post text + multipart file, fetch list, download file, delete post
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("author", "Radio Desk")
+	_ = mw.WriteField("category", "Alert")
+	_ = mw.WriteField("message", "Battery bank charged 100%")
+	fw, _ := mw.CreateFormFile("file", "../notes.txt")
+	_, _ = fw.Write([]byte("checklist-ok"))
+	_ = mw.Close()
+
+	req = httptest.NewRequest(http.MethodPost, "/api/lan-drop/post?ajax=1", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/lan-drop/post failed %d: %s", w.Code, w.Body.String())
+	}
+	var postResp struct {
+		OK   bool            `json:"ok"`
+		Post LANDropPostView `json:"post"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &postResp); err != nil || !postResp.OK || postResp.Post.FileURL == "" {
+		t.Fatalf("unexpected LAN drop post response: %v %s", err, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, postResp.Post.FileURL, nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "checklist-ok" {
+		t.Errorf("expected uploaded file bytes, got %d: %q", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/lan-drop/posts", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Battery bank charged 100%") {
+		t.Errorf("expected posted message in /api/lan-drop/posts, got %d: %s", w.Code, w.Body.String())
+	}
+
+	delForm := url.Values{"id": {postResp.Post.ID}}
+	req = httptest.NewRequest(http.MethodPost, "/api/lan-drop/delete?ajax=1", strings.NewReader(delForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("delete LAN drop post failed: %d", w.Code)
+	}
+
+	// 4. OPDS Feed (#42): root, media, zim, search, opensearch, and direct file acquisition
+	for _, ep := range []string{"/opds", "/opds/media", "/opds/all", "/opds/zim", "/opds/zim/wiki_test", "/opds/search?q=survival", "/opds/opensearch.xml"} {
+		req = httptest.NewRequest(http.MethodGet, ep, nil)
+		w = httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("OPDS endpoint %s returned %d: %s", ep, w.Code, w.Body.String())
+		}
+	}
+	req = httptest.NewRequest(http.MethodGet, "/opds/media", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), "/opds/files/media/survival_manual.epub") || !strings.Contains(w.Body.String(), "/opds/files/docs/water_guide.pdf") {
+		t.Errorf("expected /opds/media to list EPUB and PDF acquisition links, got: %s", w.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "/opds/files/media/survival_manual.epub", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "FAKE_EPUB_BYTES" {
+		t.Errorf("expected /opds/files download to return EPUB bytes, got %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/opds/files/media/..%2Fzim%2Fwiki_test.zim", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code == http.StatusOK {
+		t.Errorf("expected path traversal via /opds/files to be rejected")
+	}
+
+	// 5. Disable both LAN Drop and OPDS via Settings and confirm enforcement
+	offForm := url.Values{
+		"device_name": {"Ark"},
+		"port":        {"8080"},
+		"lan_enabled": {"on"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(offForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("POST /settings/general returned %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/lan-drop/posts", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disabled /api/lan-drop/posts, got %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/lan-drop", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "LAN Drop is currently turned off") {
+		t.Errorf("expected /lan-drop disabled notice, got %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/opds", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disabled /opds, got %d", w.Code)
+	}
+}

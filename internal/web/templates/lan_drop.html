@@ -1,0 +1,254 @@
+{{ define "content" }}
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0;">Local Bulletin Board &amp; LAN Drop</h1>
+      <p class="secondary-text" style="margin:0.3rem 0 0;">Share notes, announcements, and files across devices connected to this Ark over Wi-Fi/LAN.</p>
+    </div>
+    <div>
+      {{ if .LANDropEnabled }}
+      <span class="badge badge-success">Active on LAN</span>
+      {{ else }}
+      <span class="badge badge-warning">Disabled</span>
+      {{ end }}
+    </div>
+  </div>
+
+  {{ if not .LANDropEnabled }}
+  <div style="padding:1.25rem;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface-alt, #f6f3ec);margin-top:1rem;">
+    <p style="margin:0 0 0.75rem;"><strong>LAN Drop is currently turned off.</strong> Posting, browsing, and file sharing on <code>/lan-drop</code> are disabled until re-enabled in Settings.</p>
+    <a href="/settings" class="btn btn-primary">Enable in Settings &rarr;</a>
+  </div>
+  {{ else }}
+  {{ if .LANShareURLs }}
+  <div style="margin-top:0.85rem;padding:0.75rem 1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+    <span style="font-size:13px;font-weight:600;">Share on Wi-Fi / LAN:</span>
+    {{ range .LANShareURLs }}
+    <button type="button" class="btn" style="padding:0.25rem 0.65rem;min-height:30px;font-size:13px;" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.url);this.textContent='Copied!';setTimeout(()=>this.textContent=this.dataset.url,1400);" data-url="{{ . }}">{{ . }}</button>
+    {{ end }}
+  </div>
+  {{ end }}
+  {{ end }}
+</div>
+
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-danger, #c53030); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
+
+{{ if .LANDropEnabled }}
+<div style="display:grid;grid-template-columns:minmax(290px, 390px) minmax(0, 1fr);gap:1.25rem;align-items:start;">
+  <div class="card" style="margin-bottom:0;">
+    <h2 style="margin-top:0;">Post Note or Drop File</h2>
+    <form id="lan-drop-form" action="/api/lan-drop/post" method="POST" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="ld-author" class="form-label">Your Name / Device</label>
+        <input id="ld-author" name="author" type="text" class="form-control" maxlength="64" placeholder="e.g. Gabe, Radio Desk, Phone">
+      </div>
+      <div class="form-group">
+        <label for="ld-category" class="form-label">Category</label>
+        <select id="ld-category" name="category" class="form-control">
+          <option value="Note">Note / Message</option>
+          <option value="Alert">Alert / Notice</option>
+          <option value="Question">Question</option>
+          <option value="File">File Drop</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="ld-message" class="form-label">Message</label>
+        <textarea id="ld-message" name="message" class="form-control" rows="4" maxlength="10000" placeholder="Write a status update, coordinates, checklist note, or link..."></textarea>
+      </div>
+      <div class="form-group">
+        <label for="ld-file" class="form-label">Attach File (optional, up to 256 MB)</label>
+        <div id="ld-dropzone" style="border:2px dashed var(--color-border);border-radius:8px;padding:0.85rem;text-align:center;cursor:pointer;">
+          <input id="ld-file" name="file" type="file" style="width:100%;">
+          <div id="ld-drop-hint" class="secondary-text" style="font-size:12px;margin-top:0.35rem;">Drop a file here or click to choose (photos, PDFs, EPUBs, GPX, logs)</div>
+        </div>
+      </div>
+      <div id="ld-status" class="secondary-text" style="font-size:13px;margin-bottom:0.65rem;"></div>
+      <button id="ld-submit" type="submit" class="btn btn-primary" style="width:100%;">Post to LAN Board</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+      <h2 style="margin:0;">Bulletin Feed</h2>
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <input id="ld-filter" type="search" class="form-control" placeholder="Filter messages..." style="min-height:36px;padding:0.35rem 0.65rem;width:190px;">
+        <button type="button" class="btn" style="min-height:36px;padding:0.35rem 0.75rem;" onclick="refreshLANDropFeed()">Refresh</button>
+      </div>
+    </div>
+
+    <div id="ld-feed" style="display:flex;flex-direction:column;gap:0.75rem;">
+      {{ if not .LANDropPosts }}
+      <p class="secondary-text" id="ld-empty">No messages or files dropped yet. Post a message or drop a file on the left.</p>
+      {{ else }}
+      {{ range .LANDropPosts }}
+      <div class="ld-post-card" data-search="{{ .Author }} {{ .Category }} {{ .Message }} {{ .FileName }}" style="border:1px solid var(--color-border);border-radius:8px;padding:0.9rem 1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.4rem;">
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+            <strong>{{ .Author }}</strong>
+            <span class="badge {{ if eq .Category "Alert" }}badge-warning{{ else if eq .Category "File" }}badge-accent{{ else }}badge-success{{ end }}">{{ .Category }}</span>
+            {{ if .RemoteAddr }}<span class="secondary-text" style="font-size:12px;">{{ .RemoteAddr }}</span>{{ end }}
+          </div>
+          <div style="display:flex;align-items:center;gap:0.6rem;">
+            <span class="secondary-text" style="font-size:12px;">{{ .CreatedAt }}</span>
+            <button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost('{{ .ID }}')">Delete</button>
+          </div>
+        </div>
+        {{ if .Message }}
+        <div style="white-space:pre-wrap;word-break:break-word;margin:0.25rem 0 0.4rem;">{{ .Message }}</div>
+        {{ end }}
+        {{ if .FileURL }}
+        <div style="margin-top:0.45rem;">
+          <a href="{{ .FileURL }}" class="btn" style="min-height:34px;padding:0.3rem 0.75rem;font-size:13px;">&#8595; {{ .FileName }}{{ if .FileSize }} ({{ .FileSize }}){{ end }}</a>
+        </div>
+        {{ end }}
+      </div>
+      {{ end }}
+      {{ end }}
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var authorEl = document.getElementById('ld-author');
+  if (authorEl) {
+    try { authorEl.value = localStorage.getItem('ark_lan_drop_author') || ''; } catch (e) {}
+    authorEl.addEventListener('change', function() {
+      try { localStorage.setItem('ark_lan_drop_author', authorEl.value.trim()); } catch (e) {}
+    });
+  }
+
+  var dropzone = document.getElementById('ld-dropzone');
+  var fileEl = document.getElementById('ld-file');
+  if (dropzone && fileEl) {
+    dropzone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--color-accent)';
+    });
+    dropzone.addEventListener('dragleave', function() {
+      dropzone.style.borderColor = 'var(--color-border)';
+    });
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropzone.style.borderColor = 'var(--color-border)';
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        fileEl.files = e.dataTransfer.files;
+      }
+    });
+  }
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function badgeClass(cat) {
+    if (cat === 'Alert') return 'badge-warning';
+    if (cat === 'File') return 'badge-accent';
+    return 'badge-success';
+  }
+
+  function applyFilter() {
+    var filterEl = document.getElementById('ld-filter');
+    var q = filterEl ? filterEl.value.trim().toLowerCase() : '';
+    document.querySelectorAll('.ld-post-card').forEach(function(el) {
+      var hay = (el.getAttribute('data-search') || '').toLowerCase();
+      el.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    });
+  }
+  var filterEl = document.getElementById('ld-filter');
+  if (filterEl) filterEl.addEventListener('input', applyFilter);
+
+  window.refreshLANDropFeed = function() {
+    fetch('/api/lan-drop/posts')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var feed = document.getElementById('ld-feed');
+        if (!feed || !d || !d.ok) return;
+        var posts = d.posts || [];
+        if (posts.length === 0) {
+          feed.innerHTML = '<p class="secondary-text" id="ld-empty">No messages or files dropped yet. Post a message or drop a file on the left.</p>';
+          return;
+        }
+        var html = '';
+        posts.forEach(function(p) {
+          html += '<div class="ld-post-card" data-search="' + escHtml((p.author||'') + ' ' + (p.category||'') + ' ' + (p.message||'') + ' ' + (p.file_name||'')) + '" style="border:1px solid var(--color-border);border-radius:8px;padding:0.9rem 1rem;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.4rem;">' +
+              '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">' +
+                '<strong>' + escHtml(p.author || 'Guest') + '</strong>' +
+                '<span class="badge ' + badgeClass(p.category) + '">' + escHtml(p.category || 'Note') + '</span>' +
+                (p.remote_addr ? '<span class="secondary-text" style="font-size:12px;">' + escHtml(p.remote_addr) + '</span>' : '') +
+              '</div>' +
+              '<div style="display:flex;align-items:center;gap:0.6rem;">' +
+                '<span class="secondary-text" style="font-size:12px;">' + escHtml(p.created_at) + '</span>' +
+                '<button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost(\'' + escHtml(p.id) + '\')">Delete</button>' +
+              '</div>' +
+            '</div>' +
+            (p.message ? '<div style="white-space:pre-wrap;word-break:break-word;margin:0.25rem 0 0.4rem;">' + escHtml(p.message) + '</div>' : '') +
+            (p.file_url ? '<div style="margin-top:0.45rem;"><a href="' + escHtml(p.file_url) + '" class="btn" style="min-height:34px;padding:0.3rem 0.75rem;font-size:13px;">&#8595; ' + escHtml(p.file_name || 'Download') + (p.file_size ? ' (' + escHtml(p.file_size) + ')' : '') + '</a></div>' : '') +
+          '</div>';
+        });
+        feed.innerHTML = html;
+        applyFilter();
+      })
+      .catch(function() {});
+  };
+
+  window.deleteLANDropPost = function(id) {
+    fetch('/api/lan-drop/delete?ajax=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: 'id=' + encodeURIComponent(id)
+    }).then(function() { refreshLANDropFeed(); });
+  };
+
+  var form = document.getElementById('lan-drop-form');
+  if (form) {
+    form.addEventListener('submit', function(ev) {
+      ev.preventDefault();
+      var btn = document.getElementById('ld-submit');
+      var st = document.getElementById('ld-status');
+      if (authorEl) {
+        try { localStorage.setItem('ark_lan_drop_author', authorEl.value.trim()); } catch (e) {}
+      }
+      var fd = new FormData(form);
+      if (btn) { btn.disabled = true; btn.textContent = 'Uploading...'; }
+      if (st) st.textContent = '';
+      fetch('/api/lan-drop/post?ajax=1', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+        body: fd
+      }).then(async function(r) {
+        var d = await r.json().catch(function() { return {}; });
+        if (!r.ok || !d.ok) {
+          if (st) st.textContent = d.error || ('Failed (' + r.status + ')');
+          return;
+        }
+        var msgEl = document.getElementById('ld-message');
+        if (msgEl) msgEl.value = '';
+        if (fileEl) fileEl.value = '';
+        if (st) st.textContent = 'Posted to board.';
+        refreshLANDropFeed();
+      }).catch(function(e) {
+        if (st) st.textContent = 'Upload failed: ' + (e && e.message ? e.message : 'network error');
+      }).finally(function() {
+        if (btn) { btn.disabled = false; btn.textContent = 'Post to LAN Board'; }
+      });
+    });
+  }
+
+  setInterval(function() {
+    if (!document.hidden) refreshLANDropFeed();
+  }, 8000);
+})();
+</script>
+{{ end }}
+{{ end }}

@@ -1,0 +1,459 @@
+{{ define "content" }}
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0;">Offline Field &amp; Reference Calculators</h1>
+      <p class="secondary-text" style="margin:0.3rem 0 0;">Instant offline calculators for medical dosing, solar/battery sizing, RF antennas, coordinates, and unit conversions.</p>
+    </div>
+    <span class="badge badge-success">100% Offline</span>
+  </div>
+
+  <div id="calc-tabs" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
+    <button type="button" class="btn btn-primary calc-tab-btn" data-tab="dosage" onclick="showCalcTab('dosage')">Dosage</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="solar" onclick="showCalcTab('solar')">Solar &amp; Battery</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="radio" onclick="showCalcTab('radio')">Radio &amp; Antenna</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="coords" onclick="showCalcTab('coords')">Coordinates &amp; Bearing</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="units" onclick="showCalcTab('units')">Unit Converter</button>
+  </div>
+</div>
+
+<!-- 1. Dosage -->
+<div id="tab-dosage" class="card calc-panel">
+  <h2 style="margin-top:0;">Weight-Based Dosage Calculator</h2>
+  <p class="secondary-text">Arithmetic helper only — always verify age limits, maximum daily doses, and contraindications in <a href="/a/druglabels/" target="_blank">Drug Labels</a> or <a href="/field-guide">Remedy</a>.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;">
+    <div class="form-group">
+      <label class="form-label" for="dose-weight">Patient Weight</label>
+      <div style="display:flex;gap:0.4rem;">
+        <input id="dose-weight" type="number" step="any" min="0" value="70" class="form-control tabular" oninput="calcDosage()">
+        <select id="dose-wt-unit" class="form-control" style="width:90px;" onchange="calcDosage()">
+          <option value="kg">kg</option>
+          <option value="lb">lb</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="dose-mgkg">Target Dose (mg/kg)</label>
+      <input id="dose-mgkg" type="number" step="any" min="0" value="10" class="form-control tabular" oninput="calcDosage()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="dose-freq">Doses per Day</label>
+      <input id="dose-freq" type="number" step="1" min="1" value="3" class="form-control tabular" oninput="calcDosage()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="dose-conc">Suspension / Tablet Strength</label>
+      <div style="display:flex;gap:0.4rem;">
+        <input id="dose-conc" type="number" step="any" min="0" value="200" class="form-control tabular" oninput="calcDosage()">
+        <select id="dose-conc-type" class="form-control" style="width:125px;" onchange="calcDosage()">
+          <option value="tab">mg / tablet</option>
+          <option value="ml">mg / mL</option>
+          <option value="5ml">mg / 5 mL</option>
+        </select>
+      </div>
+    </div>
+  </div>
+  <div id="dose-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.75rem;"></div>
+</div>
+
+<!-- 2. Solar & Battery -->
+<div id="tab-solar" class="card calc-panel" style="display:none;">
+  <h2 style="margin-top:0;">Solar &amp; Battery Runtime Sizing</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;">
+    <div class="form-group">
+      <label class="form-label" for="sol-ah">Battery Capacity (Ah)</label>
+      <input id="sol-ah" type="number" step="any" min="0" value="100" class="form-control tabular" oninput="calcSolar()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="sol-v">System Voltage (V)</label>
+      <select id="sol-v" class="form-control tabular" onchange="calcSolar()">
+        <option value="12.8" selected>12.8V (LiFePO4 12V)</option>
+        <option value="12">12.0V (Lead-Acid)</option>
+        <option value="24">24.0V</option>
+        <option value="48">48.0V</option>
+        <option value="3.7">3.7V (Single Li-ion)</option>
+        <option value="5">5.0V (USB Powerbank)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="sol-dod">Usable Depth of Discharge (%)</label>
+      <input id="sol-dod" type="number" step="1" min="10" max="100" value="80" class="form-control tabular" oninput="calcSolar()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="sol-eff">Inverter / System Efficiency (%)</label>
+      <input id="sol-eff" type="number" step="1" min="10" max="100" value="88" class="form-control tabular" oninput="calcSolar()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="sol-load">Continuous Load (Watts)</label>
+      <input id="sol-load" type="number" step="any" min="0" value="45" class="form-control tabular" oninput="calcSolar()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="sol-panel">Solar Panel Input (Watts)</label>
+      <input id="sol-panel" type="number" step="any" min="0" value="200" class="form-control tabular" oninput="calcSolar()">
+    </div>
+  </div>
+  <div id="sol-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.75rem;"></div>
+</div>
+
+<!-- 3. Radio & Antenna -->
+<div id="tab-radio" class="card calc-panel" style="display:none;">
+  <h2 style="margin-top:0;">Radio Frequency, Wavelength &amp; Antenna Length</h2>
+  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(7.2)">40m NVIS (7.2 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(27.185)">CB Ch 19 (27.185 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(146.52)">2m Ham (146.52 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(151.82)">MURS (151.82 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(156.8)">Marine Ch 16 (156.8 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(162.55)">NOAA WX (162.55 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(446.0)">70cm / PMR (446 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(462.5625)">FRS/GMRS (462.5625 MHz)</button>
+    <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(906.875)">Meshtastic US (906.875 MHz)</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+    <div class="form-group">
+      <label class="form-label" for="rf-freq">Frequency (MHz)</label>
+      <input id="rf-freq" type="number" step="any" min="0.001" value="146.52" class="form-control tabular" oninput="calcRadio()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="rf-vf">End-Effect / Velocity Factor</label>
+      <input id="rf-vf" type="number" step="0.01" min="0.5" max="1" value="0.95" class="form-control tabular" oninput="calcRadio()">
+    </div>
+  </div>
+  <div id="rf-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:0.75rem;"></div>
+</div>
+
+<!-- 4. Coordinates & Bearing -->
+<div id="tab-coords" class="card calc-panel" style="display:none;">
+  <h2 style="margin-top:0;">Coordinates, UTM Converter &amp; Bearing</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.25rem;margin-top:1rem;">
+    <div>
+      <h3>Format Converter (WGS84)</h3>
+      <div class="form-group">
+        <label class="form-label" for="coord-dd">Point A (Decimal Degrees: <code>lat, lng</code>)</label>
+        <input id="coord-dd" type="text" value="40.7128, -74.0060" class="form-control tabular" oninput="calcCoords()">
+      </div>
+      <div id="coord-pin-a-wrap" style="margin-bottom:0.75rem;display:none;">
+        <select id="coord-pin-a" class="form-control" onchange="if(this.value){document.getElementById('coord-dd').value=this.value;calcCoords();}">
+          <option value="">-- Load Saved Map Pin as Point A --</option>
+        </select>
+      </div>
+      <div id="coord-conv-out" style="padding:0.9rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);font-size:14px;line-height:1.7;"></div>
+    </div>
+
+    <div>
+      <h3>Point A &rarr; Point B Distance &amp; Bearing</h3>
+      <div class="form-group">
+        <label class="form-label" for="coord-b">Point B (Decimal Degrees: <code>lat, lng</code>)</label>
+        <input id="coord-b" type="text" value="40.7580, -73.9855" class="form-control tabular" oninput="calcCoords()">
+      </div>
+      <div id="coord-pin-b-wrap" style="margin-bottom:0.75rem;display:none;">
+        <select id="coord-pin-b" class="form-control" onchange="if(this.value){document.getElementById('coord-b').value=this.value;calcCoords();}">
+          <option value="">-- Load Saved Map Pin as Point B --</option>
+        </select>
+      </div>
+      <div id="coord-nav-out" style="padding:0.9rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);font-size:14px;line-height:1.7;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 5. Unit Converter -->
+<div id="tab-units" class="card calc-panel" style="display:none;">
+  <h2 style="margin-top:0;">Offline Unit Converter</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1rem;">
+    <div class="form-group">
+      <label class="form-label" for="unit-cat">Category</label>
+      <select id="unit-cat" class="form-control" onchange="populateUnits()">
+        <option value="temp">Temperature</option>
+        <option value="weight">Weight / Mass</option>
+        <option value="volume">Liquid Volume</option>
+        <option value="length">Distance / Length</option>
+        <option value="speed">Speed</option>
+        <option value="pressure">Pressure</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="unit-val">Value</label>
+      <input id="unit-val" type="number" step="any" value="100" class="form-control tabular" oninput="calcUnits()">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="unit-from">From Unit</label>
+      <select id="unit-from" class="form-control" onchange="calcUnits()"></select>
+    </div>
+  </div>
+  <div id="unit-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:0.75rem;"></div>
+</div>
+
+<script>
+function showCalcTab(name) {
+  document.querySelectorAll('.calc-panel').forEach(function(el) {
+    el.style.display = (el.id === 'tab-' + name) ? 'block' : 'none';
+  });
+  document.querySelectorAll('.calc-tab-btn').forEach(function(b) {
+    if (b.dataset.tab === name) b.classList.add('btn-primary');
+    else b.classList.remove('btn-primary');
+  });
+}
+
+function statBox(label, val, sub) {
+  return '<div><div class="secondary-text" style="font-size:12px;">' + label + '</div>' +
+    '<div class="tabular" style="font-size:20px;font-weight:700;">' + val + '</div>' +
+    (sub ? '<div class="secondary-text" style="font-size:12px;">' + sub + '</div>' : '') + '</div>';
+}
+
+function calcDosage() {
+  var w = parseFloat(document.getElementById('dose-weight').value) || 0;
+  var unit = document.getElementById('dose-wt-unit').value;
+  var wKg = unit === 'lb' ? w * 0.45359237 : w;
+  var mgKg = parseFloat(document.getElementById('dose-mgkg').value) || 0;
+  var freq = Math.max(1, parseInt(document.getElementById('dose-freq').value, 10) || 1);
+  var conc = parseFloat(document.getElementById('dose-conc').value) || 0;
+  var cType = document.getElementById('dose-conc-type').value;
+
+  var singleMg = wKg * mgKg;
+  var dailyMg = singleMg * freq;
+  var formStr = '—';
+  if (conc > 0) {
+    if (cType === 'tab') formStr = (singleMg / conc).toFixed(2) + ' tablets';
+    else if (cType === 'ml') formStr = (singleMg / conc).toFixed(2) + ' mL';
+    else formStr = ((singleMg / conc) * 5).toFixed(2) + ' mL';
+  }
+  document.getElementById('dose-out').innerHTML =
+    statBox('Patient Weight', wKg.toFixed(1) + ' kg', (wKg * 2.20462).toFixed(1) + ' lb') +
+    statBox('Single Dose', singleMg.toFixed(1) + ' mg', formStr) +
+    statBox('Daily Total', dailyMg.toFixed(1) + ' mg', freq + 'x per day');
+}
+
+function calcSolar() {
+  var ah = parseFloat(document.getElementById('sol-ah').value) || 0;
+  var v = parseFloat(document.getElementById('sol-v').value) || 12;
+  var dod = Math.min(100, Math.max(1, parseFloat(document.getElementById('sol-dod').value) || 80)) / 100;
+  var eff = Math.min(100, Math.max(1, parseFloat(document.getElementById('sol-eff').value) || 88)) / 100;
+  var load = parseFloat(document.getElementById('sol-load').value) || 0;
+  var panel = parseFloat(document.getElementById('sol-panel').value) || 0;
+
+  var totalWh = ah * v;
+  var usableWh = totalWh * dod * eff;
+  var hours = load > 0 ? (usableWh / load) : 0;
+  var rechargeH = panel > 0 ? (usableWh / (panel * 0.85)) : 0;
+  document.getElementById('sol-out').innerHTML =
+    statBox('Total Capacity', totalWh.toFixed(0) + ' Wh', (totalWh / 1000).toFixed(2) + ' kWh') +
+    statBox('Usable Energy', usableWh.toFixed(0) + ' Wh', Math.round(dod*100) + '% DoD, ' + Math.round(eff*100) + '% eff') +
+    statBox('Estimated Runtime', load > 0 ? (hours.toFixed(1) + ' hrs') : '—', hours >= 24 ? (hours / 24).toFixed(1) + ' days' : '') +
+    statBox('Full Recharge Time', panel > 0 ? (rechargeH.toFixed(1) + ' sun hrs') : '—', 'at ~85% MPPT yield');
+}
+
+function setFreqMHz(f) {
+  document.getElementById('rf-freq').value = f;
+  calcRadio();
+}
+
+function calcRadio() {
+  var fMHz = parseFloat(document.getElementById('rf-freq').value) || 0;
+  var vf = parseFloat(document.getElementById('rf-vf').value) || 0.95;
+  if (fMHz <= 0) {
+    document.getElementById('rf-out').innerHTML = '';
+    return;
+  }
+  var fullWaveM = 299.792458 / fMHz;
+  var halfWaveM = (fullWaveM / 2) * vf;
+  var legM = halfWaveM / 2;
+  var qtrWaveM = (fullWaveM / 4) * vf;
+  document.getElementById('rf-out').innerHTML =
+    statBox('Full Wavelength', fullWaveM.toFixed(3) + ' m', (fullWaveM * 3.28084).toFixed(2) + ' ft') +
+    statBox('Half-Wave Dipole Total', halfWaveM.toFixed(3) + ' m', (halfWaveM * 3.28084).toFixed(2) + ' ft (' + (halfWaveM * 39.3701).toFixed(1) + ' in)') +
+    statBox('Each Dipole Leg (1/4)', legM.toFixed(3) + ' m', (legM * 3.28084).toFixed(2) + ' ft (' + (legM * 39.3701).toFixed(1) + ' in)') +
+    statBox('1/4-Wave Vertical Whip', qtrWaveM.toFixed(3) + ' m', (qtrWaveM * 39.3701).toFixed(1) + ' in');
+}
+
+function parseCoordPair(str) {
+  var parts = String(str || '').trim().split(/[,\s]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  var lat = parseFloat(parts[0]), lng = parseFloat(parts[1]);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat: lat, lng: lng };
+}
+
+function toDMS(val, posHem, negHem) {
+  var hem = val >= 0 ? posHem : negHem;
+  var a = Math.abs(val);
+  var d = Math.floor(a);
+  var mf = (a - d) * 60;
+  var m = Math.floor(mf);
+  var s = (mf - m) * 60;
+  return d + '° ' + m + '\' ' + s.toFixed(2) + '" ' + hem;
+}
+
+function toDDM(val, posHem, negHem) {
+  var hem = val >= 0 ? posHem : negHem;
+  var a = Math.abs(val);
+  var d = Math.floor(a);
+  var m = (a - d) * 60;
+  return d + '° ' + m.toFixed(4) + '\' ' + hem;
+}
+
+function toUTM(lat, lng) {
+  var zone = Math.floor((lng + 180) / 6) + 1;
+  var latRad = lat * Math.PI / 180;
+  var lngRad = lng * Math.PI / 180;
+  var lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
+  var a = 6378137.0, f = 1 / 298.257223563;
+  var e2 = 2 * f - f * f, ep2 = e2 / (1 - e2);
+  var k0 = 0.9996;
+  var N = a / Math.sqrt(1 - e2 * Math.sin(latRad) * Math.sin(latRad));
+  var T = Math.tan(latRad) * Math.tan(latRad);
+  var C = ep2 * Math.cos(latRad) * Math.cos(latRad);
+  var A = Math.cos(latRad) * (lngRad - lon0);
+  var M = a * ((1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256)*latRad
+    - (3*e2/8 + 3*e2*e2/32 + 45*e2*e2*e2/1024)*Math.sin(2*latRad)
+    + (15*e2*e2/256 + 45*e2*e2*e2/1024)*Math.sin(4*latRad)
+    - (35*e2*e2*e2/3072)*Math.sin(6*latRad));
+  var easting = k0 * N * (A + (1 - T + C)*Math.pow(A,3)/6 + (5 - 18*T + T*T + 72*C - 58*ep2)*Math.pow(A,5)/120) + 500000.0;
+  var northing = k0 * (M + N * Math.tan(latRad) * (A*A/2 + (5 - T + 9*C + 4*C*C)*Math.pow(A,4)/24 + (61 - 58*T + T*T + 600*C - 330*ep2)*Math.pow(A,6)/720));
+  if (lat < 0) northing += 10000000.0;
+  var bands = 'CDEFGHJKLMNPQRSTUVWX';
+  var band = (lat >= -80 && lat <= 84) ? bands.charAt(Math.min(19, Math.max(0, Math.floor((lat + 80) / 8)))) : (lat >= 0 ? 'N' : 'S');
+  return zone + band + ' ' + Math.round(easting) + 'E ' + Math.round(northing) + 'N';
+}
+
+function calcCoords() {
+  var a = parseCoordPair(document.getElementById('coord-dd').value);
+  var convEl = document.getElementById('coord-conv-out');
+  if (!a) {
+    convEl.textContent = 'Enter valid Decimal Degrees like 40.7128, -74.0060.';
+  } else {
+    convEl.innerHTML =
+      '<div><strong>Decimal:</strong> <code>' + a.lat.toFixed(6) + ', ' + a.lng.toFixed(6) + '</code></div>' +
+      '<div><strong>DMS:</strong> <code>' + toDMS(a.lat, 'N', 'S') + '  ' + toDMS(a.lng, 'E', 'W') + '</code></div>' +
+      '<div><strong>DDM:</strong> <code>' + toDDM(a.lat, 'N', 'S') + '  ' + toDDM(a.lng, 'E', 'W') + '</code></div>' +
+      '<div><strong>UTM (WGS84):</strong> <code>' + toUTM(a.lat, a.lng) + '</code></div>';
+  }
+  var b = parseCoordPair(document.getElementById('coord-b').value);
+  var navEl = document.getElementById('coord-nav-out');
+  if (!a || !b) {
+    navEl.textContent = 'Enter valid Point A and Point B coordinates.';
+  } else {
+    var R = 6371.0;
+    var p1 = a.lat * Math.PI / 180, p2 = b.lat * Math.PI / 180;
+    var dp = (b.lat - a.lat) * Math.PI / 180, dl = (b.lng - a.lng) * Math.PI / 180;
+    var s = Math.sin(dp/2)*Math.sin(dp/2) + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);
+    var distKm = R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+    var y = Math.sin(dl) * Math.cos(p2);
+    var x = Math.cos(p1)*Math.sin(p2) - Math.sin(p1)*Math.cos(p2)*Math.cos(dl);
+    var brng = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    var back = (brng + 180) % 360;
+    var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    var card = dirs[Math.round(brng / 22.5) % 16];
+    navEl.innerHTML =
+      '<div><strong>Distance:</strong> <code>' + distKm.toFixed(2) + ' km</code> &middot; <code>' + (distKm * 0.621371).toFixed(2) + ' mi</code> &middot; <code>' + (distKm * 0.539957).toFixed(2) + ' nmi</code></div>' +
+      '<div><strong>Bearing A &rarr; B:</strong> <code>' + brng.toFixed(1) + '&deg; (' + card + ')</code> &nbsp; <strong>Return:</strong> <code>' + back.toFixed(1) + '&deg;</code></div>' +
+      '<div><strong>Est. Foot Travel (4.5 km/h):</strong> <code>' + (distKm / 4.5).toFixed(1) + ' hrs</code></div>';
+  }
+}
+
+var UNIT_DEFS = {
+  temp: [
+    { id: 'C', name: 'Celsius (°C)' },
+    { id: 'F', name: 'Fahrenheit (°F)' },
+    { id: 'K', name: 'Kelvin (K)' }
+  ],
+  weight: [
+    { id: 'kg', name: 'Kilograms (kg)', f: 1000 },
+    { id: 'g', name: 'Grams (g)', f: 1 },
+    { id: 'mg', name: 'Milligrams (mg)', f: 0.001 },
+    { id: 'lb', name: 'Pounds (lb)', f: 453.59237 },
+    { id: 'oz', name: 'Ounces (oz)', f: 28.349523 }
+  ],
+  volume: [
+    { id: 'L', name: 'Liters (L)', f: 1000 },
+    { id: 'mL', name: 'Milliliters (mL)', f: 1 },
+    { id: 'gal', name: 'US Gallons (gal)', f: 3785.411784 },
+    { id: 'qt', name: 'US Quarts (qt)', f: 946.352946 },
+    { id: 'floz', name: 'US Fluid Oz (fl oz)', f: 29.57353 },
+    { id: 'tsp', name: 'Teaspoons (tsp)', f: 4.92892 }
+  ],
+  length: [
+    { id: 'km', name: 'Kilometers (km)', f: 1000 },
+    { id: 'm', name: 'Meters (m)', f: 1 },
+    { id: 'cm', name: 'Centimeters (cm)', f: 0.01 },
+    { id: 'mi', name: 'Statute Miles (mi)', f: 1609.344 },
+    { id: 'nmi', name: 'Nautical Miles (nmi)', f: 1852 },
+    { id: 'ft', name: 'Feet (ft)', f: 0.3048 },
+    { id: 'in', name: 'Inches (in)', f: 0.0254 }
+  ],
+  speed: [
+    { id: 'kmh', name: 'km/h', f: 1 / 3.6 },
+    { id: 'mph', name: 'mph', f: 0.44704 },
+    { id: 'kn', name: 'Knots (kt)', f: 0.514444 },
+    { id: 'ms', name: 'm/s', f: 1 }
+  ],
+  pressure: [
+    { id: 'kPa', name: 'Kilopascals (kPa)', f: 1 },
+    { id: 'bar', name: 'Bar', f: 100 },
+    { id: 'psi', name: 'PSI', f: 6.894757 },
+    { id: 'atm', name: 'Atmospheres (atm)', f: 101.325 },
+    { id: 'mmHg', name: 'mmHg / Torr', f: 0.133322 }
+  ]
+};
+
+function populateUnits() {
+  var cat = document.getElementById('unit-cat').value;
+  var sel = document.getElementById('unit-from');
+  sel.innerHTML = '';
+  (UNIT_DEFS[cat] || []).forEach(function(u) {
+    var opt = document.createElement('option');
+    opt.value = u.id;
+    opt.textContent = u.name;
+    sel.appendChild(opt);
+  });
+  calcUnits();
+}
+
+function calcUnits() {
+  var cat = document.getElementById('unit-cat').value;
+  var val = parseFloat(document.getElementById('unit-val').value);
+  var fromId = document.getElementById('unit-from').value;
+  var outEl = document.getElementById('unit-out');
+  if (isNaN(val)) { outEl.innerHTML = ''; return; }
+  var html = '';
+  if (cat === 'temp') {
+    var c = fromId === 'C' ? val : (fromId === 'F' ? (val - 32) * 5 / 9 : val - 273.15);
+    var vals = { C: c, F: c * 9 / 5 + 32, K: c + 273.15 };
+    UNIT_DEFS.temp.forEach(function(u) {
+      html += statBox(u.name, vals[u.id].toFixed(2), '');
+    });
+  } else {
+    var list = UNIT_DEFS[cat] || [];
+    var fromObj = list.find(function(u) { return u.id === fromId; }) || list[0];
+    var base = val * fromObj.f;
+    list.forEach(function(u) {
+      var res = base / u.f;
+      var formatted = Math.abs(res) >= 1000 ? res.toFixed(1) : (Math.abs(res) < 0.01 && res !== 0 ? res.toExponential(3) : res.toFixed(4).replace(/\.?0+$/, ''));
+      html += statBox(u.name, formatted, '');
+    });
+  }
+  outEl.innerHTML = html;
+}
+
+calcDosage();
+calcSolar();
+calcRadio();
+calcCoords();
+populateUnits();
+
+fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) {
+  var pins = (d && d.pins) || (Array.isArray(d) ? d : []);
+  if (!pins || pins.length === 0) return;
+  ['coord-pin-a', 'coord-pin-b'].forEach(function(id, idx) {
+    var sel = document.getElementById(id);
+    var wrap = document.getElementById(id + '-wrap');
+    if (!sel || !wrap) return;
+    pins.forEach(function(p) {
+      var opt = document.createElement('option');
+      opt.value = p.lat + ', ' + p.lng;
+      opt.textContent = (p.title || p.name || 'Pin') + ' (' + Number(p.lat).toFixed(4) + ', ' + Number(p.lng).toFixed(4) + ')';
+      sel.appendChild(opt);
+    });
+    wrap.style.display = 'block';
+  });
+}).catch(function() {});
+</script>
+{{ end }}

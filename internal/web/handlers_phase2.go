@@ -26,6 +26,8 @@ func (s *Server) fetchSettings() map[string]string {
 		"device_name":         "Ark",
 		"port":                "8080",
 		"lan_enabled":         "true",
+		"lan_drop_enabled":    "true",
+		"opds_enabled":        "true",
 		"max_concurrent_jobs": "3",
 		"video_quality":       "balanced",
 	}
@@ -46,6 +48,15 @@ func (s *Server) fetchSettings() map[string]string {
 	return out
 }
 
+func (s *Server) isSettingEnabled(key string, defaultVal bool) bool {
+	settings := s.fetchSettings()
+	raw := strings.ToLower(strings.TrimSpace(settings[key]))
+	if raw == "" {
+		return defaultVal
+	}
+	return raw != "false" && raw != "0" && raw != "off" && raw != "no"
+}
+
 func (s *Server) saveSettings(pairs map[string]string) error {
 	if s.db == nil {
 		return nil
@@ -62,14 +73,19 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	lan := "false"
-	if r.FormValue("lan_enabled") == "on" || r.FormValue("lan_enabled") == "true" {
-		lan = "true"
+	parseCheckbox := func(name string) string {
+		v := strings.ToLower(strings.TrimSpace(r.FormValue(name)))
+		if v == "on" || v == "true" || v == "1" {
+			return "true"
+		}
+		return "false"
 	}
 	_ = s.saveSettings(map[string]string{
-		"device_name": strings.TrimSpace(r.FormValue("device_name")),
-		"port":        strings.TrimSpace(r.FormValue("port")),
-		"lan_enabled": lan,
+		"device_name":      strings.TrimSpace(r.FormValue("device_name")),
+		"port":             strings.TrimSpace(r.FormValue("port")),
+		"lan_enabled":      parseCheckbox("lan_enabled"),
+		"lan_drop_enabled": parseCheckbox("lan_drop_enabled"),
+		"opds_enabled":     parseCheckbox("opds_enabled"),
 	})
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 }

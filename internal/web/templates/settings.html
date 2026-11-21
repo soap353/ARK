@@ -33,6 +33,20 @@
         <label for="lan_enabled">Allow read-only browsing from local network (LAN)</label>
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">Local Bulletin Board &amp; LAN Drop (#41)</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 48px;">
+        <input type="checkbox" id="lan_drop_enabled" name="lan_drop_enabled" {{ if ne (index .Settings "lan_drop_enabled") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="lan_drop_enabled">Enable shared message board &amp; file drop at <a href="/lan-drop">/lan-drop</a></label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">OPDS E-Reader Catalog Feed (#42)</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 48px;">
+        <input type="checkbox" id="opds_enabled" name="opds_enabled" {{ if ne (index .Settings "opds_enabled") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="opds_enabled">Enable OPDS 1.2 XML feed at <a href="/opds" target="_blank">/opds</a> (for KOReader, ReadEra, Calibre)</label>
+      </div>
+    </div>
     <button type="submit" class="btn btn-primary">Save General Settings</button>
   </form>
 </div>

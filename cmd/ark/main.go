@@ -59,7 +59,9 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('ai_server_url', ''),
     ('ai_api_key', ''),
     ('ai_chat_model', ''),
-    ('ai_embed_model', '');
+    ('ai_embed_model', ''),
+    ('lan_drop_enabled', 'true'),
+    ('opds_enabled', 'true');
 
 -- SQLite-backed job queue for downloads, encoding, and indexing
 CREATE TABLE IF NOT EXISTS jobs (
@@ -134,6 +136,20 @@ CREATE TABLE IF NOT EXISTS rag_documents (
     qdrant_collection TEXT NOT NULL DEFAULT '',
     indexed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Local Bulletin Board & LAN Drop posts
+CREATE TABLE IF NOT EXISTS lan_posts (
+    id TEXT PRIMARY KEY,
+    author TEXT NOT NULL DEFAULT 'Guest',
+    category TEXT NOT NULL DEFAULT 'Note',
+    message TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT '',
+    file_rel TEXT NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    remote_addr TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_lan_posts_created ON lan_posts(created_at DESC);
 
 -- Set schema version
 PRAGMA user_version = 1;
