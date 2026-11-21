@@ -164,13 +164,13 @@ function fetchKiwixPage() {
           '</div>';
         var inst = item.installed ? ' <span class="badge badge-success">Installed</span>' : '';
         var btnCls = item.installed ? 'btn' : 'btn btn-primary';
-        var btnTxt = item.installed ? 'Re-download' : 'Download ZIM';
+        var btnTxt = item.installed ? 'Downloaded' : 'Download ZIM';
         return '<tr>' +
           '<td style="min-width:240px;"><strong>' + escHTML(item.title) + '</strong>' + inst + '<div class="secondary-text" style="font-size:13px;margin-top:2px;">' + escHTML(item.summary) + '</div></td>' +
           '<td>' + badges + '</td>' +
           '<td class="tabular" style="white-space:nowrap;">' + escHTML(item.size_text) + '</td>' +
           '<td class="secondary-text tabular" style="white-space:nowrap;">' + escHTML(item.updated || '-') + '</td>' +
-          '<td><form action="/api/jobs" method="POST" style="margin:0;">' +
+          '<td><form action="/api/jobs" method="POST" data-dl-label="' + escHTML(item.title) + '" style="margin:0;">' +
             '<input type="hidden" name="type" value="kiwix_zim">' +
             '<input type="hidden" name="target" value="' + escHTML(item.download_url) + '">' +
             '<input type="hidden" name="size_bytes" value="' + (item.size_bytes || 0) + '">' +
@@ -178,6 +178,7 @@ function fetchKiwixPage() {
           '</form></td>' +
         '</tr>';
       }).join('');
+      if (typeof arkSyncDownloadButtons === 'function') arkSyncDownloadButtons();
     })
     .catch(function(err) {
       statusEl.textContent = 'Catalog request failed: ' + err.message;

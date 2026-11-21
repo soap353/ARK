@@ -122,13 +122,13 @@ func TestCatalogManifests(t *testing.T) {
 	}
 
 	expectedApps := map[string]bool{
-		"kiwix":      false,
-		"maps":       false,
-		"cyberchef":  false,
-		"flatnotes":  false,
-		"convertx":   false,
-		"druglabels": false,
-		"kolibri":    false,
+		"maps":           false,
+		"cyberchef":      false,
+		"flatnotes":      false,
+		"convertx":       false,
+		"druglabels":     false,
+		"kolibri":        false,
+		"libretranslate": false,
 	}
 
 	for _, m := range manifests {

@@ -156,6 +156,11 @@ func (r *Aria2cRunner) runResourcePack(ctx context.Context, job *Job, meta JobMe
 				dlURL = resolved
 			}
 		}
+		if dlURL != "" {
+			if freshURL := r.resolveLatestKiwixMirrorURL(ctx, dlURL); freshURL != "" {
+				dlURL = freshURL
+			}
+		}
 		if dlURL == "" {
 			lastErr = fmt.Errorf("no download URL for %s", res.Title)
 			continue
@@ -279,10 +284,13 @@ func (r *Aria2cRunner) resolvePresetURL(ctx context.Context, preset string) (str
 	}
 	q := queryMap[preset]
 	if q == "" {
-		q = preset
+		q = strings.ReplaceAll(preset, "_", " ")
 	}
 
-	opdsURL := "https://library.kiwix.org/catalog/v2/entries?count=1&q=" + url.QueryEscape(q)
+	opdsURL := "https://library.kiwix.org/catalog/v2/entries?count=5&q=" + url.QueryEscape(q)
+	if strings.Contains(strings.ToLower(preset), "_en_") || strings.HasSuffix(strings.ToLower(preset), "_en") {
+		opdsURL += "&lang=eng"
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -318,13 +326,87 @@ func (r *Aria2cRunner) resolvePresetURL(ctx context.Context, preset string) (str
 		return "", fmt.Errorf("no catalog entry found for %s", q)
 	}
 
-	for _, l := range feed.Entries[0].Links {
-		if strings.Contains(l.Rel, "acquisition") && l.Href != "" {
-			href := strings.TrimSuffix(l.Href, ".meta4")
-			return href, nil
+	presetLow := strings.ToLower(strings.TrimSpace(preset))
+	firstHref := ""
+	for _, entry := range feed.Entries {
+		for _, l := range entry.Links {
+			if strings.Contains(l.Rel, "acquisition") && l.Href != "" {
+				href := strings.TrimSuffix(l.Href, ".meta4")
+				if firstHref == "" {
+					firstHref = href
+				}
+				if presetLow != "" && strings.Contains(strings.ToLower(href), presetLow) {
+					return href, nil
+				}
+			}
 		}
 	}
+	if firstHref != "" {
+		return firstHref, nil
+	}
 	return "", fmt.Errorf("no download link found in catalog for %s", q)
+}
+
+var kiwixDatedFileRe = regexp.MustCompile(`^(.+?)_(\d{4}-\d{2}[a-z]?)\.zim$`)
+
+// resolveLatestKiwixMirrorURL resolves dated download.kiwix.org/zim/<cat>/<stem>_YYYY-MM.zim URLs
+// against the live directory index so monthly date rotations on Kiwix mirrors never 404.
+func (r *Aria2cRunner) resolveLatestKiwixMirrorURL(ctx context.Context, rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" || !strings.Contains(strings.ToLower(u.Host), "download.kiwix.org") {
+		return rawURL
+	}
+	base := pathBase(u.Path)
+	m := kiwixDatedFileRe.FindStringSubmatch(base)
+	if len(m) != 3 {
+		return rawURL
+	}
+	stemPrefix := m[1]
+	dirPath := strings.TrimSuffix(u.Path, base)
+	dirURL := u.Scheme + "://" + u.Host + dirPath
+
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, dirURL, nil)
+	if err != nil {
+		return rawURL
+	}
+	req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+	resp, err := r.HTTPClient.Do(req)
+	if err != nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return rawURL
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return rawURL
+	}
+
+	linkRe := regexp.MustCompile(`href="(` + regexp.QuoteMeta(stemPrefix) + `_\d{4}-\d{2}[a-z]?\.zim)"`)
+	matches := linkRe.FindAllStringSubmatch(string(bodyBytes), -1)
+	if len(matches) == 0 {
+		return rawURL
+	}
+	names := make([]string, 0, len(matches))
+	for _, mm := range matches {
+		if len(mm) == 2 {
+			names = append(names, mm[1])
+		}
+	}
+	sort.Strings(names)
+	latest := names[len(names)-1]
+	return dirURL + latest
+}
+
+func pathBase(p string) string {
+	p = strings.TrimRight(p, "/")
+	if idx := strings.LastIndex(p, "/"); idx != -1 {
+		return p[idx+1:]
+	}
+	return p
 }
 
 func (r *Aria2cRunner) runAria2c(ctx context.Context, job *Job, meta JobMetadata, outputDir string, progress ProgressFunc) error {

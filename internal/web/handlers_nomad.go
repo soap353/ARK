@@ -665,6 +665,52 @@ func (s *Server) handleAPIStorageCheckSpace(w http.ResponseWriter, r *http.Reque
 	_ = json.NewEncoder(w).Encode(res)
 }
 
+func (s *Server) handleAPISystemRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	online, label, canInstall := s.runtimeStatus(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"online":      online,
+		"label":       label,
+		"can_install": canInstall,
+	})
+}
+
+func (s *Server) handleAPIZIMSuggest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	stem := filepath.Base(strings.TrimSpace(r.URL.Query().Get("stem")))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if s.dataDir == "" || stem == "" || q == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"hits": []any{}})
+		return
+	}
+	zimPath := filepath.Join(s.dataDir, "zim", stem+".zim")
+	arc, err := getZIMArchive(zimPath, stem)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"hits": []any{}})
+		return
+	}
+	recs := arc.searchTitles(q, 10)
+	type suggestHit struct {
+		Title string `json:"title"`
+		URL   string `json:"url"`
+	}
+	hits := make([]suggestHit, 0, len(recs))
+	escStem := url.PathEscape(stem)
+	for _, rec := range recs {
+		hits = append(hits, suggestHit{
+			Title: rec.title,
+			URL:   fmt.Sprintf("/read/zim/%s/%c/%s", escStem, rec.ns, rec.url),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
+}
+
 // ---------------------------------------------------------------------------
 // Maps Country Extract & Custom Offline Map Pins (/maps)
 // ---------------------------------------------------------------------------
@@ -711,22 +757,32 @@ func (s *Server) handleAPIMapsExtract(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json") || r.FormValue("ajax") == "1"
 	slug := strings.TrimSpace(r.FormValue("slug"))
 	opt := kiwix.FindCountryMapBySlug(slug)
 	if opt == nil {
+		if wantsJSON {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Unknown country/map slug"})
+			return
+		}
 		http.Redirect(w, r, "/maps?err="+url.QueryEscape("Unknown country/map slug"), http.StatusSeeOther)
 		return
 	}
 	if spaceRes, ok := s.checkDownloadSpace(r.Context(), "map_extract", opt.Slug, 0); ok && spaceRes.Status == "insufficient" {
+		if wantsJSON {
+			writeJSON(w, http.StatusInsufficientStorage, spaceRes)
+			return
+		}
 		http.Redirect(w, r, "/maps?err="+url.QueryEscape(spaceRes.Message), http.StatusSeeOther)
 		return
 	}
+	jobID := fmt.Sprintf("job-map-%d", time.Now().UnixNano())
 	metaBytes, _ := json.Marshal(jobs.JobMetadata{
 		OutputDir: filepath.Join(s.dataDir, "maps"),
 	})
 	if s.queue != nil {
 		_ = s.queue.Submit(r.Context(), &jobs.Job{
-			ID:          fmt.Sprintf("job-map-%d", time.Now().UnixNano()),
+			ID:          jobID,
 			Type:        jobs.TypeMapExtract,
 			Target:      opt.Slug,
 			Status:      jobs.StatusPending,
@@ -735,7 +791,16 @@ func (s *Server) handleAPIMapsExtract(w http.ResponseWriter, r *http.Request) {
 		})
 	} else if s.db != nil {
 		_, _ = s.db.Exec(`INSERT INTO jobs (id, type, target, status, progress_msg, metadata) VALUES (?, ?, ?, 'pending', ?, ?)`,
-			fmt.Sprintf("job-map-%d", time.Now().UnixNano()), jobs.TypeMapExtract, opt.Slug, "Queued extract for "+opt.Name, string(metaBytes))
+			jobID, jobs.TypeMapExtract, opt.Slug, "Queued extract for "+opt.Name, string(metaBytes))
+	}
+	if wantsJSON {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"job_id": jobID,
+			"target": opt.Slug,
+			"status": "pending",
+		})
+		return
 	}
 	http.Redirect(w, r, "/system", http.StatusSeeOther)
 }
@@ -846,11 +911,22 @@ func (s *Server) scanDiskLibraryItems(queryFilter, catFilter string) []LibraryIt
 			}
 
 			title := name
+			desc := ""
+			stem := ""
 			if subDir == "zim" {
+				stem = strings.TrimSuffix(name, filepath.Ext(name))
 				if meta, ok := zimMetaByBase[low]; ok && meta.Title != "" {
 					title = meta.Title
+					desc = meta.Description
+				} else if arc, aerr := getZIMArchive(filepath.Join(fullDir, name), stem); aerr == nil {
+					if mTitle, mDesc := arc.metadata(); mTitle != "" {
+						title = mTitle
+						desc = mDesc
+					} else {
+						title = strings.ReplaceAll(stem, "_", " ")
+					}
 				} else {
-					title = strings.TrimSuffix(name, filepath.Ext(name))
+					title = strings.ReplaceAll(stem, "_", " ")
 				}
 			}
 
@@ -860,25 +936,26 @@ func (s *Server) scanDiskLibraryItems(queryFilter, catFilter string) []LibraryIt
 			if cat != "" && cat != "all" && !strings.EqualFold(category, catFilter) {
 				continue
 			}
-			if q != "" && !strings.Contains(strings.ToLower(title+" "+name+" "+category), q) {
+			if q != "" && !strings.Contains(strings.ToLower(title+" "+desc+" "+name+" "+category), q) {
 				continue
 			}
 
 			openURL := openPrefix + url.PathEscape(name)
 			if subDir == "zim" {
-				stem := strings.TrimSuffix(name, filepath.Ext(name))
 				openURL = "/read/zim/" + url.PathEscape(stem) + "/"
 			}
 
 			items = append(items, LibraryItemView{
-				Title:    title,
-				FileName: name,
-				RelPath:  relPath,
-				Category: category,
-				Size:     formatHumanBytes(info.Size()),
-				Date:     info.ModTime().Format("2006-01-02"),
-				OpenURL:  openURL,
-				IconURL:  "/api/library/icon?file=" + url.QueryEscape(name) + "&cat=" + url.QueryEscape(category),
+				Title:       title,
+				Description: desc,
+				Stem:        stem,
+				FileName:    name,
+				RelPath:     relPath,
+				Category:    category,
+				Size:        formatHumanBytes(info.Size()),
+				Date:        info.ModTime().Format("2006-01-02"),
+				OpenURL:     openURL,
+				IconURL:     "/api/library/icon?file=" + url.QueryEscape(name) + "&cat=" + url.QueryEscape(category),
 			})
 		}
 	}
@@ -937,7 +1014,7 @@ func (s *Server) handleAPILibraryIcon(w http.ResponseWriter, r *http.Request) {
 	category := strings.TrimSpace(r.URL.Query().Get("cat"))
 	low := strings.ToLower(fileName)
 
-	// 1. Check local disk icon cache (<dataDir>/zim/.icons/<stem>.png)
+	// 1. Check local disk icon cache (<dataDir>/zim/.icons/<stem>.png) or extract embedded ZIM cover directly
 	if s.dataDir != "" && fileName != "" {
 		iconDir := filepath.Join(s.dataDir, "zim", ".icons")
 		stem := strings.TrimSuffix(filepath.Base(low), filepath.Ext(low))
@@ -947,6 +1024,19 @@ func (s *Server) handleAPILibraryIcon(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "public, max-age=86400")
 			_, _ = w.Write(raw)
 			return
+		}
+		if strings.HasSuffix(low, ".zim") {
+			zimFile := filepath.Join(s.dataDir, "zim", filepath.Base(fileName))
+			if arc, aerr := getZIMArchive(zimFile, stem); aerr == nil {
+				if raw, mt := arc.embeddedIcon(); len(raw) > 0 {
+					_ = os.MkdirAll(iconDir, 0755)
+					_ = os.WriteFile(cachedPath, raw, 0644)
+					w.Header().Set("Content-Type", mt)
+					w.Header().Set("Cache-Control", "public, max-age=86400")
+					_, _ = w.Write(raw)
+					return
+				}
+			}
 		}
 		// Opportunistically fetch ZIM illustration thumbnail from OPDS once if online (unless disabled in tests)
 		missMarker := filepath.Join(iconDir, stem+".miss")

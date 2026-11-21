@@ -66,7 +66,7 @@ func TestNewServerAndRoutes(t *testing.T) {
 		contains     string
 	}{
 		{"/healthz", http.StatusOK, `"status":"ok"`},
-		{"/", http.StatusOK, "AI Assistant"},
+		{"/", http.StatusOK, "ConvertX"},
 		{"/library", http.StatusOK, "Check ZIM Updates"},
 		{"/kiwix", http.StatusOK, "Open Local ZIM Reader"},
 		{"/get-content", http.StatusOK, "Open Local ZIM Reader"},
@@ -74,9 +74,9 @@ func TestNewServerAndRoutes(t *testing.T) {
 		{"/apps", http.StatusOK, "<th>Module</th>"},
 		{"/ask", http.StatusOK, "Knowledge Index"},
 		{"/jobs", http.StatusSeeOther, ""},
-		{"/system", http.StatusOK, "Live Host Telemetry"},
+		{"/system", http.StatusOK, "CPU Usage"},
 		{"/settings", http.StatusOK, "<h2>General</h2>"},
-		{"/a/kiwix/", http.StatusNotFound, "App Not Active"},
+		{"/a/kiwix/", http.StatusSeeOther, ""},
 		{"/static/ark.css", http.StatusOK, "--color-bg: #F5F2EB;"},
 		{"/static/htmx.min.js", http.StatusOK, "htmx"},
 	}
@@ -96,8 +96,8 @@ func TestNewServerAndRoutes(t *testing.T) {
 			}
 		})
 	}
-	if instApps, _ := server.fetchApps(); len(instApps) < 9 {
-		t.Errorf("expected fresh DB to pre-install all 9 built-in apps, got %d", len(instApps))
+	if instApps, _ := server.fetchApps(); len(instApps) < 7 {
+		t.Errorf("expected fresh DB to pre-install all 7 built-in apps, got %d", len(instApps))
 	}
 }
 
@@ -724,14 +724,14 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 
 	// Verify embedded catalog fallback works cleanly even outside repo root (standalone release binary)
 	embeddedManifests, err := apps.LoadAllManifestsFS(catalog.FS)
-	if err != nil || len(embeddedManifests) < 9 {
+	if err != nil || len(embeddedManifests) < 7 {
 		t.Errorf("expected embedded catalog manifests to load cleanly, got count=%d err=%v", len(embeddedManifests), err)
 	}
 	origWD, _ := os.Getwd()
 	_ = os.Chdir(t.TempDir())
 	_, avail := server.fetchApps()
 	_ = os.Chdir(origWD)
-	if len(avail) < 9 {
+	if len(avail) < 7 {
 		t.Errorf("expected fetchApps() to fall back to embedded catalog when disk catalog/ is absent, got %d apps", len(avail))
 	}
 
@@ -978,12 +978,12 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 		t.Errorf("expected /library ZIM card to link to /read/zim/mini_wiki/ with target=\"_blank\"")
 	}
 
-	// 2. /a/kiwix/ redirects cleanly to /read/zim/ when Kiwix Docker app is absent and local ZIM exists
+	// 2. /a/kiwix/ redirects cleanly to /library
 	req = httptest.NewRequest(http.MethodGet, "/a/kiwix/", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/read/zim/" {
-		t.Errorf("expected /a/kiwix/ with local ZIMs to redirect 303 -> /read/zim/, got %d -> %s", w.Code, w.Header().Get("Location"))
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/library" {
+		t.Errorf("expected /a/kiwix/ to redirect 303 -> /library, got %d -> %s", w.Code, w.Header().Get("Location"))
 	}
 
 	// 3. /read/zim/mini_wiki/ opens the ZIM archive's built-in front page directly (302 -> /read/zim/mini_wiki/C/Main_Page)
@@ -1335,9 +1335,14 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/apps", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	for _, wantName := range []string{"ConvertX", "Data Chef", "Flatnotes", "Kiwix", "Kolibri", "AI Assistant"} {
+	for _, wantName := range []string{"ConvertX", "Data Chef", "Drug Labels", "Flatnotes", "Kolibri", "LibreTranslate", "Maps"} {
 		if !strings.Contains(w.Body.String(), wantName) {
 			t.Errorf("expected /apps to render literal app name %q", wantName)
+		}
+	}
+	for _, hiddenName := range []string{"AI Assistant", `data-id="kiwix"`} {
+		if strings.Contains(w.Body.String(), hiddenName) {
+			t.Errorf("expected /apps not to render removed app %q", hiddenName)
 		}
 	}
 
@@ -1995,5 +2000,68 @@ func TestAskMultiTurnContextAndBottomSpacer(t *testing.T) {
 	mux.ServeHTTP(cssW, cssReq)
 	if !strings.Contains(cssW.Body.String(), "#chat-messages::after") {
 		t.Errorf("expected /static/ark.css to include #chat-messages::after bottom spacer")
+	}
+}
+
+func TestSystemRuntimeZIMSearchAndAjaxDownloads(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, metadata TEXT, error TEXT, created_at DATETIME, updated_at DATETIME)`)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. /api/system/runtime returns Native Mode JSON cleanly when no container engine attached
+	req := httptest.NewRequest(http.MethodGet, "/api/system/runtime", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"label":"Native Mode"`) {
+		t.Errorf("expected Native Mode runtime JSON, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. /system omits removed "Live Host Telemetry" and "Live (2s SSE)" text
+	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	sysBody := w.Body.String()
+	for _, removed := range []string{"Live Host Telemetry", "Live (2s SSE)"} {
+		if strings.Contains(sysBody, removed) {
+			t.Errorf("expected /system not to contain %q", removed)
+		}
+	}
+
+	// 3. POST /api/jobs with Accept: application/json returns JSON {ok:true} without redirect
+	form := url.Values{
+		"type":       {"doc"},
+		"target":     {"https://example.com/guide.pdf"},
+		"size_bytes": {"1024"},
+		"ajax":       {"1"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"ok":true`) {
+		t.Errorf("expected JSON 200 ok:true for AJAX download, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 4. GET /api/zim/suggest responds cleanly
+	req = httptest.NewRequest(http.MethodGet, "/api/zim/suggest?stem=missing&q=water", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"hits":[]`) {
+		t.Errorf("expected JSON hits:[] on /api/zim/suggest, got %d: %s", w.Code, w.Body.String())
 	}
 }

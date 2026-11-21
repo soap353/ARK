@@ -246,7 +246,7 @@ func GetNomadCollections() []NomadCollection {
 					SizeLabel:   "3 GB",
 					Recommended: true,
 					Resources: []ContentResource{
-						zimRes("wikibooks_en_all_nopic", "Wikibooks", "Open-content textbooks across subjects (text-focused)", "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-01.zim", 3100),
+						zimRes("wikibooks_en_all_nopic", "Wikibooks", "Open-content textbooks across subjects (text-focused)", "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_nopic_2026-10.zim", 3100),
 					},
 				},
 				{

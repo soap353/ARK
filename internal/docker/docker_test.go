@@ -228,4 +228,9 @@ func TestPodmanRuntimeAndBundledExtraction(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "etc", "containers", "registries.conf")); err != nil {
 		t.Errorf("expected default registries.conf, got %v", err)
 	}
+
+	// Verify embedded images FS includes druglabels Dockerfile
+	if raw, err := os.ReadFile(filepath.Join("..", "..", "images", "druglabels", "Dockerfile")); err != nil || !strings.Contains(string(raw), "FROM golang") {
+		t.Errorf("expected druglabels Dockerfile in images/, got %v", err)
+	}
 }

@@ -101,6 +101,8 @@
     </div>
   </div>
 
+  <div id="ark-dl-toast-wrap" aria-live="polite"></div>
+
   <script>
     function toggleSidebar() {
       var sb = document.getElementById('ark-sidebar');
@@ -111,9 +113,137 @@
       }
     }
 
+    function arkShowDownloadToast(text) {
+      var wrap = document.getElementById('ark-dl-toast-wrap');
+      if (!wrap) return;
+      var badge = document.createElement('div');
+      badge.className = 'ark-dl-toast';
+      var dot = document.createElement('span');
+      dot.className = 'ark-dl-toast-dot';
+      var txt = document.createElement('span');
+      txt.textContent = text;
+      badge.appendChild(dot);
+      badge.appendChild(txt);
+      wrap.appendChild(badge);
+      setTimeout(function() {
+        badge.classList.add('ark-toast-exit');
+        setTimeout(function() {
+          if (badge.parentNode) badge.parentNode.removeChild(badge);
+        }, 300);
+      }, 4700);
+    }
+
+    var _arkSyncTimer = null;
+    function arkSyncDownloadButtons() {
+      var forms = document.querySelectorAll('form[action="/api/jobs"], form[action="/api/maps/extract"]');
+      if (!forms || forms.length === 0) return;
+      fetch('/api/jobs')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+          if (!data || !Array.isArray(data.jobs)) return;
+          var byTarget = {};
+          var hasActive = false;
+          for (var i = data.jobs.length - 1; i >= 0; i--) {
+            var j = data.jobs[i];
+            if (!j || !j.Target) continue;
+            byTarget[j.Target] = j.Status;
+            if (j.Status === 'pending' || j.Status === 'running') hasActive = true;
+          }
+          forms.forEach(function(form) {
+            if (form.querySelector('#url-input')) return;
+            var btn = form.querySelector('button[type="submit"]');
+            if (!btn) return;
+            var action = form.getAttribute('action') || '';
+            var tEl = action === '/api/maps/extract' ? form.querySelector('[name="slug"]') : form.querySelector('[name="target"]');
+            if (!tEl || !tEl.value) return;
+            var st = byTarget[tEl.value];
+            if (st === 'pending' || st === 'running') {
+              btn.textContent = 'Downloading...';
+              btn.disabled = true;
+              hasActive = true;
+            } else if (st === 'done') {
+              btn.textContent = 'Downloaded';
+              btn.classList.remove('btn-primary');
+              btn.disabled = false;
+            }
+          });
+          clearTimeout(_arkSyncTimer);
+          if (hasActive) {
+            _arkSyncTimer = setTimeout(arkSyncDownloadButtons, 2500);
+          }
+        })
+        .catch(function() {});
+    }
+
+    document.addEventListener('DOMContentLoaded', arkSyncDownloadButtons);
+
+    function arkSubmitDownloadAjax(form, action) {
+      var btn = form.querySelector('button[type="submit"]');
+      var origText = btn ? btn.textContent.trim() : 'Download';
+      var typeEl = form.querySelector('[name="type"]');
+      var targetEl = form.querySelector('[name="target"]');
+      var slugEl = form.querySelector('[name="slug"]');
+      var dlTarget = action === '/api/maps/extract' ? (slugEl ? slugEl.value : '') : (targetEl ? targetEl.value : '');
+      var itemLabel = form.getAttribute('data-dl-label') || '';
+      if (!itemLabel) {
+        var card = form.closest('.collection-card, tr, .archive-card');
+        var heading = card ? card.querySelector('h3, strong') : null;
+        if (heading && heading.textContent.trim()) {
+          itemLabel = heading.textContent.trim();
+        } else if (targetEl && targetEl.type !== 'hidden') {
+          itemLabel = dlTarget;
+        } else {
+          itemLabel = origText.replace(/^(Download|Re-download|Queue Download)\s*/i, '').trim() || dlTarget;
+        }
+      }
+
+      if (btn) {
+        btn.textContent = 'Downloading...';
+        btn.disabled = true;
+      }
+
+      var fd = new FormData(form);
+      fd.set('ajax', '1');
+      fetch(action, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams(fd).toString()
+      })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+          if (!res.ok || (res.data && res.data.status === 'insufficient')) {
+            alert((res.data && (res.data.message || res.data.error)) || 'Download failed.');
+            if (btn) {
+              btn.textContent = origText;
+              btn.disabled = false;
+            }
+            return;
+          }
+          arkShowDownloadToast('Downloading ' + itemLabel);
+          if (typeEl && targetEl && targetEl.type !== 'hidden') {
+            targetEl.value = '';
+            if (btn) {
+              btn.textContent = origText;
+              btn.disabled = false;
+            }
+          }
+          clearTimeout(_arkSyncTimer);
+          _arkSyncTimer = setTimeout(arkSyncDownloadButtons, 1500);
+        })
+        .catch(function() {
+          if (btn) {
+            btn.textContent = origText;
+            btn.disabled = false;
+          }
+        });
+    }
+
     document.addEventListener('submit', function(ev) {
       var form = ev.target;
-      if (!form || form.tagName !== 'FORM' || form.dataset.spaceConfirmed === '1') return;
+      if (!form || form.tagName !== 'FORM') return;
       var action = form.getAttribute('action') || '';
       if (action !== '/api/jobs' && action !== '/api/maps/extract') return;
 
@@ -134,31 +264,19 @@
       fetch(qs)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(res) {
-          if (!res || res.status === 'ok') {
-            form.dataset.spaceConfirmed = '1';
-            form.submit();
-            return;
-          }
-          if (res.status === 'insufficient') {
+          if (res && res.status === 'insufficient') {
             alert(res.message || 'Not enough free disk space for this download.');
             return;
           }
-          if (confirm((res.message || 'This download uses a large portion of your free disk space.') + '\n\nProceed with download anyway?')) {
-            var ci = form.querySelector('input[name="confirm_space"]');
-            if (!ci) {
-              ci = document.createElement('input');
-              ci.type = 'hidden';
-              ci.name = 'confirm_space';
-              form.appendChild(ci);
+          if (res && res.status === 'warn') {
+            if (!confirm((res.message || 'This download uses a large portion of your free disk space.') + '\n\nProceed with download anyway?')) {
+              return;
             }
-            ci.value = '1';
-            form.dataset.spaceConfirmed = '1';
-            form.submit();
           }
+          arkSubmitDownloadAjax(form, action);
         })
         .catch(function() {
-          form.dataset.spaceConfirmed = '1';
-          form.submit();
+          arkSubmitDownloadAjax(form, action);
         });
     });
   </script>

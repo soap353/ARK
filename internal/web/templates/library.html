@@ -44,22 +44,30 @@
   {{ if .Items }}
     <div class="library-grid">
       {{ range .Items }}
-      <a
-        href="{{ .OpenURL }}"
-        target="_blank"
-        rel="noopener noreferrer"
+      <div
         class="library-tile"
+        style="flex-direction: column; align-items: stretch; gap: 0.65rem;"
         data-title="{{ .Title }}"
         data-file="{{ .FileName }}"
         data-rel="{{ .RelPath }}"
         data-open="{{ .OpenURL }}">
-        <img src="{{ .IconURL }}" alt="" class="library-tile-icon" loading="lazy">
-        <div style="min-width: 0; flex: 1;">
-          <div style="font-weight: 700; font-size: 15px; line-height: 1.3; word-break: break-word;">{{ .Title }}</div>
-          <div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.3rem;">{{ .Category }} &bull; {{ .Size }}</div>
-          <div class="secondary-text tabular" style="font-size: 11px; margin-top: 0.1rem;">{{ .Date }}</div>
-        </div>
-      </a>
+        <a href="{{ .OpenURL }}" target="_blank" rel="noopener noreferrer" style="display: flex; gap: 0.75rem; align-items: flex-start; text-decoration: none; color: inherit;">
+          <img src="{{ .IconURL }}" alt="" class="library-tile-icon" loading="lazy">
+          <div style="min-width: 0; flex: 1;">
+            <div style="font-weight: 700; font-size: 15px; line-height: 1.3; word-break: break-word;">{{ .Title }}</div>
+            {{ if .Description }}
+            <div class="secondary-text" style="font-size: 12.5px; line-height: 1.35; margin-top: 0.25rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">{{ .Description }}</div>
+            {{ end }}
+            <div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.3rem;">{{ .Category }} &bull; {{ .Size }} &bull; {{ .Date }}</div>
+          </div>
+        </a>
+        {{ if .Stem }}
+        <form action="/read/zim/{{ .Stem }}/" method="GET" target="_blank" style="display: flex; gap: 0.4rem; margin: 0; padding-top: 0.35rem; border-top: 1px solid var(--color-border);">
+          <input type="search" name="q" placeholder="Search inside book..." class="form-control" style="flex: 1; min-height: 30px; padding: 0.2rem 0.55rem; font-size: 12.5px;" required>
+          <button type="submit" class="btn" style="min-height: 30px; padding: 0.15rem 0.65rem; font-size: 12.5px;">Search</button>
+        </form>
+        {{ end }}
+      </div>
       {{ end }}
     </div>
   {{ else }}

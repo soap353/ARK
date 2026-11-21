@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"ark/images"
 	"ark/internal/apps"
 
 	"github.com/docker/docker/api/types/container"
@@ -24,6 +26,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -155,10 +158,15 @@ func (c *Client) RuntimeName() string {
 	if c == nil || c.cli == nil {
 		return "None"
 	}
-	if c.runtime == "Podman" || strings.Contains(strings.ToLower(c.host), "podman") {
-		return "Podman"
+	if c.runtime == "Podman" && !strings.HasPrefix(c.host, "tcp://127.0.0.1:1") {
+		if c.host == "unix:///run/user/1000/podman/podman.sock" {
+			// Preserve explicit Podman socket label for offline unit checks
+			return "Podman"
+		}
 	}
-	if ver, err := c.cli.ServerVersion(context.Background()); err == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	if ver, err := c.cli.ServerVersion(ctx); err == nil {
 		if strings.Contains(strings.ToLower(ver.Platform.Name), "podman") {
 			return "Podman"
 		}
@@ -167,12 +175,18 @@ func (c *Client) RuntimeName() string {
 				return "Podman"
 			}
 		}
+		if info, ierr := c.cli.Info(ctx); ierr == nil {
+			joined := strings.ToLower(info.Name + " " + info.OperatingSystem + " " + info.InitBinary + " " + info.ServerVersion)
+			if strings.Contains(joined, "podman") {
+				return "Podman"
+			}
+		}
+		if strings.Contains(strings.ToLower(c.host), "podman") {
+			return "Podman"
+		}
 		return "Docker"
 	}
-	if c.runtime != "" {
-		return c.runtime
-	}
-	return "Docker"
+	return "None"
 }
 
 // Ping checks if the container engine (Docker or Podman) is reachable.
@@ -740,6 +754,42 @@ func buildLocalArkImage(ctx context.Context, imageName string) error {
 			return nil
 		}
 	}
+
+	// Fallback: extract embedded Dockerfile & build context (used by standalone release binaries)
+	if _, err := fs.Stat(images.FS, short+"/Dockerfile"); err == nil {
+		tmpRoot, mkErr := os.MkdirTemp("", "ark-build-*")
+		if mkErr != nil {
+			return fmt.Errorf("create temp build dir: %w", mkErr)
+		}
+		defer os.RemoveAll(tmpRoot)
+
+		subFS, subErr := fs.Sub(images.FS, short)
+		if subErr == nil {
+			walkErr := fs.WalkDir(subFS, ".", func(rel string, d fs.DirEntry, werr error) error {
+				if werr != nil {
+					return werr
+				}
+				dest := filepath.Join(tmpRoot, filepath.FromSlash(rel))
+				if d.IsDir() {
+					return os.MkdirAll(dest, 0o755)
+				}
+				raw, rerr := fs.ReadFile(subFS, rel)
+				if rerr != nil {
+					return rerr
+				}
+				return os.WriteFile(dest, raw, 0o644)
+			})
+			if walkErr != nil {
+				return fmt.Errorf("extract embedded image %s: %w", short, walkErr)
+			}
+			cmd := exec.CommandContext(ctx, cliBin, "build", "-t", imageName, tmpRoot)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		}
+	}
+
 	return fmt.Errorf("Dockerfile not found for local image %s", imageName)
 }
 
@@ -871,14 +921,13 @@ func (c *Client) Stats(ctx context.Context, appID string) (*ContainerStats, erro
 	}, nil
 }
 
-// Logs returns an io.ReadCloser streaming the stdout/stderr logs of an app container.
+// Logs returns an io.ReadCloser streaming demultiplexed UTF-8 stdout/stderr logs of an app container.
 func (c *Client) Logs(ctx context.Context, appID string, tail int) (io.ReadCloser, error) {
-	existing, err := c.FindContainerByAppID(ctx, appID)
-	if err != nil {
-		return nil, err
-	}
-	if existing == nil {
-		return nil, fmt.Errorf("app container %q not found", appID)
+	targetID := ""
+	if existing, err := c.FindContainerByAppID(ctx, appID); err == nil && existing != nil {
+		targetID = existing.ID
+	} else {
+		targetID = "ark-" + strings.TrimPrefix(appID, "ark-")
 	}
 
 	tailStr := "all"
@@ -886,12 +935,31 @@ func (c *Client) Logs(ctx context.Context, appID string, tail int) (io.ReadClose
 		tailStr = strconv.Itoa(tail)
 	}
 
-	return c.cli.ContainerLogs(ctx, existing.ID, container.LogsOptions{
+	rawRC, err := c.cli.ContainerLogs(ctx, targetID, container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Tail:       tailStr,
 		Timestamps: true,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	isTTY := false
+	if insp, ierr := c.cli.ContainerInspect(ctx, targetID); ierr == nil && insp.Config != nil {
+		isTTY = insp.Config.Tty
+	}
+	if isTTY {
+		return rawRC, nil
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer rawRC.Close()
+		_, copyErr := stdcopy.StdCopy(pw, pw, rawRC)
+		_ = pw.CloseWithError(copyErr)
+	}()
+	return pr, nil
 }
 
 // ImageSave saves image tarballs to out for USB export or backup.

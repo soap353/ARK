@@ -10,7 +10,7 @@
       <h2 style="margin: 0;">Wikipedia</h2>
       <span class="secondary-text" style="font-size: 14px;">Select a Wikipedia offline package tier, or grab the all-in-one Starter Pack.</span>
     </div>
-    <form action="/api/jobs" method="POST" style="margin: 0;">
+    <form action="/api/jobs" method="POST" data-dl-label="Prepper Starter Pack" style="margin: 0;">
       <input type="hidden" name="type" value="preset">
       <input type="hidden" name="target" value="starter_pack">
       <button type="submit" class="btn btn-primary" style="min-height: 40px; padding: 0.35rem 1rem; font-size: 15px;">Download Prepper Starter Pack (~27 GB)</button>
@@ -31,11 +31,11 @@
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--color-border);">
         <span class="badge">{{ .SizeLabel }}</span>
-        <form action="/api/jobs" method="POST" style="margin: 0;">
+        <form action="/api/jobs" method="POST" data-dl-label="{{ .Name }}" style="margin: 0;">
           <input type="hidden" name="type" value="preset">
           <input type="hidden" name="target" value="{{ .PresetTarget }}">
           <button type="submit" class="btn {{ if not .Installed }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
-            {{ if .Installed }}Re-download{{ else }}Download{{ end }}
+            {{ if .Installed }}Downloaded{{ else }}Download{{ end }}
           </button>
         </form>
       </div>
@@ -285,7 +285,12 @@ function selectCollectionTier(slug, btn) {
     return '<li style="margin-bottom:0.2rem;">' + escapeHTML(t) + '</li>';
   }).join('');
   document.getElementById('tier-target-' + slug).value = tierSlug;
-  document.getElementById('tier-btn-' + slug).textContent = 'Download ' + colTitle + ' (' + tierName + ')';
+  var tBtn = document.getElementById('tier-btn-' + slug);
+  tBtn.textContent = 'Download ' + colTitle + ' (' + tierName + ')';
+  tBtn.classList.add('btn-primary');
+  tBtn.disabled = false;
+  if (tBtn.closest('form')) tBtn.closest('form').setAttribute('data-dl-label', colTitle + ' (' + tierName + ')');
+  if (typeof arkSyncDownloadButtons === 'function') arkSyncDownloadButtons();
 }
 
 function escapeHTML(str) {
@@ -322,7 +327,7 @@ function searchKiwixCatalog() {
       statusEl.textContent = 'Showing ' + items.length + (data.total ? ' of ' + data.total : '') + ' entries from library.kiwix.org';
       tbodyEl.innerHTML = items.map(function(item) {
         var metaBadge = '<span class="badge">' + escapeHTML(item.category || 'other') + '</span> <span class="badge">' + escapeHTML(item.language || '') + '</span>' + (item.flavour ? ' <span class="badge">' + escapeHTML(item.flavour) + '</span>' : '');
-        var btnLabel = item.installed ? 'Re-download' : 'Download ZIM';
+        var btnLabel = item.installed ? 'Downloaded' : 'Download ZIM';
         var btnClass = item.installed ? 'btn' : 'btn btn-primary';
         var installedTag = item.installed ? ' <span class="badge badge-success">Installed</span>' : '';
         return '<tr>' +
@@ -330,14 +335,16 @@ function searchKiwixCatalog() {
           '<td>' + metaBadge + '</td>' +
           '<td style="white-space:nowrap;">' + escapeHTML(item.size_text) + '</td>' +
           '<td class="secondary-text" style="white-space:nowrap;">' + escapeHTML(item.updated || '-') + '</td>' +
-          '<td><form action="/api/jobs" method="POST" style="margin:0;">' +
+          '<td><form action="/api/jobs" method="POST" data-dl-label="' + escapeHTML(item.title) + '" style="margin:0;">' +
             '<input type="hidden" name="type" value="kiwix_zim">' +
             '<input type="hidden" name="target" value="' + escapeHTML(item.download_url) + '">' +
+            '<input type="hidden" name="size_bytes" value="' + (item.size_bytes || 0) + '">' +
             '<button type="submit" class="' + btnClass + '" style="min-height:34px; padding:0.2rem 0.75rem; font-size:13px; white-space:nowrap;">' + btnLabel + '</button>' +
           '</form></td>' +
         '</tr>';
       }).join('');
       wrapEl.style.display = 'block';
+      if (typeof arkSyncDownloadButtons === 'function') arkSyncDownloadButtons();
     })
     .catch(function(err) {
       statusEl.textContent = 'Could not load Kiwix Library catalog: ' + err.message;

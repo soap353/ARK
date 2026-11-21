@@ -50,6 +50,9 @@ type zimArchive struct {
 	clusters    []cachedZIMCluster
 	titles      []zimTitleRecord
 	titlesBuilt bool
+	metaLoaded  bool
+	metaTitle   string
+	metaDesc    string
 }
 
 var (
@@ -340,13 +343,96 @@ func (a *zimArchive) readBlob(f *os.File, clusterNum, blobNum uint32) ([]byte, e
 	return blobs[blobNum], nil
 }
 
+func (a *zimArchive) readTitleEntryIdx(f *os.File, titlePosIdx uint32) (uint32, error) {
+	if titlePosIdx >= a.hdr.ArticleCount || a.hdr.TitlePtrPos == 0 {
+		return 0, fmt.Errorf("title index out of range")
+	}
+	var buf [4]byte
+	if _, err := f.ReadAt(buf[:], int64(a.hdr.TitlePtrPos)+int64(titlePosIdx)*4); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf[:]), nil
+}
+
+func (a *zimArchive) readMetaEntryBytes(f *os.File, key string) ([]byte, string) {
+	e, ok := a.findEntry(f, 'M', key)
+	if !ok {
+		return nil, ""
+	}
+	if e.mimeID == 0xffff {
+		t, rerr := a.followRedirects(f, e)
+		if rerr != nil {
+			return nil, ""
+		}
+		e = t
+	}
+	if e.mimeID >= 0xfffd {
+		return nil, ""
+	}
+	blob, err := a.readBlob(f, e.clusterNum, e.blobNum)
+	if err != nil || len(blob) == 0 {
+		return nil, ""
+	}
+	mt := ""
+	if int(e.mimeID) < len(a.mimes) {
+		mt = a.mimes[e.mimeID]
+	}
+	return blob, mt
+}
+
+func (a *zimArchive) metadata() (title, desc string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.metaLoaded {
+		return a.metaTitle, a.metaDesc
+	}
+	a.metaLoaded = true
+	if f, err := os.Open(a.path); err == nil {
+		defer f.Close()
+		if raw, _ := a.readMetaEntryBytes(f, "Title"); len(raw) > 0 {
+			a.metaTitle = strings.TrimSpace(string(raw))
+		}
+		if raw, _ := a.readMetaEntryBytes(f, "Description"); len(raw) > 0 {
+			a.metaDesc = strings.TrimSpace(string(raw))
+		}
+	}
+	return a.metaTitle, a.metaDesc
+}
+
+func (a *zimArchive) embeddedIcon() ([]byte, string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	f, err := os.Open(a.path)
+	if err != nil {
+		return nil, ""
+	}
+	defer f.Close()
+	for _, key := range []string{"Illustration_48x48@1", "Illustration_96x96@1", "favicon"} {
+		if raw, mt := a.readMetaEntryBytes(f, key); len(raw) > 0 {
+			if mt == "" {
+				mt = http.DetectContentType(raw)
+			}
+			return raw, mt
+		}
+	}
+	return nil, ""
+}
+
 func (a *zimArchive) searchTitles(query string, limit int) []zimTitleRecord {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return nil
 	}
+	terms := strings.Fields(q)
+	if len(terms) == 0 {
+		return nil
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	if a.hdr.ArticleCount > 40000 && a.hdr.TitlePtrPos > 0 {
+		return a.searchLargeZIMByTitlePtr(q, terms, limit)
+	}
 
 	if !a.titlesBuilt && a.hdr.ArticleCount > 0 {
 		if f, err := os.Open(a.path); err == nil {
@@ -421,23 +507,140 @@ func (a *zimArchive) searchTitles(query string, limit int) []zimTitleRecord {
 		a.titlesBuilt = true
 	}
 
-	var prefixMatches, subMatches []zimTitleRecord
-	for _, rec := range a.titles {
+	return rankZIMTitleMatches(a.titles, q, terms, limit)
+}
+
+func rankZIMTitleMatches(candidates []zimTitleRecord, q string, terms []string, limit int) []zimTitleRecord {
+	var exact, prefix, wordMatch []zimTitleRecord
+	for _, rec := range candidates {
 		low := strings.ToLower(rec.title)
-		if strings.HasPrefix(low, q) {
-			prefixMatches = append(prefixMatches, rec)
-			if len(prefixMatches) >= limit {
+		matchedAll := true
+		for _, t := range terms {
+			if !strings.Contains(low, t) {
+				matchedAll = false
 				break
 			}
-		} else if len(subMatches) < limit && strings.Contains(low, q) {
-			subMatches = append(subMatches, rec)
+		}
+		if !matchedAll {
+			continue
+		}
+		if low == q {
+			exact = append(exact, rec)
+		} else if strings.HasPrefix(low, q) {
+			prefix = append(prefix, rec)
+		} else if len(wordMatch) < limit {
+			wordMatch = append(wordMatch, rec)
+		}
+		if len(exact)+len(prefix) >= limit {
+			break
 		}
 	}
-	out := append(prefixMatches, subMatches...)
+	out := make([]zimTitleRecord, 0, limit)
+	out = append(out, exact...)
+	out = append(out, prefix...)
+	out = append(out, wordMatch...)
 	if len(out) > limit {
 		out = out[:limit]
 	}
 	return out
+}
+
+// searchLargeZIMByTitlePtr uses O(log N) binary search over TitlePtrPos so multi-million-entry
+// ZIM files (Wikipedia full/nopic) return ranked prefix & multi-term matches in milliseconds with ~0 RAM.
+func (a *zimArchive) searchLargeZIMByTitlePtr(q string, terms []string, limit int) []zimTitleRecord {
+	f, err := os.Open(a.path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	n := int(a.hdr.ArticleCount)
+	wantNS := byte('C')
+	if a.hdr.MajorVersion < 6 {
+		wantNS = 'A'
+	}
+
+	probeSeeds := []string{q}
+	if len(terms) > 0 && terms[0] != q {
+		probeSeeds = append(probeSeeds, terms[0])
+	}
+	var probes []string
+	seenProbe := make(map[string]bool)
+	addProbe := func(s string) {
+		if s != "" && !seenProbe[s] {
+			seenProbe[s] = true
+			probes = append(probes, s)
+		}
+	}
+	for _, s := range probeSeeds {
+		addProbe(s)
+		addProbe(strings.ToUpper(s[:1]) + s[1:])
+		addProbe(strings.ToUpper(s))
+	}
+
+	seenURL := make(map[string]bool)
+	var collected []zimTitleRecord
+	addEntry := func(e zimResolvedEntry) {
+		if e.ns != wantNS || e.mimeID >= 0xfffd {
+			return
+		}
+		if int(e.mimeID) >= len(a.mimes) || !strings.HasPrefix(strings.ToLower(a.mimes[e.mimeID]), "text/html") {
+			return
+		}
+		key := string(e.ns) + ":" + e.url
+		if seenURL[key] {
+			return
+		}
+		low := strings.ToLower(e.title)
+		for _, t := range terms {
+			if !strings.Contains(low, t) {
+				return
+			}
+		}
+		seenURL[key] = true
+		collected = append(collected, zimTitleRecord{ns: e.ns, url: e.url, title: e.title})
+	}
+
+	for _, p := range probes {
+		if len(collected) >= limit*4 {
+			break
+		}
+		pos := sort.Search(n, func(i int) bool {
+			urlIdx, err := a.readTitleEntryIdx(f, uint32(i))
+			if err != nil {
+				return false
+			}
+			e, err := a.readEntryAt(f, urlIdx)
+			if err != nil {
+				return false
+			}
+			if e.ns != wantNS {
+				return e.ns > wantNS
+			}
+			return e.title >= p
+		})
+		start := pos - 120
+		if start < 0 {
+			start = 0
+		}
+		end := pos + 1800
+		if end > n {
+			end = n
+		}
+		for i := start; i < end && len(collected) < limit*4; i++ {
+			urlIdx, err := a.readTitleEntryIdx(f, uint32(i))
+			if err != nil {
+				continue
+			}
+			e, err := a.readEntryAt(f, urlIdx)
+			if err != nil || e.ns != wantNS {
+				continue
+			}
+			addEntry(e)
+		}
+	}
+
+	return rankZIMTitleMatches(collected, q, terms, limit)
 }
 
 func (a *zimArchive) resolveFrontPageEntry(f *os.File) (zimResolvedEntry, bool) {
@@ -671,7 +874,11 @@ func (s *Server) isZIMIndexed(zimPath string) bool {
 func (s *Server) renderZIMStartPage(w http.ResponseWriter, stem, zimPath string, arc *zimArchive) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	escStem := url.PathEscape(stem)
-	displayTitle := strings.ReplaceAll(stem, "_", " ")
+	displayTitle, metaDesc := arc.metadata()
+	if displayTitle == "" {
+		displayTitle = strings.ReplaceAll(stem, "_", " ")
+	}
+	_ = metaDesc
 	iconURL := "/api/library/icon?file=" + url.QueryEscape(stem+".zim") + "&cat=ZIM"
 	aiBadge := ""
 	if s.isZIMIndexed(zimPath) {
@@ -1266,7 +1473,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<a id="ark-ask-link" href="/ask" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Ask AI</a>` +
 		`<label style="display:inline-flex;align-items:center;gap:5px;color:#C9DAD1;font-size:12px;margin-left:auto;white-space:nowrap;">Theme <select id="ark-theme-sel" onchange="window.arkSetZIMTheme&&window.arkSetZIMTheme(this.value,true)" style="background:#12201A;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;"><option value="forest">Forest</option><option value="light">Light</option><option value="sepia">Sepia</option><option value="dark">Dark</option><option value="default">Original</option></select></label>` +
 		`<form action="/read/zim/` + escStem + `/" method="GET" style="display:flex;gap:6px;margin:0;">` +
-		`<input type="search" name="q" placeholder="Search ` + html.EscapeString(stem) + `..." style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required>` +
+		`<input type="search" name="q" list="ark-zim-suggest-list" placeholder="Search ` + html.EscapeString(stem) + `..." oninput="clearTimeout(window._azt);window._azt=setTimeout(()=>{var v=this.value.trim();if(v.length<2)return;fetch('/api/zim/suggest?stem=` + escStem + `&q='+encodeURIComponent(v)).then(r=>r.json()).then(d=>{var dl=document.getElementById('ark-zim-suggest-list');if(!dl)return;dl.innerHTML='';(d.hits||[]).forEach(h=>{var o=document.createElement('option');o.value=h.title;dl.appendChild(o);});}).catch(()=>{});},180)" style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required><datalist id="ark-zim-suggest-list"></datalist>` +
 		`<button type="submit" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;">Search</button>` +
 		`</form>` +
 		`<a id="ark-download-html" href="?download=1" onclick="var u=new URL(location.href);u.searchParams.set('download','1');this.href=u.toString();" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">&#8595; Download HTML</a>` +

@@ -52,11 +52,13 @@ type LibraryItemView struct {
 	Title    string
 	FileName string
 	RelPath  string
-	Category string
-	Size     string
-	Date     string
-	OpenURL  string
-	IconURL  string
+	Category    string
+	Description string
+	Stem        string
+	Size        string
+	Date        string
+	OpenURL     string
+	IconURL     string
 }
 
 // AppView represents an application module in the catalog or installed
@@ -228,8 +230,8 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 	}
 
 	if db != nil {
-		// Ensure removed qdrant catalog module is purged from app_states
-		_, _ = db.Exec(`DELETE FROM app_states WHERE id = 'qdrant'`)
+		// Ensure removed catalog modules (qdrant, ollama, kiwix) are purged from app_states
+		_, _ = db.Exec(`DELETE FROM app_states WHERE id IN ('qdrant', 'ollama', 'kiwix')`)
 	}
 
 	s := &Server{
@@ -258,7 +260,7 @@ func (s *Server) seedDefaultApps() {
 		manifests, _ = apps.LoadAllManifestsFS(catalog.FS)
 	}
 	for _, m := range manifests {
-		if m.ID == "qdrant" {
+		if m.ID == "qdrant" || m.ID == "ollama" || m.ID == "kiwix" {
 			continue
 		}
 		_, _ = s.db.Exec(`
@@ -358,8 +360,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/custom", s.handleAPICustomAppSave)
 	mux.HandleFunc("/api/apps/update", s.handleAPIAppUpdateImage)
 	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
+	mux.HandleFunc("/api/system/runtime", s.handleAPISystemRuntime)
 	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
 	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
+	mux.HandleFunc("/api/zim/suggest", s.handleAPIZIMSuggest)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
 	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
@@ -390,10 +394,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 				return
 			}
 			if r.URL.Path == "/a/kiwix" || strings.HasPrefix(r.URL.Path, "/a/kiwix/") {
-				if _, ok := s.proxy.GetRoute("kiwix"); !ok && s.hasLocalZIMFiles() {
-					http.Redirect(w, r, "/read/zim/", http.StatusSeeOther)
-					return
-				}
+				http.Redirect(w, r, "/library", http.StatusSeeOther)
+				return
 			}
 			s.proxy.ServeHTTP(w, r)
 		}))
@@ -640,6 +642,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		jobsList := s.fetchRecentSessionJobs(50)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "jobs": jobsList})
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
@@ -739,6 +746,16 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Database error", http.StatusInternalServerError)
 			return
 		}
+	}
+
+	if strings.Contains(r.Header.Get("Accept"), "application/json") || r.FormValue("ajax") == "1" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"job_id": jobID,
+			"target": target,
+			"status": "pending",
+		})
+		return
 	}
 
 	redirect := sanitizeLocalRedirect(r.FormValue("redirect"))
@@ -1240,7 +1257,7 @@ func (s *Server) fetchApps() ([]AppView, []AppView) {
 	var available []AppView
 
 	for _, m := range manifests {
-		if m.ID == "qdrant" {
+		if m.ID == "qdrant" || m.ID == "ollama" || m.ID == "kiwix" {
 			continue
 		}
 		state, found := installedMap[m.ID]
