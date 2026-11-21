@@ -2273,7 +2273,7 @@ func TestZIMSearchRedirectsPaginationAndTOC(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body := w.Body.String()
-	for _, want := range []string{`id="ark-toc-toggle"`, `id="ark-toc-panel"`, `data-stem="wiki_test"`, `ark_zim_toc_open_`, `display:none`} {
+	for _, want := range []string{`id="ark-toc-toggle"`, `id="ark-toc-panel"`, `data-stem="wiki_test"`, `ark_zim_toc_open_`, `translateX(-100%)`} {
 		if w.Code != http.StatusOK || !strings.Contains(body, want) {
 			t.Errorf("expected ZIM page HTML to contain %q, status=%d", want, w.Code)
 		}

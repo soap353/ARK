@@ -1528,7 +1528,7 @@ func arkThemeHeadTag() string {
 	return `<meta charset="utf-8"><style id="ark-reader-base">
 .ark-ai-highlight { background: #FDE047 !important; color: #1B2E26 !important; padding: 1px 4px; border-radius: 3px; outline: 2px solid #C25E28; }
 .ark-ai-highlight-block { background: rgba(253, 224, 71, 0.25) !important; border-left: 4px solid #C25E28 !important; padding: 4px 8px !important; border-radius: 4px; }
-html { scroll-padding-top: 54px !important; }
+html { scroll-padding-top: 54px !important; transition: padding-left 0.22s cubic-bezier(0.22, 1, 0.36, 1) !important; }
 html body { padding-top: 46px !important; }
 #container { top: 46px !important; height: calc(100% - 46px) !important; }
 .item figcaption, .item figcaption * { color: #FFFFFF !important; text-shadow: 0 1px 3px rgba(0,0,0,0.85) !important; }
@@ -1537,7 +1537,8 @@ html body { padding-top: 46px !important; }
 #ark-page-pager a, #ark-page-pager a * { color: #F5F2EB !important; }
 #ark-proxy-nav input, #ark-proxy-nav select { background-color: #12201A !important; color: #F5F2EB !important; caret-color: #F5F2EB !important; border-color: #436153 !important; -webkit-text-fill-color: #F5F2EB !important; }
 #ark-proxy-nav input::placeholder { color: #A9BEB3 !important; opacity: 1 !important; -webkit-text-fill-color: #A9BEB3 !important; }
-#ark-toc-panel { position: fixed !important; top: 46px !important; left: 0 !important; bottom: 0 !important; width: 290px !important; max-width: 85vw !important; box-sizing: border-box !important; z-index: 2147483646 !important; background: #16261F !important; color: #F5F2EB !important; border-right: 1px solid #2A4338 !important; box-shadow: 4px 0 18px rgba(0,0,0,.28) !important; flex-direction: column !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; font-size: 13px !important; line-height: 1.4 !important; margin: 0 !important; padding: 0 !important; text-align: left !important; }
+#ark-toc-panel { position: fixed !important; top: 46px !important; left: 0 !important; bottom: 0 !important; width: 290px !important; max-width: 85vw !important; box-sizing: border-box !important; z-index: 2147483646 !important; background: #16261F !important; color: #F5F2EB !important; border-right: 1px solid #2A4338 !important; box-shadow: 4px 0 18px rgba(0,0,0,.28) !important; display: flex !important; flex-direction: column !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; font-size: 13px !important; line-height: 1.4 !important; margin: 0 !important; padding: 0 !important; text-align: left !important; transform: translateX(-100%); visibility: hidden; pointer-events: none; transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.22s ease !important; will-change: transform; }
+#ark-toc-panel.ark-toc-open { transform: translateX(0) !important; visibility: visible !important; pointer-events: auto !important; }
 #ark-toc-panel * { box-sizing: border-box !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
 #ark-toc-panel #ark-toc-head, #ark-toc-panel #ark-toc-search-wrap { flex: 0 0 auto !important; }
 #ark-toc-panel #ark-toc-title { font-size: 13px !important; font-weight: 700 !important; color: #F5F2EB !important; line-height: 1.3 !important; margin: 0 !important; }
@@ -1912,11 +1913,15 @@ func arkThemeScriptTag(initialTheme string) string {
     var origHtmlPadLeft = document.documentElement.style.paddingLeft || '';
 
     function isOpen() {
-      return panel.style.display === 'flex';
+      return panel.classList.contains('ark-toc-open');
     }
 
     function applyOpenState(open, persist) {
-      panel.style.display = open ? 'flex' : 'none';
+      if (open) {
+        panel.classList.add('ark-toc-open');
+      } else {
+        panel.classList.remove('ark-toc-open');
+      }
       toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggleBtn.style.background = open ? '#C25E28' : '#2A4338';
       if (open && window.innerWidth >= 900) {
@@ -2068,7 +2073,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<a id="ark-download-html" href="?download=1" onclick="var u=new URL(location.href);u.searchParams.set('download','1');this.href=u.toString();" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">&#8595; Download HTML</a>` +
 		addBtn +
 		`</nav>` +
-		`<aside id="ark-toc-panel" data-stem="` + safeStemAttr + `" style="position:fixed;top:46px;left:0;bottom:0;width:290px;max-width:85vw;box-sizing:border-box;z-index:2147483646;background:#16261F;color:#F5F2EB;border-right:1px solid #2A4338;box-shadow:4px 0 18px rgba(0,0,0,.28);display:none;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">` +
+		`<aside id="ark-toc-panel" data-stem="` + safeStemAttr + `" style="position:fixed;top:46px;left:0;bottom:0;width:290px;max-width:85vw;box-sizing:border-box;z-index:2147483646;background:#16261F;color:#F5F2EB;border-right:1px solid #2A4338;box-shadow:4px 0 18px rgba(0,0,0,.28);display:flex;flex-direction:column;transform:translateX(-100%);visibility:hidden;pointer-events:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">` +
 		`<div id="ark-toc-head" style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #2A4338;">` +
 		`<div style="min-width:0;"><div id="ark-toc-title" style="font-size:13px;font-weight:700;color:#F5F2EB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Table of Contents</div><div id="ark-toc-count" style="font-size:11px;color:#9BB5A8;">Collapsed</div></div>` +
 		`<button id="ark-toc-close" type="button" title="Collapse" style="background:transparent;color:#C9DAD1;border:1px solid #436153;border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;">&times;</button>` +
