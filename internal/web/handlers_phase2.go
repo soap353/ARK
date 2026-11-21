@@ -895,6 +895,7 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #13: Scoped & federated retrieval (#1 ZIMs, #2 Remedy, #3 Drug Labels, #4 Indexed notes/docs)
+	// Skip local retrieval/tools when the query is purely conversational, creative, or doesn't need external sources.
 	ragQuery := q
 	if len(historyMsgs) > 0 {
 		for i := len(historyMsgs) - 1; i >= 0; i-- {
@@ -904,7 +905,9 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if scope != "attached" {
+	calcRes := evalAskMathTool(q)
+	needKnowledge := queryNeedsLocalKnowledge(q, scope, triageType, preZIM, sourcesOnly, calcRes != "")
+	if needKnowledge && scope != "attached" {
 		if scope == "all" || scope == "notes" || scope == "zim" {
 			hits, _ := ai.SearchKnowledge(r.Context(), s.db, conn, qdrant, ai.DefaultCollection, ragQuery, 3)
 			for _, h := range hits {
@@ -945,8 +948,8 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 			extraToolCtx.WriteByte('\n')
 		}
 	}
-	if calc := evalAskMathTool(q); calc != "" {
-		extraToolCtx.WriteString(calc)
+	if calcRes != "" {
+		extraToolCtx.WriteString(calcRes)
 		extraToolCtx.WriteByte('\n')
 	}
 
@@ -1001,8 +1004,9 @@ func (s *Server) handleAPIAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemPrompt := `You are Ark AI, a focused offline reference assistant. Stay strictly on the user's question, ignore unrelated context snippets, and give concise direct answers (2-4 short sentences or brief bullets).
+	systemPrompt := `You are Ark AI, a helpful offline assistant. Stay focused on the user's question, ignore any unrelated context snippets, and give concise direct answers.
 Maintain multi-turn conversation continuity: use the prior conversation history to answer follow-up questions, resolve pronouns (it, that, they, this), and remember facts established in earlier turns of this chat.
+Tools and retrieved local sources are optional: if the query is conversational (greetings, thanks, casual chat), creative, coding/general reasoning, or does not require looking up local archives, maps, or tools, answer directly without using or mentioning any tools and return "references": [] and "map_actions": [].
 Respond ONLY with a valid JSON object matching this exact schema:
 {
   "title": "1 to 4 word title based strictly on the user's query",
@@ -1014,7 +1018,7 @@ Respond ONLY with a valid JSON object matching this exact schema:
     {"title": "Location name", "lat": 40.0, "lng": -74.5, "category": "waypoint", "note": "optional note"}
   ]
 }
-Only list sources in "references" that you actually used to answer the question. If no retrieved context source was relevant or used, return "references": [] and do not list any sources. Only include "map_actions" when discussing specific coordinates or saved waypoints.`
+Only list sources in "references" when retrieved Context sources were provided and actually used to answer the question; otherwise return "references": []. Only include "map_actions" when discussing specific coordinates or saved waypoints.`
 	if sourcesOnly {
 		systemPrompt += "\nSTRICT MODE ENABLED: Answer ONLY from the provided Context sources, attachments, or calculated values. Do NOT use outside memory or speculate. If the context does not contain the answer, say so clearly."
 	}

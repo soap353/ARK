@@ -986,7 +986,7 @@ loop:
 						eta = int(float64(totalBytes-dl) / rate)
 					}
 				}
-				progress(pct, fmt.Sprintf("%s (%dx turbo, %d mirror(s)): %.1f / %.1f MB (%.1f MB/s)", fileName, workers, len(mirrors), float64(dl)/(1024*1024), float64(totalBytes)/(1024*1024), rateMBs), dl, totalBytes, eta)
+				progress(pct, fmt.Sprintf("%s: %.1f / %.1f MB (%.1f MB/s)", fileName, float64(dl)/(1024*1024), float64(totalBytes)/(1024*1024), rateMBs), dl, totalBytes, eta)
 			}
 		}
 	}

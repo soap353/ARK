@@ -678,3 +678,43 @@ func estimatePromptTokens(systemPrompt string, history []ai.Msg, userPrompt stri
 	}
 	return (totalChars + 3) / 4
 }
+
+func stripChatPunct(s string) string {
+	return strings.TrimSpace(strings.Trim(s, " \t\r\n.,!?\"'`:;"))
+}
+
+// queryNeedsLocalKnowledge returns false when a query can be answered directly without querying
+// local archives/databases (greetings, conversational follow-ups, creative writing, pure math).
+func queryNeedsLocalKnowledge(q, scope, triageType, preZIM string, sourcesOnly, hasCalc bool) bool {
+	if sourcesOnly || triageType != "" || preZIM != "" || (scope != "" && scope != "all" && scope != "attached") {
+		return true
+	}
+	if scope == "attached" {
+		return false
+	}
+	low := stripChatPunct(strings.ToLower(q))
+	if low == "" {
+		return false
+	}
+	for _, kw := range []string{"source", "cite", "citation", "reference", "wiki", "wikipedia", "zim", "library", "book", "guide", "remedy", "medical", "drug", "pill", "medication", "dosage", "symptom", "map", "waypoint", "pin", "coordinate", "notes", "document", "search", "lookup", "look up", "according to"} {
+		if strings.Contains(low, kw) {
+			return true
+		}
+	}
+	if hasCalc {
+		return false
+	}
+	switch low {
+	case "hi", "hello", "hey", "yo", "sup", "greetings", "good morning", "good afternoon", "good evening",
+		"thanks", "thank you", "thx", "ty", "ok", "okay", "cool", "nice", "great", "awesome", "got it",
+		"bye", "goodbye", "see you", "how are you", "how are u", "who are you", "what are you",
+		"what can you do", "help", "test", "testing", "ping":
+		return false
+	}
+	for _, pref := range []string{"my name is ", "remember that ", "what is my name", "what's my name", "what did i ", "earlier you ", "tell me a joke", "write a ", "write an ", "draft a ", "compose a ", "rewrite ", "proofread ", "translate "} {
+		if strings.HasPrefix(low, pref) || strings.Contains(low, pref) {
+			return false
+		}
+	}
+	return len(ai.SignificantTerms(q)) > 0
+}

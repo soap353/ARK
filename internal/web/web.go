@@ -364,6 +364,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
 	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
 	mux.HandleFunc("/api/zim/suggest", s.handleAPIZIMSuggest)
+	mux.HandleFunc("/api/zim/pages", s.handleAPIZIMPages)
 	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
 	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)

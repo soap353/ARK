@@ -2081,3 +2081,239 @@ func TestSystemRuntimeZIMSearchAndAjaxDownloads(t *testing.T) {
 		t.Errorf("expected JSON hits:[] on /api/zim/suggest, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func writeWikiTestZIM(t *testing.T, zimPath string) {
+	t.Helper()
+	type testEntry struct {
+		url        string
+		title      string
+		html       string
+		isRedirect bool
+		targetIdx  uint32
+	}
+	entries := []testEntry{
+		{url: "Main_Page", title: "Main Page", html: "<html><body><h1>Welcome</h1></body></html>"},
+		{url: "United_States", title: "United States", html: "<html><body><h1>United States</h1><p>North American country.</p></body></html>"},
+	}
+	for i := 1; i <= 15; i++ {
+		entries = append(entries, testEntry{
+			url:   fmt.Sprintf("Water_compound_%02d", i),
+			title: fmt.Sprintf("Water compound %02d", i),
+			html:  fmt.Sprintf("<html><body><h1>Water compound %02d</h1></body></html>", i),
+		})
+	}
+	// Exact match appears AFTER 15 prefix entries; Redirect USA appears at end.
+	entries = append(entries,
+		testEntry{url: "Water", title: "Water", html: "<html><body><h1>Water</h1><p>H2O molecule.</p></body></html>"},
+		testEntry{url: "USA", title: "USA", isRedirect: true, targetIdx: 1},
+	)
+
+	var blobData bytes.Buffer
+	var offs []uint32
+	blobNum := uint32(0)
+	entryBlobIdx := make([]uint32, len(entries))
+	for i, e := range entries {
+		if e.isRedirect {
+			continue
+		}
+		entryBlobIdx[i] = blobNum
+		offs = append(offs, uint32((len(entries)-2+1)*4)) // patched below
+		_ = offs
+		blobNum++
+	}
+	offs = make([]uint32, 0, blobNum+1)
+	headerBytes := (blobNum + 1) * 4
+	curBlobOff := headerBytes
+	for _, e := range entries {
+		if e.isRedirect {
+			continue
+		}
+		offs = append(offs, uint32(curBlobOff))
+		b := []byte(e.html)
+		blobData.Write(b)
+		curBlobOff += uint32(len(b))
+	}
+	offs = append(offs, uint32(curBlobOff))
+
+	var uncompressed bytes.Buffer
+	for _, off := range offs {
+		_ = binary.Write(&uncompressed, binary.LittleEndian, off)
+	}
+	uncompressed.Write(blobData.Bytes())
+
+	enc, _ := zstd.NewWriter(nil)
+	defer enc.Close()
+	var clusterBuf bytes.Buffer
+	clusterBuf.WriteByte(5)
+	clusterBuf.Write(enc.EncodeAll(uncompressed.Bytes(), nil))
+
+	mimeList := []byte("text/html;raw=true\x00\x00")
+	mimePos := uint64(80)
+	dirStart := mimePos + uint64(len(mimeList))
+	var dirBuf bytes.Buffer
+	entryOffs := make([]uint64, len(entries))
+	for i, e := range entries {
+		entryOffs[i] = dirStart + uint64(dirBuf.Len())
+		if e.isRedirect {
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint16(0xffff))
+			dirBuf.WriteByte(0)
+			dirBuf.WriteByte('C')
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, e.targetIdx)
+		} else {
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint16(0))
+			dirBuf.WriteByte(0)
+			dirBuf.WriteByte('C')
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, uint32(0))
+			_ = binary.Write(&dirBuf, binary.LittleEndian, entryBlobIdx[i])
+		}
+		dirBuf.WriteString(e.url + "\x00")
+		dirBuf.WriteString(e.title + "\x00")
+	}
+
+	urlPtrPos := dirStart + uint64(dirBuf.Len())
+	clusterPtrPos := urlPtrPos + uint64(len(entries)*8)
+	clusterDataPos := clusterPtrPos + 8
+
+	var zimBuf bytes.Buffer
+	var hdr [80]byte
+	binary.LittleEndian.PutUint32(hdr[0:4], ai.ZIMMagic)
+	binary.LittleEndian.PutUint16(hdr[4:6], 6)
+	binary.LittleEndian.PutUint16(hdr[6:8], 3)
+	binary.LittleEndian.PutUint32(hdr[24:28], uint32(len(entries)))
+	binary.LittleEndian.PutUint32(hdr[28:32], 1)
+	binary.LittleEndian.PutUint64(hdr[32:40], urlPtrPos)
+	binary.LittleEndian.PutUint64(hdr[40:48], ^uint64(0)) // v6.3 style: no TitlePtrPos
+	binary.LittleEndian.PutUint64(hdr[48:56], clusterPtrPos)
+	binary.LittleEndian.PutUint64(hdr[56:64], mimePos)
+	binary.LittleEndian.PutUint32(hdr[64:68], 0)
+	binary.LittleEndian.PutUint64(hdr[72:80], clusterDataPos+uint64(clusterBuf.Len()))
+	zimBuf.Write(hdr[:])
+	zimBuf.Write(mimeList)
+	zimBuf.Write(dirBuf.Bytes())
+	for _, off := range entryOffs {
+		_ = binary.Write(&zimBuf, binary.LittleEndian, off)
+	}
+	_ = binary.Write(&zimBuf, binary.LittleEndian, clusterDataPos)
+	zimBuf.Write(clusterBuf.Bytes())
+
+	if err := os.WriteFile(zimPath, zimBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write zim: %v", err)
+	}
+}
+
+func TestZIMSearchRedirectsPaginationAndTOC(t *testing.T) {
+	tmpDir := t.TempDir()
+	zimDir := filepath.Join(tmpDir, "zim")
+	if err := os.MkdirAll(zimDir, 0o755); err != nil {
+		t.Fatalf("mkdir zim: %v", err)
+	}
+	zimPath := filepath.Join(zimDir, "wiki_test.zim")
+	writeWikiTestZIM(t, zimPath)
+
+	arc, err := getZIMArchive(zimPath, "wiki_test")
+	if err != nil {
+		t.Fatalf("getZIMArchive: %v", err)
+	}
+
+	// Exact title "Water" placed after 15 prefix entries must rank first even with limit=5
+	if hits := arc.searchTitles("water", 5); len(hits) == 0 || hits[0].title != "Water" {
+		t.Errorf("searchTitles(\"water\", 5) expected exact \"Water\" first, got %+v", hits)
+	}
+	if hits := arc.scanTitlesStreaming("water", []string{"water"}, 5); len(hits) == 0 || hits[0].title != "Water" {
+		t.Errorf("scanTitlesStreaming(\"water\", 5) expected exact \"Water\" first, got %+v", hits)
+	}
+	// Redirect entry USA (mimeID == 0xffff) must also be searchable
+	if hits := arc.searchTitles("usa", 10); len(hits) == 0 || hits[0].url != "USA" {
+		t.Errorf("searchTitles(\"usa\") expected redirect \"USA\", got %+v", hits)
+	}
+	if hits := arc.scanTitlesStreaming("usa", []string{"usa"}, 10); len(hits) == 0 || hits[0].url != "USA" {
+		t.Errorf("scanTitlesStreaming(\"usa\") expected redirect \"USA\", got %+v", hits)
+	}
+
+	srv, err := NewServer(nil, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// /api/zim/pages pagination + filter
+	req := httptest.NewRequest(http.MethodGet, "/api/zim/pages?stem=wiki_test&offset=0&limit=5", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("/api/zim/pages status %d: %s", w.Code, w.Body.String())
+	}
+	var pgResp struct {
+		Pages      []struct{ Title, URL string } `json:"pages"`
+		Total      int                           `json:"total"`
+		NextOffset int                           `json:"next_offset"`
+		HasMore    bool                          `json:"has_more"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &pgResp); err != nil {
+		t.Fatalf("decode /api/zim/pages: %v", err)
+	}
+	if len(pgResp.Pages) != 5 || !pgResp.HasMore || pgResp.Total < 18 {
+		t.Errorf("unexpected /api/zim/pages response: %+v", pgResp)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/zim/pages?stem=wiki_test&q=united", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "United States") {
+		t.Errorf("expected filtered /api/zim/pages to include United States, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Rendered article has collapsible left TOC panel defaulted collapsed with per-item localStorage key
+	req = httptest.NewRequest(http.MethodGet, "/read/zim/wiki_test/C/Main_Page", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	body := w.Body.String()
+	for _, want := range []string{`id="ark-toc-toggle"`, `id="ark-toc-panel"`, `data-stem="wiki_test"`, `ark_zim_toc_open_`, `display:none`} {
+		if w.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("expected ZIM page HTML to contain %q, status=%d", want, w.Code)
+		}
+	}
+}
+
+func TestRealWikipediaZIMSearchIfPresent(t *testing.T) {
+	wikiPath := filepath.Join("..", "..", "data", "zim", "wikipedia_en_top_mini_2026-06.zim")
+	if _, err := os.Stat(wikiPath); err != nil {
+		t.Skipf("wikipedia mini zim not present locally: %v", err)
+	}
+	arc, err := getZIMArchive(wikiPath, "wikipedia_en_top_mini_2026-06")
+	if err != nil {
+		t.Fatalf("open wikipedia zim: %v", err)
+	}
+	for _, q := range []string{"water", "albert einstein", "usa"} {
+		hits := arc.searchTitles(q, 10)
+		if len(hits) == 0 {
+			t.Errorf("expected hits for %q in %s, got 0", q, wikiPath)
+		}
+	}
+	pages, total, hasMore := arc.listPages(0, 20, "")
+	if len(pages) != 20 || total < 1000 || !hasMore {
+		t.Errorf("unexpected wikipedia listPages(0,20): len=%d total=%d hasMore=%v", len(pages), total, hasMore)
+	}
+}
+
+func TestAskAIQueryNeedsLocalKnowledge(t *testing.T) {
+	noToolCases := []string{"hi", "Hello!", "thanks!", "My name is Gabe", "tell me a joke", "what is 25 * 4?", "how are you?"}
+	for _, q := range noToolCases {
+		hasCalc := evalAskMathTool(q) != ""
+		if queryNeedsLocalKnowledge(q, "all", "", "", false, hasCalc) {
+			t.Errorf("expected queryNeedsLocalKnowledge(%q) == false", q)
+		}
+	}
+	needToolCases := []string{"water purification", "dosage of ibuprofen", "search wikipedia for einstein", "cite local notes on welding"}
+	for _, q := range needToolCases {
+		hasCalc := evalAskMathTool(q) != ""
+		if !queryNeedsLocalKnowledge(q, "all", "", "", false, hasCalc) {
+			t.Errorf("expected queryNeedsLocalKnowledge(%q) == true", q)
+		}
+	}
+}

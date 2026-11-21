@@ -711,6 +711,59 @@ func (s *Server) handleAPIZIMSuggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"hits": hits})
 }
 
+func (s *Server) handleAPIZIMPages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	stem := filepath.Base(strings.TrimSpace(r.URL.Query().Get("stem")))
+	if s.dataDir == "" || stem == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"pages": []any{}, "total": 0, "next_offset": 0, "has_more": false})
+		return
+	}
+	offset := 0
+	if rawOff := strings.TrimSpace(r.URL.Query().Get("offset")); rawOff != "" {
+		if n, err := strconv.Atoi(rawOff); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	limit := 200
+	if rawLim := strings.TrimSpace(r.URL.Query().Get("limit")); rawLim != "" {
+		if n, err := strconv.Atoi(rawLim); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	filter := strings.TrimSpace(r.URL.Query().Get("q"))
+	zimPath := filepath.Join(s.dataDir, "zim", stem+".zim")
+	arc, err := getZIMArchive(zimPath, stem)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"pages": []any{}, "total": 0, "next_offset": 0, "has_more": false})
+		return
+	}
+	recs, total, hasMore := arc.listPages(offset, limit, filter)
+	type pageHit struct {
+		Title string `json:"title"`
+		URL   string `json:"url"`
+	}
+	pages := make([]pageHit, 0, len(recs))
+	escStem := url.PathEscape(stem)
+	for _, rec := range recs {
+		pages = append(pages, pageHit{
+			Title: rec.title,
+			URL:   fmt.Sprintf("/read/zim/%s/%c/%s", escStem, rec.ns, strings.TrimPrefix(rec.url, "/")),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pages":       pages,
+		"total":       total,
+		"next_offset": offset + len(pages),
+		"has_more":    hasMore,
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Maps Country Extract & Custom Offline Map Pins (/maps)
 // ---------------------------------------------------------------------------
