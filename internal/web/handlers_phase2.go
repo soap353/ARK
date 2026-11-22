@@ -227,7 +227,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		Jobs:                jobsList,
 		HasActiveJobs:       hasActive(jobsList),
 	}
-	s.render(w, "system.html", data)
+	s.render(w, r, "system.html", data)
 }
 
 func (s *Server) handleAPIContainerRestart(w http.ResponseWriter, r *http.Request) {

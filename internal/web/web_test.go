@@ -85,6 +85,7 @@ func TestNewServerAndRoutes(t *testing.T) {
 	for _, rt := range routes {
 		t.Run(rt.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, rt.path, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 
@@ -311,6 +312,7 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	sysBody := w.Body.String()
@@ -397,6 +399,7 @@ func TestPhase2SettingsAndAIEndpoints(t *testing.T) {
 		"ai_embed_model": {"nomic-embed-text"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/settings/ai", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -503,6 +506,7 @@ func TestSettingsUSBAndUpdateRoutes(t *testing.T) {
 		"include_config": {"1"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/settings/usb-profile", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -512,6 +516,7 @@ func TestSettingsUSBAndUpdateRoutes(t *testing.T) {
 
 	// 2. Render /settings and verify Phase 3 USB + Updates cards and saved profile button appear
 	req = httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body := w.Body.String()
@@ -527,6 +532,7 @@ func TestSettingsUSBAndUpdateRoutes(t *testing.T) {
 		"categories":  {"zim"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/settings/usb-export", strings.NewReader(expForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -541,6 +547,7 @@ func TestSettingsUSBAndUpdateRoutes(t *testing.T) {
 	// 4. Reject invalid/missing update bundle cleanly
 	updForm := url.Values{"update_source": {filepath.Join(tmpDir, "nonexistent-update")}}
 	req = httptest.NewRequest(http.MethodPost, "/settings/update", strings.NewReader(updForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -622,6 +629,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/system", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body := w.Body.String()
@@ -788,6 +796,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	sysOut := w.Body.String()
@@ -1766,6 +1775,7 @@ func TestAIModelStatusAndContextSetting(t *testing.T) {
 		"ai_embed_model":    {""},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/settings/ai", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1851,6 +1861,7 @@ func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
 
 	// 1. /settings renders <select id="ai_chat_model" ...> dropdown
 	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -1862,6 +1873,7 @@ func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
 
 	// 2. /system renders #system-clock
 	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -1877,6 +1889,7 @@ func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
 
 	onlineTimeProbeURL = ""
 	req = httptest.NewRequest(http.MethodGet, "/api/system/time", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"device"`) {
@@ -1891,6 +1904,7 @@ func TestSettingsChatModelDropdownAndSystemClock(t *testing.T) {
 
 	onlineTimeProbeURL = timeSrv.URL
 	req = httptest.NewRequest(http.MethodGet, "/api/system/time", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"online"`) {
@@ -2041,6 +2055,7 @@ func TestSystemRuntimeZIMSearchAndAjaxDownloads(t *testing.T) {
 
 	// 1. /api/system/runtime returns Native Mode JSON cleanly when no container engine attached
 	req := httptest.NewRequest(http.MethodGet, "/api/system/runtime", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"label":"Native Mode"`) {
@@ -2049,6 +2064,7 @@ func TestSystemRuntimeZIMSearchAndAjaxDownloads(t *testing.T) {
 
 	// 2. /system omits removed "Live Host Telemetry" and "Live (2s SSE)" text
 	req = httptest.NewRequest(http.MethodGet, "/system", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	sysBody := w.Body.String()
@@ -2467,6 +2483,7 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 
 	// 2. Settings renders toggles for LAN Drop and OPDS Feed
 	req = httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `name="lan_drop_enabled"`) || !strings.Contains(w.Body.String(), `name="opds_enabled"`) {
@@ -2559,6 +2576,7 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 		"lan_enabled": {"on"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(offForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -2583,5 +2601,88 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for disabled /opds, got %d", w.Code)
+	}
+}
+
+func TestRemoteAccessBlocksSettingsAndSystemAndHidesCommandNav(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, metadata TEXT, error TEXT, created_at DATETIME, updated_at DATETIME)`)
+
+	server, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := server.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	blockedRoutes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/system"},
+		{http.MethodGet, "/settings"},
+		{http.MethodGet, "/jobs"},
+		{http.MethodPost, "/settings/general"},
+		{http.MethodPost, "/settings/ai"},
+		{http.MethodPost, "/settings/downloads"},
+		{http.MethodPost, "/settings/restart"},
+		{http.MethodPost, "/settings/shutdown"},
+		{http.MethodGet, "/api/system/runtime"},
+		{http.MethodGet, "/api/system/time"},
+		{http.MethodGet, "/api/system/sse"},
+		{http.MethodPost, "/api/system/install-runtime"},
+	}
+	for _, rt := range blockedRoutes {
+		req := httptest.NewRequest(rt.method, rt.path, nil)
+		req.RemoteAddr = "192.168.1.42:54321"
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("remote %s %s expected 403 Forbidden, got %d", rt.method, rt.path, w.Code)
+		}
+	}
+
+	// Remote requests to regular pages hide the Command sidebar section and its /system + /settings links.
+	for _, path := range []string{"/", "/library", "/ask", "/lan-drop"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = "192.168.1.42:54321"
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("remote GET %s expected 200, got %d", path, w.Code)
+		}
+		body := w.Body.String()
+		if strings.Contains(body, `<div class="nav-section-label">Command</div>`) || strings.Contains(body, `href="/system"`) || strings.Contains(body, `href="/settings"`) {
+			t.Errorf("remote GET %s should hide Command sidebar links (/system, /settings)", path)
+		}
+	}
+
+	// Local requests (IPv4 and IPv6 loopback) can access /system and /settings and see the Command sidebar section.
+	for _, addr := range []string{"127.0.0.1:54321", "[::1]:54321"} {
+		req := httptest.NewRequest(http.MethodGet, "/library", nil)
+		req.RemoteAddr = addr
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		body := w.Body.String()
+		if !strings.Contains(body, `<div class="nav-section-label">Command</div>`) || !strings.Contains(body, `href="/system"`) || !strings.Contains(body, `href="/settings"`) {
+			t.Errorf("local GET /library (%s) should show Command sidebar links", addr)
+		}
+		for _, path := range []string{"/system", "/settings"} {
+			req = httptest.NewRequest(http.MethodGet, path, nil)
+			req.RemoteAddr = addr
+			w = httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Errorf("local GET %s (%s) expected 200, got %d", path, addr, w.Code)
+			}
+		}
 	}
 }

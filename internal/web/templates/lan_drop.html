@@ -17,7 +17,7 @@
   {{ if not .LANDropEnabled }}
   <div style="padding:1.25rem;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface-alt, #f6f3ec);margin-top:1rem;">
     <p style="margin:0 0 0.75rem;"><strong>LAN Drop is currently turned off.</strong> Posting, browsing, and file sharing on <code>/lan-drop</code> are disabled until re-enabled in Settings.</p>
-    <a href="/settings" class="btn btn-primary">Enable in Settings &rarr;</a>
+    {{ if .IsLocal }}<a href="/settings" class="btn btn-primary">Enable in Settings &rarr;</a>{{ end }}
   </div>
   {{ else }}
   {{ if .LANShareURLs }}

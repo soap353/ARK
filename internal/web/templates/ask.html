@@ -22,8 +22,12 @@
       Connect any OpenAI-compatible local AI server (Ollama, LM Studio, vLLM, or llama.cpp) to enable offline semantic Q&amp;A across your documents and Kiwix articles.
     </p>
     <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+      {{ if .IsLocal }}
       <a href="/settings#ai" class="btn btn-primary">Connect AI Server</a>
       <a href="/apps" class="btn">Install Ollama / Qdrant</a>
+      {{ else }}
+      <span class="secondary-text">Ask the host device to connect an AI server in Settings.</span>
+      {{ end }}
     </div>
   </div>
 {{ else }}

@@ -51,7 +51,7 @@ func (s *Server) handleKiwixCatalogPage(w http.ResponseWriter, r *http.Request) 
 		CustomOPDS:   s.fetchSettings()["custom_opds_url"],
 		InitialQuery: strings.TrimSpace(r.URL.Query().Get("q")),
 	}
-	s.render(w, "kiwix.html", data)
+	s.render(w, r, "kiwix.html", data)
 }
 
 func (s *Server) handleAPILibraryDelete(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +185,7 @@ func (s *Server) handleFieldGuidePage(w http.ResponseWriter, r *http.Request) {
 		SelectedCondition: condSlug,
 		SelectedGuideKind: kind,
 	}
-	s.render(w, "field_guide.html", data)
+	s.render(w, r, "field_guide.html", data)
 }
 
 // ---------------------------------------------------------------------------

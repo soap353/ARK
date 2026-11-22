@@ -331,5 +331,5 @@ func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {
 		FlashMsg:        strings.TrimSpace(r.URL.Query().Get("msg")),
 		FlashErr:        strings.TrimSpace(r.URL.Query().Get("err")),
 	}
-	s.render(w, "maps.html", data)
+	s.render(w, r, "maps.html", data)
 }

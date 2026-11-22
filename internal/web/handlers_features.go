@@ -119,7 +119,7 @@ func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
 		ActiveNav:    "tools",
 		SessionToken: s.sessionStart.Format(time.RFC3339),
 	}
-	s.render(w, "tools.html", data)
+	s.render(w, r, "tools.html", data)
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ func (s *Server) handleLANDropPage(w http.ResponseWriter, r *http.Request) {
 		FlashMsg:         strings.TrimSpace(r.URL.Query().Get("msg")),
 		FlashErr:         strings.TrimSpace(r.URL.Query().Get("err")),
 	}
-	s.render(w, "lan_drop.html", data)
+	s.render(w, r, "lan_drop.html", data)
 }
 
 func (s *Server) handleAPILANDropPosts(w http.ResponseWriter, r *http.Request) {

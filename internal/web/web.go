@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -160,6 +161,7 @@ type PageData struct {
 	LastDowntime        system.DowntimeInfo
 	GitHubRepo          string
 	SessionToken        string
+	IsLocal             bool
 	LANDropEnabled      bool
 	OPDSEnabled         bool
 	LANDropPosts        []LANDropPostView
@@ -355,19 +357,19 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/field-guide", s.handleFieldGuidePage)
 	mux.HandleFunc("/apps", s.handleApps)
 	mux.HandleFunc("/ask", s.handleAsk)
-	mux.HandleFunc("/jobs", s.handleJobsRedirect)
-	mux.HandleFunc("/system", s.handleSystem)
-	mux.HandleFunc("/settings", s.handleSettings)
-	mux.HandleFunc("/settings/general", s.handleSettingsGeneral)
-	mux.HandleFunc("/settings/ai", s.handleSettingsAI)
-	mux.HandleFunc("/settings/downloads", s.handleSettingsDownloads)
-	mux.HandleFunc("/settings/usb-export", s.handleSettingsUSBExport)
-	mux.HandleFunc("/settings/usb-profile", s.handleSettingsUSBProfile)
-	mux.HandleFunc("/settings/update", s.handleSettingsUpdate)
-	mux.HandleFunc("/settings/update-github", s.handleSettingsUpdateGitHub)
-	mux.HandleFunc("/settings/rollback", s.handleSettingsRollback)
-	mux.HandleFunc("/settings/restart", s.handleSettingsRestart)
-	mux.HandleFunc("/settings/shutdown", s.handleSettingsShutdown)
+	mux.HandleFunc("/jobs", s.localOnly(s.handleJobsRedirect))
+	mux.HandleFunc("/system", s.localOnly(s.handleSystem))
+	mux.HandleFunc("/settings", s.localOnly(s.handleSettings))
+	mux.HandleFunc("/settings/general", s.localOnly(s.handleSettingsGeneral))
+	mux.HandleFunc("/settings/ai", s.localOnly(s.handleSettingsAI))
+	mux.HandleFunc("/settings/downloads", s.localOnly(s.handleSettingsDownloads))
+	mux.HandleFunc("/settings/usb-export", s.localOnly(s.handleSettingsUSBExport))
+	mux.HandleFunc("/settings/usb-profile", s.localOnly(s.handleSettingsUSBProfile))
+	mux.HandleFunc("/settings/update", s.localOnly(s.handleSettingsUpdate))
+	mux.HandleFunc("/settings/update-github", s.localOnly(s.handleSettingsUpdateGitHub))
+	mux.HandleFunc("/settings/rollback", s.localOnly(s.handleSettingsRollback))
+	mux.HandleFunc("/settings/restart", s.localOnly(s.handleSettingsRestart))
+	mux.HandleFunc("/settings/shutdown", s.localOnly(s.handleSettingsShutdown))
 	mux.HandleFunc("/maps", s.handleMapsViewer)
 	mux.HandleFunc("/maps/files/", s.handleMapsFiles)
 	mux.HandleFunc("/maps/tiles/", s.handleUnifiedMapTiles)
@@ -396,10 +398,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/apps/uninstall", s.handleAPIAppUninstall)
 	mux.HandleFunc("/api/apps/custom", s.handleAPICustomAppSave)
 	mux.HandleFunc("/api/apps/update", s.handleAPIAppUpdateImage)
-	mux.Handle("/api/system/sse", system.NewSSEFeed(s.dataDir))
-	mux.HandleFunc("/api/system/runtime", s.handleAPISystemRuntime)
-	mux.HandleFunc("/api/system/time", s.handleAPISystemTime)
-	mux.HandleFunc("/api/system/install-runtime", s.handleAPISystemInstallRuntime)
+	mux.HandleFunc("/api/system/sse", s.localOnly(system.NewSSEFeed(s.dataDir).ServeHTTP))
+	mux.HandleFunc("/api/system/runtime", s.localOnly(s.handleAPISystemRuntime))
+	mux.HandleFunc("/api/system/time", s.localOnly(s.handleAPISystemTime))
+	mux.HandleFunc("/api/system/install-runtime", s.localOnly(s.handleAPISystemInstallRuntime))
 	mux.HandleFunc("/api/zim/suggest", s.handleAPIZIMSuggest)
 	mux.HandleFunc("/api/zim/pages", s.handleAPIZIMPages)
 	mux.HandleFunc("/api/lan-drop/posts", s.handleAPILANDropPosts)
@@ -479,7 +481,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		InstalledApps: installedApps,
 		FlashErr:      r.URL.Query().Get("err"),
 	}
-	s.render(w, "home.html", data)
+	s.render(w, r, "home.html", data)
 }
 
 func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
@@ -495,7 +497,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		FlashMsg:         strings.TrimSpace(r.URL.Query().Get("msg")),
 		FlashErr:         strings.TrimSpace(r.URL.Query().Get("err")),
 	}
-	s.render(w, "library.html", data)
+	s.render(w, r, "library.html", data)
 }
 
 func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
@@ -563,7 +565,7 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 		MapRegions:        regViews,
 		CreatorVideoPacks: kiwix.GetVideoCreatorPacks(),
 	}
-	s.render(w, "get_content.html", data)
+	s.render(w, r, "get_content.html", data)
 }
 
 func (s *Server) listFileNamesLower(dir string) []string {
@@ -608,7 +610,7 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		FlashMsg:          strings.TrimSpace(r.URL.Query().Get("msg")),
 		FlashErr:          strings.TrimSpace(r.URL.Query().Get("err")),
 	}
-	s.render(w, "apps.html", data)
+	s.render(w, r, "apps.html", data)
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
@@ -654,7 +656,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		FlashMsg:          strings.TrimSpace(r.URL.Query().Get("msg")),
 		FlashErr:          strings.TrimSpace(r.URL.Query().Get("err")),
 	}
-	s.render(w, "ask.html", data)
+	s.render(w, r, "ask.html", data)
 }
 
 func (s *Server) handleJobsRedirect(w http.ResponseWriter, r *http.Request) {
@@ -681,7 +683,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		GitHubRepo:         s.resolveGitHubRepo(),
 	}
 	s.populatePhase3Settings(r.Context(), &data)
-	s.render(w, "settings.html", data)
+	s.render(w, r, "settings.html", data)
 }
 
 func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
@@ -1523,7 +1525,38 @@ func (s *Server) fetchLibraryItems() []LibraryItemView {
 	return items
 }
 
-func (s *Server) render(w http.ResponseWriter, pageTemplate string, data PageData) {
+func isLocalRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host := clientHostFromReq(r)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalRequest(r) {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"ok":false,"error":"forbidden: local host access only"}`))
+				return
+			}
+			http.Error(w, "Forbidden: Settings and System pages are only accessible from the local host.", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) render(w http.ResponseWriter, r *http.Request, pageTemplate string, data PageData) {
+	data.IsLocal = isLocalRequest(r)
 	tmpl, ok := s.templates[pageTemplate]
 	if !ok {
 		log.Printf("Template not found: %s", pageTemplate)
