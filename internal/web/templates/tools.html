@@ -18,120 +18,153 @@
   </div>
 </div>
 
-<!-- 0. Full Graphing & Scientific Calculator -->
-<div id="tab-graph" class="card calc-panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.85rem;">
-    <div>
-      <h2 style="margin:0;">Graphing &amp; Scientific Calculator</h2>
-      <p class="secondary-text" style="margin:0.2rem 0 0;font-size:13px;">Supports <code>y=f(x)</code>, inequalities (<code>y&lt;x</code>), implicit equations (<code>x^2+y^2=25</code>), polar (<code>r=2*sin(3*theta)</code>), parametric (<code>(cos(t), sin(t))</code>), scatter points, derivatives, &amp; integrals.</p>
+<!-- 0. Desmos-Style Graphing & Scientific Calculator -->
+<div id="tab-graph" class="card calc-panel" style="padding:0;overflow:hidden;">
+  <!-- Top compact Desmos-style header bar -->
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;padding:0.55rem 0.9rem;background:#1B2E26;color:#F5F2EB;border-bottom:1px solid #2A4338;">
+    <div style="display:flex;align-items:center;gap:0.65rem;">
+      <button type="button" id="gc-sidebar-toggle" class="btn" title="Show/Hide Expression List" style="min-height:30px;padding:0.2rem 0.6rem;font-size:13px;background:#2A4338;color:#F5F2EB;border-color:#436153;" onclick="gcToggleSidebar()">&laquo;</button>
+      <strong style="font-size:15px;">Graphing Calculator</strong>
+      <span id="gc-top-hint" style="font-size:12px;color:#A9BEB3;">y=f(x), x&sup2;+y&sup2;=25, r=sin(3&theta;), (cos t, sin t), a=2, y&lt;x</span>
     </div>
-    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
-      <button type="button" id="gc-ang-btn" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcToggleAngleMode()">RAD</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcToggleTrigGrid()">&pi; Grid</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcResetView()">Reset View</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcZoom(0.75)">Zoom +</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.25rem 0.7rem;font-size:13px;" onclick="gcZoom(1.333)">Zoom &minus;</button>
+    <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;">
+      <select id="gc-preset-sel" style="min-height:30px;padding:0.2rem 0.55rem;font-size:12px;width:auto;border-radius:6px;border:1px solid #436153;background:#2A4338;color:#F5F2EB;cursor:pointer;" onchange="if(this.value){gcLoadPreset(this.value);this.value='';}">
+        <option value="">Examples...</option>
+        <option value="trig">Damped Wave + Slider</option>
+        <option value="intersect">Parabola &amp; Line</option>
+        <option value="circle">Circle &amp; Hyperbola</option>
+        <option value="polar">Polar Rose</option>
+        <option value="param">Lissajous Parametric</option>
+        <option value="heart">Heart Implicit</option>
+        <option value="ineq">Linear Inequalities</option>
+        <option value="scatter">Scatter + Regression</option>
+      </select>
+      <button type="button" class="btn" style="min-height:30px;padding:0.15rem 0.6rem;font-size:12px;background:#2A4338;color:#F5F2EB;border-color:#436153;" onclick="gcToggleKeypad()">Keypad</button>
     </div>
   </div>
 
-  <!-- Scientific Scratchpad Evaluator -->
-  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;margin-bottom:0.9rem;padding:0.65rem 0.85rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);">
-    <label for="gc-sci-input" style="font-weight:700;font-size:13px;white-space:nowrap;">Compute:</label>
-    <input id="gc-sci-input" type="text" class="form-control tabular" style="flex:1;min-width:220px;min-height:36px;" value="integral(sin(x), 0, pi)" placeholder="e.g. 2^10 * cos(pi/3), nCr(10,3), deriv(x^3, 2), integral(x^2, 0, 3)" oninput="gcEvalScratchpad()">
-    <div id="gc-sci-out" class="tabular" style="font-weight:700;font-size:15px;padding:0.25rem 0.65rem;border-radius:6px;background:var(--color-surface, #fff);border:1px solid var(--color-border);min-width:110px;text-align:right;">= 2</div>
-  </div>
-
-  <!-- Presets -->
-  <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.85rem;">
-    <span class="secondary-text" style="font-size:12px;align-self:center;">Presets:</span>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('trig')">Damped Wave</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('intersect')">Parabola &amp; Line</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('circle')">Circle &amp; Hyperbola</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('polar')">Polar Rose</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('param')">Lissajous Parametric</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('heart')">Heart Implicit</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('ineq')">Linear Inequality</button>
-    <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcLoadPreset('scatter')">Data + Regression</button>
-  </div>
-
-  <div style="display:grid;grid-template-columns:minmax(290px, 380px) minmax(0, 1fr);gap:1rem;align-items:start;">
-    <!-- Left Column: Equations, Sliders, Keypad, Analysis -->
-    <div style="display:flex;flex-direction:column;gap:0.75rem;">
-      <div id="gc-expr-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-        <button type="button" class="btn btn-primary" style="min-height:36px;padding:0.3rem 0.85rem;font-size:13px;" onclick="gcAddExpr('')">+ Add Expression</button>
-        <button type="button" class="btn" style="min-height:36px;padding:0.3rem 0.75rem;font-size:13px;" onclick="gcAddSlider()">+ Add Slider (a/b/c)</button>
-      </div>
-
-      <!-- Sliders -->
-      <div id="gc-sliders-wrap" style="display:none;flex-direction:column;gap:0.45rem;padding:0.65rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);"></div>
-
-      <!-- Scientific Keypad -->
-      <div style="padding:0.6rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
-        <div class="secondary-text" style="font-size:11px;margin-bottom:0.35rem;font-weight:600;">Quick Insert Keypad (inserts into active row)</div>
-        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.3rem;">
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('sin(')">sin</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('cos(')">cos</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('tan(')">tan</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('sqrt(')">&radic;</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('^2')">x&sup2;</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('^')">x^y</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('ln(')">ln</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('log(')">log</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('abs(')">|x|</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('pi')">&pi;</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('e')">e</button>
-          <button type="button" class="btn" style="min-height:30px;padding:0.15rem;font-size:12px;" onclick="gcInsertToken('theta')">&theta;</button>
+  <!-- Split Desmos Workspace -->
+  <div style="display:flex;min-height:580px;height:66vh;max-height:760px;position:relative;background:#FFFFFF;">
+    <!-- Left Expression Sidebar -->
+    <div id="gc-sidebar" style="width:345px;max-width:46vw;flex:0 0 auto;display:flex;flex-direction:column;border-right:1px solid #DCD6CC;background:#F7F7F7;overflow:hidden;">
+      <!-- Add Expression Toolbar -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.35rem;padding:0.45rem 0.6rem;background:#EEEEEE;border-bottom:1px solid #DCD6CC;">
+        <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.65rem;font-size:13px;font-weight:600;background:#FFFFFF;" onclick="gcAddExpr('')">+ Expression</button>
+        <div style="display:flex;gap:0.3rem;">
+          <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.5rem;font-size:12px;background:#FFFFFF;" title="Clear all expressions" onclick="gcClearAll()">Clear</button>
         </div>
       </div>
 
-      <!-- Bounds + Analysis Tools -->
-      <div style="padding:0.7rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
-        <div style="font-weight:700;font-size:13px;margin-bottom:0.45rem;">Window Bounds &amp; Calculus / Table</div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.35rem;margin-bottom:0.55rem;">
-          <label style="font-size:11px;">X min<input id="gc-xmin" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
-          <label style="font-size:11px;">X max<input id="gc-xmax" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
-          <label style="font-size:11px;">Y min<input id="gc-ymin" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
-          <label style="font-size:11px;">Y max<input id="gc-ymax" type="number" step="any" class="form-control tabular" style="min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
-        </div>
+      <!-- Expression Cards -->
+      <div id="gc-expr-list" style="flex:1;overflow-y:auto;background:#FFFFFF;"></div>
 
-        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.45rem;">
-          <select id="gc-analyze-target" class="form-control" style="flex:1;min-width:120px;min-height:32px;padding:0.2rem 0.4rem;font-size:12px;" onchange="gcAnalyzeSelected()"></select>
-          <button type="button" class="btn" style="min-height:32px;padding:0.2rem 0.6rem;font-size:12px;" onclick="gcAnalyzeSelected()">Roots &amp; Extrema</button>
-          <button type="button" class="btn" style="min-height:32px;padding:0.2rem 0.6rem;font-size:12px;" onclick="gcFindIntersections()">Intersections</button>
+      <!-- Compact Calculus & Intersections Strip -->
+      <div id="gc-calc-strip" style="flex:0 0 auto;padding:0.5rem 0.65rem;border-top:1px solid #DCD6CC;background:#F5F5F5;font-size:12px;">
+        <div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;margin-bottom:0.35rem;">
+          <select id="gc-analyze-target" class="form-control" style="flex:1;min-width:95px;min-height:28px;padding:0.15rem 0.35rem;font-size:12px;" onchange="gcRenderTable()"></select>
+          <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.45rem;font-size:11px;background:#fff;" onclick="gcAnalyzeSelected()">Key Pts</button>
+          <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.45rem;font-size:11px;background:#fff;" onclick="gcFindIntersections()">Intersect</button>
+          <button type="button" class="btn" style="min-height:28px;padding:0.15rem 0.45rem;font-size:11px;background:#fff;" onclick="gcToggleTableModal()">Table</button>
         </div>
-
-        <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.45rem;">
-          <span style="font-size:12px;">Integral &int; a:</span>
-          <input id="gc-int-a" type="number" step="any" value="0" class="form-control tabular" style="width:66px;min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" oninput="gcUpdateIntegral()">
-          <span style="font-size:12px;">b:</span>
-          <input id="gc-int-b" type="number" step="any" value="3.14159" class="form-control tabular" style="width:74px;min-height:30px;padding:0.2rem 0.35rem;font-size:12px;" oninput="gcUpdateIntegral()">
-          <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><input id="gc-int-show" type="checkbox" onchange="gcUpdateIntegral()"> Shade Area</label>
+        <div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;">
+          <span>&int;</span>
+          <input id="gc-int-a" type="number" step="any" value="0" class="form-control tabular" style="width:54px;min-height:26px;padding:0.1rem 0.3rem;font-size:11px;" oninput="gcUpdateIntegral()">
+          <span>..</span>
+          <input id="gc-int-b" type="number" step="any" value="3.14159" class="form-control tabular" style="width:62px;min-height:26px;padding:0.1rem 0.3rem;font-size:11px;" oninput="gcUpdateIntegral()">
+          <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;"><input id="gc-int-show" type="checkbox" onchange="gcUpdateIntegral()"> Area</label>
         </div>
-
-        <div id="gc-analysis-out" class="tabular" style="font-size:12px;line-height:1.55;max-height:150px;overflow-y:auto;"></div>
+        <div id="gc-analysis-out" class="tabular" style="margin-top:0.3rem;color:#1B2E26;line-height:1.45;max-height:74px;overflow-y:auto;"></div>
       </div>
     </div>
 
-    <!-- Right Column: Interactive Canvas + Values Table -->
-    <div style="display:flex;flex-direction:column;gap:0.75rem;">
-      <div style="position:relative;border:1px solid var(--color-border);border-radius:10px;overflow:hidden;background:#FDFBF7;">
-        <canvas id="gc-canvas" style="display:block;width:100%;height:500px;cursor:crosshair;touch-action:none;"></canvas>
-        <div id="gc-hud" class="tabular" style="position:absolute;left:10px;bottom:10px;background:rgba(27,46,38,0.88);color:#F5F2EB;padding:4px 9px;border-radius:6px;font-size:12px;pointer-events:none;">x: 0.00, y: 0.00</div>
+    <!-- Right Desmos Graph Paper Area -->
+    <div style="flex:1;min-width:0;position:relative;background:#FFFFFF;overflow:hidden;">
+      <canvas id="gc-canvas" style="display:block;width:100%;height:100%;cursor:crosshair;touch-action:none;"></canvas>
+
+      <!-- Floating Top-Right Desmos Controls (Wrench + Zoom Stack) -->
+      <div style="position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-end;z-index:5;">
+        <button type="button" id="gc-wrench-btn" title="Graph Settings" onclick="gcToggleSettings()" style="width:36px;height:36px;border-radius:6px;border:1px solid #CFCFCF;background:rgba(255,255,255,0.94);box-shadow:0 2px 6px rgba(0,0,0,0.12);cursor:pointer;font-size:16px;color:#222;">&#9881;</button>
+        <div style="display:flex;flex-direction:column;border-radius:6px;border:1px solid #CFCFCF;background:rgba(255,255,255,0.94);box-shadow:0 2px 6px rgba(0,0,0,0.12);overflow:hidden;">
+          <button type="button" title="Zoom In" onclick="gcZoom(0.75)" style="width:36px;height:32px;border:none;border-bottom:1px solid #E5E5E5;background:transparent;cursor:pointer;font-size:17px;font-weight:700;color:#222;">+</button>
+          <button type="button" title="Zoom Out" onclick="gcZoom(1.333)" style="width:36px;height:32px;border:none;border-bottom:1px solid #E5E5E5;background:transparent;cursor:pointer;font-size:17px;font-weight:700;color:#222;">&minus;</button>
+          <button type="button" title="Default Viewport (Home)" onclick="gcResetView()" style="width:36px;height:30px;border:none;background:transparent;cursor:pointer;font-size:13px;color:#222;">&#8962;</button>
+        </div>
       </div>
 
-      <!-- Function Table -->
-      <div style="padding:0.7rem;border:1px solid var(--color-border);border-radius:8px;background:rgba(42,67,56,0.04);">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.45rem;">
-          <strong style="font-size:13px;">Table of Values (x, f(x), f&prime;(x))</strong>
-          <div style="display:flex;gap:0.35rem;align-items:center;">
-            <label style="font-size:12px;">Start <input id="gc-tbl-start" type="number" step="any" value="-3" class="form-control tabular" style="display:inline-block;width:62px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
-            <label style="font-size:12px;">Step <input id="gc-tbl-step" type="number" step="any" value="1" min="0.0001" class="form-control tabular" style="display:inline-block;width:58px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
-            <label style="font-size:12px;">Rows <input id="gc-tbl-count" type="number" step="1" min="2" max="40" value="9" class="form-control tabular" style="display:inline-block;width:54px;min-height:28px;padding:0.15rem 0.3rem;font-size:12px;" oninput="gcRenderTable()"></label>
+      <!-- Floating Wrench Graph Settings Popover (Desmos Style) -->
+      <div id="gc-settings-pop" style="display:none;position:absolute;top:12px;right:56px;width:270px;background:#FFFFFF;border:1px solid #CCCCCC;border-radius:8px;box-shadow:0 6px 22px rgba(0,0,0,0.18);padding:0.75rem;z-index:10;font-size:12px;color:#222;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <strong style="font-size:13px;">Graph Settings</strong>
+          <button type="button" onclick="gcToggleSettings()" style="border:none;background:none;font-size:16px;cursor:pointer;color:#666;">&times;</button>
+        </div>
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.6rem;">
+          <label style="display:inline-flex;align-items:center;gap:4px;"><input id="gc-opt-grid" type="checkbox" checked onchange="gcDraw()"> Grid</label>
+          <label style="display:inline-flex;align-items:center;gap:4px;"><input id="gc-opt-minor" type="checkbox" checked onchange="gcDraw()"> Minor</label>
+          <label style="display:inline-flex;align-items:center;gap:4px;"><input id="gc-opt-nums" type="checkbox" checked onchange="gcDraw()"> Numbers</label>
+          <label style="display:inline-flex;align-items:center;gap:4px;"><input id="gc-opt-arrows" type="checkbox" checked onchange="gcDraw()"> Arrows</label>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-bottom:0.55rem;">
+          <label>X min<input id="gc-xmin" type="number" step="any" class="form-control tabular" style="min-height:28px;padding:0.15rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label>X max<input id="gc-xmax" type="number" step="any" class="form-control tabular" style="min-height:28px;padding:0.15rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label>Y min<input id="gc-ymin" type="number" step="any" class="form-control tabular" style="min-height:28px;padding:0.15rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+          <label>Y max<input id="gc-ymax" type="number" step="any" class="form-control tabular" style="min-height:28px;padding:0.15rem 0.35rem;font-size:12px;" onchange="gcApplyBounds()"></label>
+        </div>
+        <div style="display:flex;gap:0.4rem;align-items:center;justify-content:space-between;">
+          <div style="display:inline-flex;border:1px solid #CCC;border-radius:6px;overflow:hidden;">
+            <button type="button" id="gc-mode-rad" onclick="gcSetAngleMode('RAD')" style="border:none;padding:4px 10px;font-size:12px;cursor:pointer;background:#1B2E26;color:#fff;font-weight:600;">Radians</button>
+            <button type="button" id="gc-mode-deg" onclick="gcSetAngleMode('DEG')" style="border:none;padding:4px 10px;font-size:12px;cursor:pointer;background:#F3F3F3;color:#222;">Degrees</button>
           </div>
+          <button type="button" id="gc-trig-btn" class="btn" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="gcToggleTrigGrid()">&pi; Axis</button>
         </div>
-        <div id="gc-table-wrap" style="overflow-x:auto;"></div>
       </div>
+
+      <!-- Optional Table Drawer Overlay -->
+      <div id="gc-table-pop" style="display:none;position:absolute;bottom:12px;right:12px;width:290px;max-height:270px;background:#FFFFFF;border:1px solid #CCCCCC;border-radius:8px;box-shadow:0 6px 22px rgba(0,0,0,0.18);padding:0.65rem;z-index:9;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+          <strong style="font-size:12px;">Values Table</strong>
+          <button type="button" onclick="gcToggleTableModal()" style="border:none;background:none;font-size:16px;cursor:pointer;color:#666;">&times;</button>
+        </div>
+        <div style="display:flex;gap:0.35rem;align-items:center;margin-bottom:0.4rem;font-size:11px;">
+          <label>Start <input id="gc-tbl-start" type="number" step="any" value="-3" class="form-control tabular" style="display:inline-block;width:54px;min-height:24px;padding:0.1rem 0.25rem;font-size:11px;" oninput="gcRenderTable()"></label>
+          <label>Step <input id="gc-tbl-step" type="number" step="any" value="1" min="0.0001" class="form-control tabular" style="display:inline-block;width:48px;min-height:24px;padding:0.1rem 0.25rem;font-size:11px;" oninput="gcRenderTable()"></label>
+          <label>Rows <input id="gc-tbl-count" type="number" step="1" min="2" max="40" value="9" class="form-control tabular" style="display:inline-block;width:44px;min-height:24px;padding:0.1rem 0.25rem;font-size:11px;" oninput="gcRenderTable()"></label>
+        </div>
+        <div id="gc-table-wrap"></div>
+      </div>
+
+      <!-- Floating Bottom-Left Desmos Coord Pill + Keypad Toggle -->
+      <div style="position:absolute;left:10px;bottom:10px;display:flex;gap:6px;align-items:center;z-index:5;">
+        <button type="button" title="Toggle Math Keypad" onclick="gcToggleKeypad()" style="height:30px;padding:0 10px;border-radius:6px;border:1px solid #CFCFCF;background:rgba(255,255,255,0.95);box-shadow:0 2px 6px rgba(0,0,0,0.12);cursor:pointer;font-size:13px;color:#222;">&#9000; Keypad</button>
+        <div id="gc-hud" class="tabular" style="background:rgba(27,46,38,0.88);color:#F5F2EB;padding:5px 10px;border-radius:6px;font-size:12px;pointer-events:none;">Click any curve or dot to trace</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Desmos-Style Bottom Collapsible Math Keypad -->
+  <div id="gc-keypad" style="display:none;background:#EFEFEF;border-top:1px solid #D0D0D0;padding:0.6rem 0.75rem;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:0.35rem;max-width:860px;margin:0 auto;">
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('x')"><em>x</em></button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('y')"><em>y</em></button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^2')">a&sup2;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^')">a^b</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sqrt(')">&radic;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('abs(')">|a|</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('(')">(</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken(')')">)</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('<')">&lt;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('>')">&gt;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('=')">=</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sin(')">sin</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('cos(')">cos</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('tan(')">tan</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('ln(')">ln</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('log(')">log</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('pi')">&pi;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('e')">e</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('theta')">&theta;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('deriv(')">d/dx</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('integral(')">&int;</button>
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('nCr(')">nCr</button>
     </div>
   </div>
 </div>
@@ -172,6 +205,10 @@
     </div>
   </div>
   <div id="dose-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.75rem;"></div>
+  <ul class="secondary-text" style="margin:0.75rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Patient Weight (body mass in kg/lb), Target Dose (prescribed mg per kg), Doses/Day (daily administrations), Strength (mg per tablet or per mL/5 mL).</li>
+    <li><strong>Outputs:</strong> Patient Weight (converted kg/lb), Single Dose (exact mg &amp; tablets or mL per dose), Daily Total (combined 24-hour mg across all doses).</li>
+  </ul>
 </div>
 
 <!-- 2. Solar & Battery -->
@@ -211,6 +248,10 @@
     </div>
   </div>
   <div id="sol-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0.75rem;"></div>
+  <ul class="secondary-text" style="margin:0.75rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Capacity &amp; Voltage (battery size), Usable DoD (safe discharge %: ~80% LiFePO4, ~50% Lead-Acid), Efficiency (inverter/wiring losses), Load &amp; Solar Panel (continuous draw vs panel peak Watts).</li>
+    <li><strong>Outputs:</strong> Total Capacity (raw stored Wh), Usable Energy (safe deliverable Wh after losses), Estimated Runtime (how long the battery runs your load), Full Recharge Time (peak sun hours at ~85% controller yield).</li>
+  </ul>
 </div>
 
 <!-- 3. Radio & Antenna -->
@@ -238,6 +279,10 @@
     </div>
   </div>
   <div id="rf-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:0.75rem;"></div>
+  <ul class="secondary-text" style="margin:0.75rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Frequency (operating channel in MHz) and Velocity Factor (0.95 accounts for wire end-effects vs 1.0 in vacuum).</li>
+    <li><strong>Outputs:</strong> Full Wavelength (&lambda; distance per wave cycle), Half-Wave Dipole (total wire span &amp; each &lambda;/4 leg from feedpoint), 1/4-Wave Vertical Whip (single element over a ground plane).</li>
+  </ul>
 </div>
 
 <!-- 4. Coordinates & Bearing -->
@@ -272,6 +317,10 @@
       <div id="coord-nav-out" style="padding:0.9rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);font-size:14px;line-height:1.7;"></div>
     </div>
   </div>
+  <ul class="secondary-text" style="margin:0.85rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Point A &amp; Point B entered as <code>lat, lng</code> Decimal Degrees (or loaded from saved Map pins).</li>
+    <li><strong>Outputs:</strong> DMS (Degrees-Minutes-Seconds), DDM (Degrees-Decimal-Minutes), WGS84 UTM (grid zone &amp; meters east/north), Great-Circle Distance, Compass Bearing A&rarr;B / Return, and walking ETA at 4.5 km/h.</li>
+  </ul>
 </div>
 
 <!-- 5. Unit Converter -->
@@ -299,6 +348,10 @@
     </div>
   </div>
   <div id="unit-out" style="margin-top:0.75rem;padding:1rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:0.75rem;"></div>
+  <ul class="secondary-text" style="margin:0.75rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Category (measurement family), Value (numeric amount), and From Unit (starting unit).</li>
+    <li><strong>Outputs:</strong> Simultaneous conversions across all metric, US customary, and field/nautical units in that category.</li>
+  </ul>
 </div>
 
 <script>
@@ -587,19 +640,22 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   if (!canvas || !exprListEl) return;
   var ctx = canvas.getContext('2d');
 
-  var PALETTE = ['#C25E28', '#1D4ED8', '#15803D', '#9333EA', '#B45309', '#0F766E', '#BE123C'];
+  var PALETTE = ['#C74440', '#2D70B3', '#388C46', '#6042A6', '#FA7E19', '#000000'];
   var state = {
     xmin: -10, xmax: 10, ymin: -6.5, ymax: 6.5,
     angleMode: 'RAD',
     trigGrid: false,
     exprs: [
       { id: 1, text: 'a * sin(x)', color: PALETTE[0], visible: true, showDeriv: false },
-      { id: 2, text: 'x^2 / 4 - 2', color: PALETTE[1], visible: true, showDeriv: false }
+      { id: 2, text: 'a = 2', color: PALETTE[1], visible: true, showDeriv: false, min: -10, max: 10, step: 0.1, playing: false },
+      { id: 3, text: 'x^2 / 4 - 2', color: PALETTE[2], visible: true, showDeriv: false }
     ],
-    sliders: { a: { val: 2, min: -5, max: 5, step: 0.1, playing: false } },
+    sliders: { a: { val: 2, min: -10, max: 10, step: 0.1, playing: false } },
     activeExprId: 1,
-    nextId: 3,
+    nextId: 4,
     markers: [],
+    poiDots: [],
+    lockedDot: null,
     hover: null,
     dragging: false,
     dragStart: null,
@@ -1019,70 +1075,102 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   }
 
   function drawGrid(W, H) {
-    ctx.fillStyle = '#FDFBF7';
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, W, H);
 
-    var xStep = state.trigGrid ? (Math.PI / 2) : niceStep(state.xmax - state.xmin, W / 85);
-    var yStep = niceStep(state.ymax - state.ymin, H / 70);
+    var showGrid = !document.getElementById('gc-opt-grid') || document.getElementById('gc-opt-grid').checked;
+    var showMinor = !document.getElementById('gc-opt-minor') || document.getElementById('gc-opt-minor').checked;
+    var showNums = !document.getElementById('gc-opt-nums') || document.getElementById('gc-opt-nums').checked;
+    var showArrows = !document.getElementById('gc-opt-arrows') || document.getElementById('gc-opt-arrows').checked;
 
-    // Minor grid
-    ctx.strokeStyle = 'rgba(27,46,38,0.06)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    var xStartM = Math.floor(state.xmin / (xStep / 4)) * (xStep / 4);
-    for (var xm = xStartM; xm <= state.xmax; xm += xStep / 4) {
-      var pxm = worldToPxX(xm, W);
-      ctx.moveTo(pxm, 0); ctx.lineTo(pxm, H);
-    }
-    var yStartM = Math.floor(state.ymin / (yStep / 4)) * (yStep / 4);
-    for (var ym = yStartM; ym <= state.ymax; ym += yStep / 4) {
-      var pym = worldToPxY(ym, H);
-      ctx.moveTo(0, pym); ctx.lineTo(W, pym);
-    }
-    ctx.stroke();
-
-    // Major grid
-    ctx.strokeStyle = 'rgba(27,46,38,0.14)';
-    ctx.beginPath();
+    var xStep = state.trigGrid ? (Math.PI / 2) : niceStep(state.xmax - state.xmin, W / 90);
+    var yStep = niceStep(state.ymax - state.ymin, H / 75);
     var xStart = Math.floor(state.xmin / xStep) * xStep;
-    for (var x = xStart; x <= state.xmax + xStep * 0.1; x += xStep) {
-      var px = worldToPxX(x, W);
-      ctx.moveTo(px, 0); ctx.lineTo(px, H);
-    }
     var yStart = Math.floor(state.ymin / yStep) * yStep;
-    for (var y = yStart; y <= state.ymax + yStep * 0.1; y += yStep) {
-      var py = worldToPxY(y, H);
-      ctx.moveTo(0, py); ctx.lineTo(W, py);
-    }
-    ctx.stroke();
 
-    // Axes
+    if (showGrid && showMinor) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      var xStartM = Math.floor(state.xmin / (xStep / 4)) * (xStep / 4);
+      for (var xm = xStartM; xm <= state.xmax; xm += xStep / 4) {
+        var pxm = worldToPxX(xm, W);
+        ctx.moveTo(pxm, 0); ctx.lineTo(pxm, H);
+      }
+      var yStartM = Math.floor(state.ymin / (yStep / 4)) * (yStep / 4);
+      for (var ym = yStartM; ym <= state.ymax; ym += yStep / 4) {
+        var pym = worldToPxY(ym, H);
+        ctx.moveTo(0, pym); ctx.lineTo(W, pym);
+      }
+      ctx.stroke();
+    }
+
+    if (showGrid) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (var x = xStart; x <= state.xmax + xStep * 0.1; x += xStep) {
+        var px = worldToPxX(x, W);
+        ctx.moveTo(px, 0); ctx.lineTo(px, H);
+      }
+      for (var y = yStart; y <= state.ymax + yStep * 0.1; y += yStep) {
+        var py = worldToPxY(y, H);
+        ctx.moveTo(0, py); ctx.lineTo(W, py);
+      }
+      ctx.stroke();
+    }
+
+    // Crisp black Desmos axes
     var axX = worldToPxX(0, W);
     var axY = worldToPxY(0, H);
-    ctx.strokeStyle = '#1B2E26';
+    ctx.strokeStyle = '#222222';
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     if (axX >= 0 && axX <= W) { ctx.moveTo(axX, 0); ctx.lineTo(axX, H); }
     if (axY >= 0 && axY <= H) { ctx.moveTo(0, axY); ctx.lineTo(W, axY); }
     ctx.stroke();
 
-    // Tick labels
-    ctx.fillStyle = '#3B5246';
-    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
-    var lblY = Math.min(H - 16, Math.max(14, axY + 14));
-    ctx.textAlign = 'center';
-    for (var xt = xStart; xt <= state.xmax + xStep * 0.1; xt += xStep) {
-      if (Math.abs(xt) < xStep * 1e-4) continue;
-      var pxt = worldToPxX(xt, W);
-      if (pxt > 14 && pxt < W - 14) ctx.fillText(formatTick(xt, xStep), pxt, lblY);
+    if (showArrows) {
+      ctx.fillStyle = '#222222';
+      if (axX >= 8 && axX <= W - 8) {
+        ctx.beginPath(); ctx.moveTo(axX, 2); ctx.lineTo(axX - 4, 10); ctx.lineTo(axX + 4, 10); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(axX, H - 2); ctx.lineTo(axX - 4, H - 10); ctx.lineTo(axX + 4, H - 10); ctx.fill();
+      }
+      if (axY >= 8 && axY <= H - 8) {
+        ctx.beginPath(); ctx.moveTo(W - 2, axY); ctx.lineTo(W - 10, axY - 4); ctx.lineTo(W - 10, axY + 4); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(2, axY); ctx.lineTo(10, axY - 4); ctx.lineTo(10, axY + 4); ctx.fill();
+      }
     }
-    var lblX = Math.min(W - 34, Math.max(6, axX + 6));
-    ctx.textAlign = axX < 42 ? 'left' : 'right';
-    if (axX >= 42) lblX = Math.min(W - 8, axX - 6);
-    for (var yt = yStart; yt <= state.ymax + yStep * 0.1; yt += yStep) {
-      if (Math.abs(yt) < yStep * 1e-4) continue;
-      var pyt = worldToPxY(yt, H);
-      if (pyt > 12 && pyt < H - 10) ctx.fillText(formatTick(yt, yStep), lblX, pyt + 4);
+
+    if (showNums) {
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      var lblY = Math.min(H - 12, Math.max(14, axY + 15));
+      ctx.textAlign = 'center';
+      var drawHaloText = function(txt, tx, ty) {
+        ctx.save();
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.strokeText(txt, tx, ty);
+        ctx.fillStyle = '#444444';
+        ctx.fillText(txt, tx, ty);
+        ctx.restore();
+      };
+      for (var xt = xStart; xt <= state.xmax + xStep * 0.1; xt += xStep) {
+        if (Math.abs(xt) < xStep * 1e-4) continue;
+        var pxt = worldToPxX(xt, W);
+        if (pxt > 16 && pxt < W - 16) drawHaloText(formatTick(xt, xStep), pxt, lblY);
+      }
+      var lblX = axX < 42 ? Math.max(8, axX + 6) : Math.min(W - 8, axX - 6);
+      ctx.textAlign = axX < 42 ? 'left' : 'right';
+      for (var yt = yStart; yt <= state.ymax + yStep * 0.1; yt += yStep) {
+        if (Math.abs(yt) < yStep * 1e-4) continue;
+        var pyt = worldToPxY(yt, H);
+        if (pyt > 14 && pyt < H - 12) drawHaloText(formatTick(yt, yStep), lblX, pyt + 4);
+      }
+      if (axX > 14 && axX < W - 14 && axY > 14 && axY < H - 14) {
+        ctx.textAlign = 'right';
+        drawHaloText('0', axX - 5, axY + 14);
+      }
     }
   }
 
@@ -1262,6 +1350,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     var W = rect.width, H = rect.height;
 
     drawGrid(W, H);
+    syncSlidersFromExprs();
 
     // Optional shaded definite integral under active curve
     if (state.integral.show) {
@@ -1289,7 +1378,10 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     }
 
     state.exprs.forEach(function(item) {
-      if (!item.visible || !item.text.trim()) { item.error = ''; item.meta = ''; return; }
+      if (!item.visible || !item.text.trim()) { item.error = ''; item.meta = ''; item.inlineVal = null; return; }
+      if (item.isSlider) { item.error = ''; item.meta = ''; item.inlineVal = null; return; }
+      item.inlineVal = tryEvalInlineConstant(item.text);
+      if (item.inlineVal !== null) { item.error = ''; item.meta = ''; return; }
       try {
         var spec = parsePlotSpec(item.text);
         item.error = '';
@@ -1317,35 +1409,194 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       }
     });
 
-    // Markers (roots, extrema, intersections)
+    // Desmos clickable gray Points of Interest (roots, intercepts, extrema, intersections)
+    computePOIs();
+    state.poiDots.forEach(function(d) {
+      var mx = worldToPxX(d.x, W), my = worldToPxY(d.y, H);
+      var isHot = state.hover && Math.hypot(state.hover.px - mx, state.hover.py - my) < 9;
+      ctx.fillStyle = isHot ? '#1B2E26' : '#888888';
+      ctx.beginPath(); ctx.arc(mx, my, isHot ? 5.5 : 4, 0, Math.PI * 2); ctx.fill();
+      if (isHot) {
+        ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1.5; ctx.stroke();
+        drawDesmosTooltip(d.x, d.y, mx, my, '#1B2E26');
+      }
+    });
+
+    // Explicit markers
     state.markers.forEach(function(m) {
       var mx = worldToPxX(m.x, W), my = worldToPxY(m.y, H);
       if (mx < -10 || mx > W + 10 || my < -10 || my > H + 10) return;
       ctx.fillStyle = m.color || '#1B2E26';
-      ctx.beginPath(); ctx.arc(mx, my, 4.5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#FDFBF7'; ctx.lineWidth = 1.5; ctx.stroke();
-      if (m.label) {
-        ctx.fillStyle = '#1B2E26';
-        ctx.font = 'bold 11px ui-monospace, monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(m.label, mx + 7, my - 6);
-      }
+      ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1.5; ctx.stroke();
+      if (m.label) drawDesmosTooltip(m.x, m.y, mx, my, m.color);
     });
 
-    // Hover crosshair
-    if (state.hover) {
-      ctx.strokeStyle = 'rgba(27,46,38,0.35)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(state.hover.px, 0); ctx.lineTo(state.hover.px, H);
-      ctx.moveTo(0, state.hover.py); ctx.lineTo(W, state.hover.py);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // Live curve trace point when cursor hovers near any curve
+    if (state.hover && state.hover.tracePt) {
+      var tp = state.hover.tracePt;
+      var tpx = worldToPxX(tp.x, W), tpy = worldToPxY(tp.y, H);
+      ctx.fillStyle = tp.color;
+      ctx.beginPath(); ctx.arc(tpx, tpy, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2; ctx.stroke();
+      drawDesmosTooltip(tp.x, tp.y, tpx, tpy, tp.color);
     }
 
     syncBoundsInputs();
   };
+
+  function syncSlidersFromExprs() {
+    var activeSliders = {};
+    state.exprs.forEach(function(item) {
+      var m = String(item.text || '').trim().match(/^([a-zA-Z])\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+))$/);
+      if (m) {
+        var k = m[1].toLowerCase();
+        if (k !== 'x' && k !== 'y' && k !== 'e' && k !== 't' && k !== 'r') {
+          var v = parseFloat(m[2]);
+          if (item.min === undefined) item.min = Math.min(-10, Math.floor(v - 5));
+          if (item.max === undefined) item.max = Math.max(10, Math.ceil(v + 5));
+          if (item.step === undefined) item.step = 0.1;
+          item.isSlider = true;
+          item.sliderVar = k;
+          item.sliderVal = v;
+          activeSliders[k] = { val: v, min: item.min, max: item.max, step: item.step, playing: !!item.playing };
+          return;
+        }
+      }
+      item.isSlider = false;
+      item.sliderVar = '';
+    });
+    state.sliders = activeSliders;
+  }
+
+  function findMissingSliderVars(rawText) {
+    var known = { x:1, y:1, t:1, r:1, e:1, pi:1, tau:1, phi:1, theta:1 };
+    var missing = [];
+    try {
+      var toks = tokenizeMath(rawText.replace(/^[^=<>]*=/, ''));
+      toks.forEach(function(tk) {
+        if (tk.type === 'id' && tk.val.length === 1 && !FUNCS.hasOwnProperty(tk.val) && !known[tk.val] && !state.sliders[tk.val] && missing.indexOf(tk.val) === -1) {
+          missing.push(tk.val);
+        }
+      });
+    } catch (e) {}
+    return missing;
+  }
+
+  function tryEvalInlineConstant(rawText) {
+    var s = String(rawText || '').trim();
+    if (!s || /[=<>]/.test(s)) return null;
+    try {
+      var dm = s.match(/^deriv\((.*)\)$/i);
+      var im = s.match(/^integral\((.*)\)$/i);
+      var val;
+      if (dm) {
+        var dp = splitTopArgs(dm[1]);
+        if (dp.length !== 2) return null;
+        var fn = compileExpr(dp[0]), x0 = compileExpr(dp[1])({});
+        var h = 1e-6 * Math.max(1, Math.abs(x0));
+        val = (fn({ x: x0 + h }) - fn({ x: x0 - h })) / (2 * h);
+      } else if (im) {
+        var ip = splitTopArgs(im[1]);
+        if (ip.length !== 3) return null;
+        val = simpsonIntegral(compileExpr(ip[0]), compileExpr(ip[1])({}), compileExpr(ip[2])({}));
+      } else {
+        // Check no free plot vars (x, y, t, theta)
+        var toks = tokenizeMath(s);
+        for (var i = 0; i < toks.length; i++) {
+          if (toks[i].type === 'id' && (toks[i].val === 'x' || toks[i].val === 'y' || toks[i].val === 't' || toks[i].val === 'theta')) return null;
+        }
+        val = compileExpr(s)({});
+      }
+      if (isFinite(val)) {
+        var rounded = Math.abs(val) < 1e-12 ? 0 : val;
+        return Number(rounded.toPrecision(9)).toString();
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function computePOIs() {
+    var dots = [];
+    var expls = [];
+    state.exprs.forEach(function(item) {
+      if (!item.visible || item.isSlider || !item.text.trim()) return;
+      try {
+        var sp = parsePlotSpec(item.text);
+        if (sp.kind === 'explicit' || sp.kind === 'ineq') expls.push({ item: item, fn: sp.fn });
+      } catch (e) {}
+    });
+    if (expls.length === 0) { state.poiDots = []; return; }
+
+    var N = 220, dx = (state.xmax - state.xmin) / N;
+    var addDot = function(x, y, kind) {
+      if (!isFinite(x) || !isFinite(y)) return;
+      if (x < state.xmin || x > state.xmax || y < state.ymin || y > state.ymax) return;
+      for (var i = 0; i < dots.length; i++) {
+        if (Math.abs(dots[i].x - x) < dx * 0.5 && Math.abs(dots[i].y - y) < (state.ymax - state.ymin) * 0.02) return;
+      }
+      dots.push({ x: x, y: y, kind: kind });
+    };
+
+    expls.forEach(function(cur) {
+      var f = function(x) { return cur.fn({ x: x }); };
+      var y0 = f(0);
+      if (isFinite(y0)) addDot(0, y0, 'y-int');
+      var prevX = state.xmin, prevY = f(prevX), prevD = NaN;
+      var h = dx * 0.1;
+      for (var i = 1; i <= N; i++) {
+        var x = state.xmin + i * dx, y = f(x);
+        var d = (f(x + h) - f(x - h)) / (2 * h);
+        if (isFinite(prevY) && isFinite(y) && ((prevY < 0 && y > 0) || (prevY > 0 && y < 0))) {
+          addDot(bisectZero(f, prevX, x), 0, 'root');
+        }
+        if (isFinite(prevD) && isFinite(d) && ((prevD > 0 && d < 0) || (prevD < 0 && d > 0))) {
+          var ex = bisectZero(function(v) { return (f(v + h) - f(v - h)) / (2 * h); }, prevX, x);
+          addDot(ex, f(ex), 'ext');
+        }
+        prevX = x; prevY = y; prevD = d;
+      }
+    });
+
+    for (var a = 0; a < expls.length; a++) {
+      for (var b = a + 1; b < expls.length; b++) {
+        var diff = function(x) { return expls[a].fn({ x: x }) - expls[b].fn({ x: x }); };
+        var px = state.xmin, py = diff(px);
+        for (var i = 1; i <= N; i++) {
+          var x = state.xmin + i * dx, y = diff(x);
+          if (isFinite(py) && isFinite(y) && ((py < 0 && y > 0) || (py > 0 && y < 0))) {
+            var ix = bisectZero(diff, px, x);
+            addDot(ix, expls[a].fn({ x: ix }), 'int');
+          }
+          px = x; py = y;
+        }
+      }
+    }
+    state.poiDots = dots.slice(0, 60);
+  }
+
+  function drawDesmosTooltip(x, y, px, py, accentColor) {
+    var label = '(' + Number(x.toFixed(3)) + ', ' + Number(y.toFixed(3)) + ')';
+    ctx.save();
+    ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    var tw = ctx.measureText(label).width;
+    var bw = tw + 14, bh = 24;
+    var bx = Math.min(canvas.getBoundingClientRect().width - bw - 6, Math.max(6, px - bw / 2));
+    var by = py - bh - 10;
+    if (by < 6) by = py + 14;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = accentColor || '#333333';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 5);
+    else ctx.rect(bx, by, bw, bh);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#1B2E26';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, bx + bw / 2, by + 16);
+    ctx.restore();
+  }
 
   function syncBoundsInputs() {
     var fm = function(v) { return Number(v.toFixed(4)).toString(); };
@@ -1356,19 +1607,51 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   }
 
   function renderExprRows() {
+    syncSlidersFromExprs();
     var html = '';
     state.exprs.forEach(function(item, idx) {
-      var activeBorder = item.id === state.activeExprId ? 'border-color:var(--color-accent);box-shadow:0 0 0 2px rgba(194,94,40,0.14);' : '';
-      html += '<div style="border:1px solid var(--color-border);border-radius:8px;padding:0.45rem 0.55rem;background:var(--color-surface,#fff);' + activeBorder + '">' +
-        '<div style="display:flex;align-items:center;gap:0.4rem;">' +
-          '<input type="color" value="' + item.color + '" title="Color" style="width:26px;height:26px;border:none;padding:0;background:none;cursor:pointer;" onchange="gcSetColor(' + item.id + ',this.value)">' +
-          '<input type="text" class="form-control tabular" value="' + item.text.replace(/"/g, '&quot;') + '" placeholder="e.g. x^2 - 4, sin(x), x^2+y^2=25" style="flex:1;min-height:34px;padding:0.25rem 0.5rem;font-size:13px;" onfocus="gcSetActive(' + item.id + ')" oninput="gcUpdateText(' + item.id + ',this.value)">' +
-          '<button type="button" class="btn" title="Toggle derivative f\'(x)" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;' + (item.showDeriv ? 'background:var(--color-accent);color:#fff;' : '') + '" onclick="gcToggleDeriv(' + item.id + ')">f&prime;</button>' +
-          '<button type="button" class="btn" title="Show/Hide" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;opacity:' + (item.visible ? '1' : '0.45') + ';" onclick="gcToggleVis(' + item.id + ')">' + (item.visible ? 'On' : 'Off') + '</button>' +
-          '<button type="button" class="btn" title="Remove" style="min-height:30px;padding:0.15rem 0.45rem;font-size:12px;" onclick="gcRemoveExpr(' + item.id + ')">&times;</button>' +
+      var isAct = item.id === state.activeExprId;
+      var borderLeft = isAct ? '3px solid #2D70B3' : '3px solid transparent';
+      var dotBg = item.visible ? item.color : '#FFFFFF';
+      var dotBorder = item.visible ? item.color : '#BBBBBB';
+
+      html += '<div style="border-bottom:1px solid #E5E5E5;border-left:' + borderLeft + ';background:' + (isAct ? '#FFFFFF' : '#FAFAFA') + ';display:flex;">' +
+        // Left numbered gutter + colored curve circle (Desmos signature gutter)
+        '<div style="width:42px;flex:0 0 auto;background:#F2F2F2;border-right:1px solid #E5E5E5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px 2px;">' +
+          '<span style="font-size:10px;color:#777;font-weight:600;">' + (idx + 1) + '</span>' +
+          '<button type="button" title="Toggle visibility" onclick="gcToggleVis(' + item.id + ')" style="width:20px;height:20px;border-radius:50%;border:2px solid ' + dotBorder + ';background:' + dotBg + ';cursor:pointer;padding:0;"></button>' +
         '</div>' +
-        '<div id="gc-err-' + item.id + '" style="font-size:11px;color:#b91c1c;margin-top:2px;"></div>' +
-      '</div>';
+        // Main expression body
+        '<div style="flex:1;min-width:0;padding:6px 8px;">' +
+          '<div style="display:flex;align-items:center;gap:4px;">' +
+            '<input type="color" value="' + item.color + '" title="Color" style="width:16px;height:18px;border:none;padding:0;background:none;cursor:pointer;flex:0 0 auto;" onchange="gcSetColor(' + item.id + ',this.value)">' +
+            '<input type="text" class="tabular" value="' + item.text.replace(/"/g, '&quot;') + '" placeholder="Enter expression (e.g. y = x^2)" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:14px;padding:3px 2px;color:#111;" onfocus="gcSetActive(' + item.id + ')" oninput="gcUpdateText(' + item.id + ',this.value)">' +
+            (item.inlineVal !== null && item.inlineVal !== undefined ? '<span id="gc-val-' + item.id + '" class="tabular" style="font-size:12px;font-weight:700;color:#1B2E26;background:#EDF2EF;padding:2px 6px;border-radius:4px;">= ' + item.inlineVal + '</span>' : '<span id="gc-val-' + item.id + '"></span>') +
+            (!item.isSlider ? '<button type="button" title="Plot f\'(x)" onclick="gcToggleDeriv(' + item.id + ')" style="border:1px solid #DDD;border-radius:4px;background:' + (item.showDeriv ? '#1B2E26' : '#fff') + ';color:' + (item.showDeriv ? '#fff' : '#555') + ';font-size:11px;padding:1px 5px;cursor:pointer;">f&prime;</button>' : '') +
+            '<button type="button" title="Remove row" onclick="gcRemoveExpr(' + item.id + ')" style="border:none;background:none;color:#999;font-size:17px;line-height:1;cursor:pointer;padding:0 3px;">&times;</button>' +
+          '</div>';
+
+      // Inline Desmos Slider control when row is `a = 2`
+      if (item.isSlider) {
+        html += '<div style="display:flex;align-items:center;gap:6px;margin-top:5px;">' +
+          '<button type="button" title="Play/Pause" onclick="gcTogglePlayRow(' + item.id + ')" style="border:1px solid #CCC;border-radius:999px;width:24px;height:24px;background:#fff;cursor:pointer;font-size:10px;padding:0;">' + (item.playing ? '&#9646;&#9646;' : '&#9654;') + '</button>' +
+          '<input type="number" step="any" value="' + item.min + '" style="width:42px;border:none;border-bottom:1px solid #DDD;font-size:11px;text-align:center;background:transparent;" onchange="gcSetSliderBound(' + item.id + ',\'min\',this.value)">' +
+          '<input type="range" min="' + item.min + '" max="' + item.max + '" step="' + item.step + '" value="' + item.sliderVal + '" style="flex:1;" oninput="gcSetSliderRow(' + item.id + ',this.value)">' +
+          '<input type="number" step="any" value="' + item.max + '" style="width:42px;border:none;border-bottom:1px solid #DDD;font-size:11px;text-align:center;background:transparent;" onchange="gcSetSliderBound(' + item.id + ',\'max\',this.value)">' +
+        '</div>';
+      }
+
+      // Auto-slider prompt pills if row uses undefined parameters (e.g. `b` in `b*x + a`)
+      var missing = item.isSlider ? [] : findMissingSliderVars(item.text);
+      if (missing.length > 0) {
+        html += '<div style="display:flex;align-items:center;gap:4px;margin-top:4px;flex-wrap:wrap;font-size:11px;color:#666;"><span>add slider:</span>' +
+          missing.map(function(v) {
+            return '<button type="button" onclick="gcInsertSliderFor(\'' + v + '\')" style="border:1px solid #2D70B3;background:#EFF6FF;color:#1D4ED8;border-radius:4px;padding:1px 7px;font-size:11px;font-weight:600;cursor:pointer;">' + v + '</button>';
+          }).join('') +
+        '</div>';
+      }
+
+      html += '<div id="gc-err-' + item.id + '" style="font-size:11px;margin-top:2px;"></div></div></div>';
     });
     exprListEl.innerHTML = html;
     syncAnalyzeSelect();
@@ -1377,10 +1660,21 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   function syncExprNotes() {
     state.exprs.forEach(function(item) {
       var el = document.getElementById('gc-err-' + item.id);
-      if (!el) return;
-      if (item.error) { el.style.color = '#b91c1c'; el.textContent = item.error; }
-      else if (item.meta) { el.style.color = '#15803D'; el.textContent = item.meta; }
-      else el.textContent = '';
+      if (el) {
+        if (item.error) { el.style.color = '#b91c1c'; el.textContent = item.error; }
+        else if (item.meta) { el.style.color = '#15803D'; el.textContent = item.meta; }
+        else el.textContent = '';
+      }
+      var vel = document.getElementById('gc-val-' + item.id);
+      if (vel) {
+        if (item.inlineVal !== null && item.inlineVal !== undefined) {
+          vel.textContent = '= ' + item.inlineVal;
+          vel.style.cssText = 'font-size:12px;font-weight:700;color:#1B2E26;background:#EDF2EF;padding:2px 6px;border-radius:4px;';
+        } else {
+          vel.textContent = '';
+          vel.style.cssText = '';
+        }
+      }
     });
   }
 
@@ -1390,49 +1684,32 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     var cur = sel.value;
     sel.innerHTML = '';
     state.exprs.forEach(function(item, idx) {
+      if (item.isSlider) return;
       var opt = document.createElement('option');
       opt.value = item.id;
-      opt.textContent = 'f' + (idx + 1) + ': ' + (item.text || '(empty)');
+      opt.textContent = (idx + 1) + ': ' + (item.text || '(empty)');
       sel.appendChild(opt);
     });
-    if (cur) sel.value = cur;
-  }
-
-  function renderSliders() {
-    var wrap = document.getElementById('gc-sliders-wrap');
-    if (!wrap) return;
-    var keys = Object.keys(state.sliders);
-    if (keys.length === 0) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
-    wrap.style.display = 'flex';
-    var html = '';
-    keys.forEach(function(k) {
-      var sl = state.sliders[k];
-      html += '<div style="display:flex;align-items:center;gap:0.45rem;">' +
-        '<strong class="tabular" style="width:18px;font-size:13px;">' + k + '</strong>' +
-        '<input type="range" min="' + sl.min + '" max="' + sl.max + '" step="' + sl.step + '" value="' + sl.val + '" style="flex:1;" oninput="gcSetSlider(\'' + k + '\',this.value)">' +
-        '<span id="gc-slval-' + k + '" class="tabular" style="width:42px;text-align:right;font-size:12px;">' + Number(sl.val).toFixed(1) + '</span>' +
-        '<button type="button" class="btn" style="min-height:26px;padding:0.1rem 0.45rem;font-size:11px;" onclick="gcTogglePlay(\'' + k + '\')">' + (sl.playing ? 'Pause' : 'Play') + '</button>' +
-      '</div>';
-    });
-    wrap.innerHTML = html;
+    if (cur && sel.querySelector('option[value="' + cur + '"]')) sel.value = cur;
   }
 
   var sliderTimer = null;
   function tickSliders() {
     var anyPlaying = false;
-    Object.keys(state.sliders).forEach(function(k) {
-      var sl = state.sliders[k];
-      if (!sl.playing) return;
+    state.exprs.forEach(function(item) {
+      if (!item.isSlider || !item.playing) return;
       anyPlaying = true;
-      sl.val += sl.step;
-      if (sl.val > sl.max) sl.val = sl.min;
-      var valEl = document.getElementById('gc-slval-' + k);
-      if (valEl) valEl.textContent = Number(sl.val).toFixed(1);
+      var nv = (item.sliderVal || 0) + (item.step || 0.1);
+      if (nv > item.max) nv = item.min;
+      item.sliderVal = Number(nv.toFixed(3));
+      item.text = item.sliderVar + ' = ' + item.sliderVal;
     });
     if (anyPlaying) {
+      renderExprRows();
       gcDraw();
+      syncExprNotes();
       gcRenderTable();
-      sliderTimer = setTimeout(tickSliders, 60);
+      sliderTimer = setTimeout(tickSliders, 65);
     } else {
       sliderTimer = null;
     }
@@ -1442,8 +1719,13 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   window.gcUpdateText = function(id, val) {
     var item = state.exprs.find(function(e) { return e.id === id; });
     if (item) item.text = val;
+    var hadSlider = item && item.isSlider;
+    syncSlidersFromExprs();
     state.markers = [];
     gcDraw();
+    if (hadSlider !== (item && item.isSlider) || findMissingSliderVars(val).length > 0) {
+      renderExprRows();
+    }
     syncExprNotes();
     syncAnalyzeSelect();
     gcRenderTable();
@@ -1451,6 +1733,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   window.gcSetColor = function(id, c) {
     var item = state.exprs.find(function(e) { return e.id === id; });
     if (item) item.color = c;
+    renderExprRows();
     gcDraw();
   };
   window.gcToggleDeriv = function(id) {
@@ -1472,6 +1755,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     state.markers = [];
     renderExprRows();
     gcDraw();
+    syncExprNotes();
     gcRenderTable();
   };
   window.gcAddExpr = function(txt) {
@@ -1482,30 +1766,40 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     gcDraw();
     syncExprNotes();
   };
-  window.gcAddSlider = function() {
-    var names = ['a', 'b', 'c', 'k', 'm'];
-    for (var i = 0; i < names.length; i++) {
-      if (!state.sliders[names[i]]) {
-        state.sliders[names[i]] = { val: 1, min: -5, max: 5, step: 0.1, playing: false };
-        renderSliders();
-        gcDraw();
-        return;
-      }
-    }
-  };
-  window.gcSetSlider = function(k, v) {
-    if (!state.sliders[k]) return;
-    state.sliders[k].val = parseFloat(v);
-    var lbl = document.getElementById('gc-slval-' + k);
-    if (lbl) lbl.textContent = Number(state.sliders[k].val).toFixed(1);
+  window.gcClearAll = function() {
+    state.exprs = [{ id: 1, text: '', color: PALETTE[0], visible: true, showDeriv: false }];
+    state.nextId = 2;
+    state.activeExprId = 1;
+    state.markers = [];
+    renderExprRows();
     gcDraw();
+  };
+  window.gcInsertSliderFor = function(varName) {
+    gcAddExpr(varName + ' = 1');
+  };
+  window.gcSetSliderRow = function(id, v) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (!item || !item.isSlider) return;
+    item.sliderVal = parseFloat(v);
+    item.text = item.sliderVar + ' = ' + Number(item.sliderVal.toFixed(3));
+    renderExprRows();
+    gcDraw();
+    syncExprNotes();
     gcRenderTable();
   };
-  window.gcTogglePlay = function(k) {
-    if (!state.sliders[k]) return;
-    state.sliders[k].playing = !state.sliders[k].playing;
-    renderSliders();
-    if (!sliderTimer && state.sliders[k].playing) tickSliders();
+  window.gcSetSliderBound = function(id, which, v) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    var num = parseFloat(v);
+    if (!item || !isFinite(num)) return;
+    item[which] = num;
+    renderExprRows();
+  };
+  window.gcTogglePlayRow = function(id) {
+    var item = state.exprs.find(function(e) { return e.id === id; });
+    if (!item) return;
+    item.playing = !item.playing;
+    renderExprRows();
+    if (!sliderTimer && item.playing) tickSliders();
   };
   window.gcInsertToken = function(tok) {
     var item = state.exprs.find(function(e) { return e.id === state.activeExprId; }) || state.exprs[0];
@@ -1515,12 +1809,42 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     gcDraw();
     syncExprNotes();
   };
-  window.gcToggleAngleMode = function() {
-    state.angleMode = state.angleMode === 'RAD' ? 'DEG' : 'RAD';
-    var b = document.getElementById('gc-ang-btn');
-    if (b) b.textContent = state.angleMode;
+  window.gcToggleSidebar = function() {
+    var sb = document.getElementById('gc-sidebar');
+    var btn = document.getElementById('gc-sidebar-toggle');
+    if (!sb) return;
+    var hidden = sb.style.display === 'none';
+    sb.style.display = hidden ? 'flex' : 'none';
+    if (btn) btn.innerHTML = hidden ? '&laquo;' : '&raquo;';
+    setTimeout(gcDraw, 15);
+  };
+  window.gcToggleKeypad = function() {
+    var kp = document.getElementById('gc-keypad');
+    if (!kp) return;
+    kp.style.display = kp.style.display === 'none' ? 'block' : 'none';
+    setTimeout(gcDraw, 15);
+  };
+  window.gcToggleSettings = function() {
+    var pop = document.getElementById('gc-settings-pop');
+    if (pop) pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
+  };
+  window.gcToggleTableModal = function() {
+    var pop = document.getElementById('gc-table-pop');
+    if (!pop) return;
+    pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
+    if (pop.style.display === 'block') gcRenderTable();
+  };
+  window.gcSetAngleMode = function(mode) {
+    state.angleMode = mode === 'DEG' ? 'DEG' : 'RAD';
+    var rb = document.getElementById('gc-mode-rad'), db = document.getElementById('gc-mode-deg');
+    if (rb && db) {
+      rb.style.background = state.angleMode === 'RAD' ? '#1B2E26' : '#F3F3F3';
+      rb.style.color = state.angleMode === 'RAD' ? '#fff' : '#222';
+      db.style.background = state.angleMode === 'DEG' ? '#1B2E26' : '#F3F3F3';
+      db.style.color = state.angleMode === 'DEG' ? '#fff' : '#222';
+    }
     gcDraw();
-    gcEvalScratchpad();
+    syncExprNotes();
     gcRenderTable();
   };
   window.gcToggleTrigGrid = function() {
@@ -1563,9 +1887,9 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     if (name === 'trig') {
       state.exprs = [
         { id: 1, text: 'a * exp(-0.15*x^2) * cos(3*x)', color: PALETTE[0], visible: true, showDeriv: false },
-        { id: 2, text: 'a * exp(-0.15*x^2)', color: PALETTE[1], visible: true, showDeriv: false }
+        { id: 2, text: 'a = 3', color: PALETTE[1], visible: true, showDeriv: false, min: -10, max: 10, step: 0.1, playing: false },
+        { id: 3, text: 'a * exp(-0.15*x^2)', color: PALETTE[2], visible: true, showDeriv: false }
       ];
-      state.sliders = { a: { val: 3, min: -5, max: 5, step: 0.1, playing: false } };
       state.xmin = -8; state.xmax = 8; state.ymin = -5; state.ymax = 5;
     } else if (name === 'intersect') {
       state.exprs = [
@@ -1608,7 +1932,6 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     }
     state.nextId = state.exprs.length + 1;
     state.activeExprId = state.exprs[0].id;
-    renderSliders();
     renderExprRows();
     gcDraw();
     syncExprNotes();
@@ -1768,16 +2091,33 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     if (ev.target === canvas) {
       var px = ev.clientX - rect.left, py = ev.clientY - rect.top;
       var wx = pxToWorldX(px, rect.width), wy = pxToWorldY(py, rect.height);
-      state.hover = { px: px, py: py, x: wx, y: wy };
+      // Find nearest explicit curve point within 14px (Desmos curve tracing)
+      var tracePt = null, bestDist = 14;
+      state.exprs.forEach(function(item) {
+        if (!item.visible || item.isSlider || !item.text.trim()) return;
+        try {
+          var sp = parsePlotSpec(item.text);
+          if (sp.kind === 'explicit' || sp.kind === 'ineq') {
+            var cy = sp.fn({ x: wx });
+            if (isFinite(cy)) {
+              var cpy = worldToPxY(cy, rect.height);
+              var dist = Math.abs(cpy - py);
+              if (dist < bestDist) {
+                bestDist = dist;
+                tracePt = { x: wx, y: cy, color: item.color };
+              }
+            }
+          }
+        } catch (e) {}
+      });
+      state.hover = { px: px, py: py, x: wx, y: wy, tracePt: tracePt };
       var hud = document.getElementById('gc-hud');
       if (hud) {
-        var extra = '';
-        var active = getActiveExplicitSpec();
-        if (active) {
-          var fx = active.spec.fn({ x: wx });
-          if (isFinite(fx)) extra = '  |  f(x): ' + fx.toFixed(3);
+        if (tracePt) {
+          hud.textContent = '(' + tracePt.x.toFixed(3) + ', ' + tracePt.y.toFixed(3) + ')';
+        } else {
+          hud.textContent = 'x: ' + wx.toFixed(3) + ', y: ' + wy.toFixed(3);
         }
-        hud.textContent = 'x: ' + wx.toFixed(3) + ', y: ' + wy.toFixed(3) + extra;
       }
       gcDraw();
     }
@@ -1795,9 +2135,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     if (g && g.style.display !== 'none') gcDraw();
   });
 
-  renderSliders();
   renderExprRows();
-  gcEvalScratchpad();
   setTimeout(function() { gcDraw(); syncExprNotes(); gcRenderTable(); }, 30);
 })();
 </script>
