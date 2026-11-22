@@ -8,7 +8,7 @@
     <span class="badge badge-success">Local</span>
   </div>
 
-  <div id="calc-tabs" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
+  <div id="calc-tabs" data-session-token="{{ .SessionToken }}" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
     <button type="button" class="btn btn-primary calc-tab-btn" data-tab="graph" onclick="showCalcTab('graph')">Graphing Calculator</button>
     <button type="button" class="btn calc-tab-btn" data-tab="dosage" onclick="showCalcTab('dosage')">Dosage</button>
     <button type="button" class="btn calc-tab-btn" data-tab="solar" onclick="showCalcTab('solar')">Solar &amp; Battery</button>
@@ -1624,7 +1624,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
         '<div style="flex:1;min-width:0;padding:6px 8px;">' +
           '<div style="display:flex;align-items:center;gap:4px;">' +
             '<input type="color" value="' + item.color + '" title="Color" style="width:16px;height:18px;border:none;padding:0;background:none;cursor:pointer;flex:0 0 auto;" onchange="gcSetColor(' + item.id + ',this.value)">' +
-            '<input type="text" class="tabular" value="' + item.text.replace(/"/g, '&quot;') + '" placeholder="Enter expression (e.g. y = x^2)" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:14px;padding:3px 2px;color:#111;" onfocus="gcSetActive(' + item.id + ')" oninput="gcUpdateText(' + item.id + ',this.value)">' +
+            '<input id="gc-expr-input-' + item.id + '" type="text" class="tabular" value="' + item.text.replace(/"/g, '&quot;') + '" placeholder="Enter expression (e.g. y = x^2)" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-size:14px;padding:3px 2px;color:#111;" onfocus="gcSetActive(' + item.id + ')" oninput="gcUpdateText(' + item.id + ',this.value)">' +
             (item.inlineVal !== null && item.inlineVal !== undefined ? '<span id="gc-val-' + item.id + '" class="tabular" style="font-size:12px;font-weight:700;color:#1B2E26;background:#EDF2EF;padding:2px 6px;border-radius:4px;">= ' + item.inlineVal + '</span>' : '<span id="gc-val-' + item.id + '"></span>') +
             (!item.isSlider ? '<button type="button" title="Plot f\'(x)" onclick="gcToggleDeriv(' + item.id + ')" style="border:1px solid #DDD;border-radius:4px;background:' + (item.showDeriv ? '#1B2E26' : '#fff') + ';color:' + (item.showDeriv ? '#fff' : '#555') + ';font-size:11px;padding:1px 5px;cursor:pointer;">f&prime;</button>' : '') +
             '<button type="button" title="Remove row" onclick="gcRemoveExpr(' + item.id + ')" style="border:none;background:none;color:#999;font-size:17px;line-height:1;cursor:pointer;padding:0 3px;">&times;</button>' +
@@ -1633,9 +1633,9 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       // Inline Desmos Slider control when row is `a = 2`
       if (item.isSlider) {
         html += '<div style="display:flex;align-items:center;gap:6px;margin-top:5px;">' +
-          '<button type="button" title="Play/Pause" onclick="gcTogglePlayRow(' + item.id + ')" style="border:1px solid #CCC;border-radius:999px;width:24px;height:24px;background:#fff;cursor:pointer;font-size:10px;padding:0;">' + (item.playing ? '&#9646;&#9646;' : '&#9654;') + '</button>' +
+          '<button id="gc-play-btn-' + item.id + '" type="button" title="Play/Pause" onclick="gcTogglePlayRow(' + item.id + ')" style="border:1px solid #CCC;border-radius:999px;width:24px;height:24px;background:#fff;cursor:pointer;font-size:10px;padding:0;">' + (item.playing ? '&#9646;&#9646;' : '&#9654;') + '</button>' +
           '<input type="number" step="any" value="' + item.min + '" style="width:42px;border:none;border-bottom:1px solid #DDD;font-size:11px;text-align:center;background:transparent;" onchange="gcSetSliderBound(' + item.id + ',\'min\',this.value)">' +
-          '<input type="range" min="' + item.min + '" max="' + item.max + '" step="' + item.step + '" value="' + item.sliderVal + '" style="flex:1;" oninput="gcSetSliderRow(' + item.id + ',this.value)">' +
+          '<input id="gc-slider-range-' + item.id + '" type="range" min="' + item.min + '" max="' + item.max + '" step="' + item.step + '" value="' + item.sliderVal + '" style="flex:1;cursor:pointer;" oninput="gcSetSliderRow(' + item.id + ',this.value)">' +
           '<input type="number" step="any" value="' + item.max + '" style="width:42px;border:none;border-bottom:1px solid #DDD;font-size:11px;text-align:center;background:transparent;" onchange="gcSetSliderBound(' + item.id + ',\'max\',this.value)">' +
         '</div>';
       }
@@ -1693,6 +1693,17 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   }
 
   var sliderTimer = null;
+  function updateSliderRowDOM(item, updateRange) {
+    var txtEl = document.getElementById('gc-expr-input-' + item.id);
+    if (txtEl && document.activeElement !== txtEl) {
+      txtEl.value = item.text;
+    }
+    if (updateRange) {
+      var rngEl = document.getElementById('gc-slider-range-' + item.id);
+      if (rngEl) rngEl.value = item.sliderVal;
+    }
+  }
+
   function tickSliders() {
     var anyPlaying = false;
     state.exprs.forEach(function(item) {
@@ -1702,9 +1713,9 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       if (nv > item.max) nv = item.min;
       item.sliderVal = Number(nv.toFixed(3));
       item.text = item.sliderVar + ' = ' + item.sliderVal;
+      updateSliderRowDOM(item, true);
     });
     if (anyPlaying) {
-      renderExprRows();
       gcDraw();
       syncExprNotes();
       gcRenderTable();
@@ -1781,7 +1792,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     if (!item || !item.isSlider) return;
     item.sliderVal = parseFloat(v);
     item.text = item.sliderVar + ' = ' + Number(item.sliderVal.toFixed(3));
-    renderExprRows();
+    updateSliderRowDOM(item, false);
     gcDraw();
     syncExprNotes();
     gcRenderTable();
@@ -1797,8 +1808,11 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     var item = state.exprs.find(function(e) { return e.id === id; });
     if (!item) return;
     item.playing = !item.playing;
-    renderExprRows();
-    if (!sliderTimer && item.playing) tickSliders();
+    var btn = document.getElementById('gc-play-btn-' + item.id);
+    if (btn) btn.innerHTML = item.playing ? '&#9646;&#9646;' : '&#9654;';
+    if (item.playing && !sliderTimer) {
+      tickSliders();
+    }
   };
   window.gcInsertToken = function(tok) {
     var item = state.exprs.find(function(e) { return e.id === state.activeExprId; }) || state.exprs[0];
@@ -2134,6 +2148,123 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     if (g && g.style.display !== 'none') gcDraw();
   });
 
+  var STORAGE_KEY = 'ark_tools_state_v1';
+  var tabsEl = document.getElementById('calc-tabs');
+  var sessionToken = tabsEl ? (tabsEl.getAttribute('data-session-token') || '') : '';
+  var FIELD_IDS = [
+    'dose-weight', 'dose-wt-unit', 'dose-mgkg', 'dose-freq', 'dose-conc', 'dose-conc-type',
+    'sol-ah', 'sol-v', 'sol-dod', 'sol-eff', 'sol-load', 'sol-panel',
+    'rf-freq', 'rf-vf', 'coord-dd', 'coord-b',
+    'unit-cat', 'unit-val', 'unit-from',
+    'gc-int-a', 'gc-int-b', 'gc-tbl-start', 'gc-tbl-step', 'gc-tbl-count'
+  ];
+  var CHECK_IDS = ['gc-opt-grid', 'gc-opt-minor', 'gc-opt-nums', 'gc-opt-arrows', 'gc-int-show'];
+
+  function activeCalcTabName() {
+    var btn = document.querySelector('.calc-tab-btn.btn-primary');
+    return (btn && btn.dataset && btn.dataset.tab) ? btn.dataset.tab : 'graph';
+  }
+
+  function saveToolsState() {
+    if (!sessionToken) return;
+    try {
+      var fields = {};
+      FIELD_IDS.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) fields[id] = el.value;
+      });
+      var checks = {};
+      CHECK_IDS.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) checks[id] = !!el.checked;
+      });
+      var savedExprs = state.exprs.map(function(e) {
+        return { id: e.id, text: e.text, color: e.color, visible: !!e.visible, showDeriv: !!e.showDeriv, min: e.min, max: e.max, step: e.step };
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        sessionToken: sessionToken,
+        activeTab: activeCalcTabName(),
+        fields: fields,
+        checks: checks,
+        graph: {
+          xmin: state.xmin, xmax: state.xmax, ymin: state.ymin, ymax: state.ymax,
+          angleMode: state.angleMode, trigGrid: !!state.trigGrid,
+          activeExprId: state.activeExprId, nextId: state.nextId,
+          exprs: savedExprs
+        }
+      }));
+    } catch (e) {}
+  }
+
+  function restoreToolsState() {
+    if (!sessionToken) return;
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var saved = JSON.parse(raw);
+      if (!saved || saved.sessionToken !== sessionToken) {
+        localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      if (saved.fields) {
+        if (saved.fields['unit-cat']) {
+          var uc = document.getElementById('unit-cat');
+          if (uc) { uc.value = saved.fields['unit-cat']; populateUnits(); }
+        }
+        FIELD_IDS.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el && saved.fields.hasOwnProperty(id)) el.value = saved.fields[id];
+        });
+      }
+      if (saved.checks) {
+        CHECK_IDS.forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el && saved.checks.hasOwnProperty(id)) el.checked = !!saved.checks[id];
+        });
+        state.integral.show = !!saved.checks['gc-int-show'];
+      }
+      if (saved.graph && Array.isArray(saved.graph.exprs) && saved.graph.exprs.length > 0) {
+        state.xmin = saved.graph.xmin; state.xmax = saved.graph.xmax;
+        state.ymin = saved.graph.ymin; state.ymax = saved.graph.ymax;
+        state.trigGrid = !!saved.graph.trigGrid;
+        state.activeExprId = saved.graph.activeExprId || saved.graph.exprs[0].id;
+        state.nextId = saved.graph.nextId || (saved.graph.exprs.length + 1);
+        state.exprs = saved.graph.exprs.map(function(e) {
+          return { id: e.id, text: e.text || '', color: e.color || PALETTE[0], visible: e.visible !== false, showDeriv: !!e.showDeriv, min: e.min, max: e.max, step: e.step, playing: false };
+        });
+        if (saved.graph.angleMode === 'DEG') gcSetAngleMode('DEG');
+      }
+      calcDosage();
+      calcSolar();
+      calcRadio();
+      calcCoords();
+      calcUnits();
+      if (saved.activeTab && saved.activeTab !== 'graph') {
+        showCalcTab(saved.activeTab);
+      }
+    } catch (e) {}
+  }
+
+  window.arkSaveToolsState = saveToolsState;
+  var origShowCalcTab = window.showCalcTab;
+  window.showCalcTab = function(name) {
+    origShowCalcTab(name);
+    saveToolsState();
+  };
+  ['tab-dosage', 'tab-solar', 'tab-radio', 'tab-coords', 'tab-units', 'gc-settings-pop', 'gc-table-pop', 'gc-calc-strip'].forEach(function(cid) {
+    var el = document.getElementById(cid);
+    if (el) {
+      el.addEventListener('input', saveToolsState);
+      el.addEventListener('change', saveToolsState);
+    }
+  });
+  var origGcDraw = window.gcDraw;
+  window.gcDraw = function() {
+    origGcDraw();
+    saveToolsState();
+  };
+
+  restoreToolsState();
   renderExprRows();
   setTimeout(function() { gcDraw(); syncExprNotes(); gcRenderTable(); }, 30);
 })();

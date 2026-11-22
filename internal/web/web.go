@@ -159,6 +159,7 @@ type PageData struct {
 	GuideRemedies       []fieldguide.Remedy
 	LastDowntime        system.DowntimeInfo
 	GitHubRepo          string
+	SessionToken        string
 	LANDropEnabled      bool
 	OPDSEnabled         bool
 	LANDropPosts        []LANDropPostView

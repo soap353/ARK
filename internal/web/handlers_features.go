@@ -115,8 +115,9 @@ func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := PageData{
-		Title:     "Field Calculators",
-		ActiveNav: "tools",
+		Title:        "Field Calculators",
+		ActiveNav:    "tools",
+		SessionToken: s.sessionStart.Format(time.RFC3339),
 	}
 	s.render(w, "tools.html", data)
 }
