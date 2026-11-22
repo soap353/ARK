@@ -246,7 +246,10 @@ func startTrayIcon(port string, onShutdown func()) func() {
 		hwnd = h
 		mu.Unlock()
 
-		hIcon, _, _ := procLoadIconW.Call(0, idiApplication)
+		hIcon, _, _ := procLoadIconW.Call(hInst, 1)
+		if hIcon == 0 {
+			hIcon, _, _ = procLoadIconW.Call(0, idiApplication)
+		}
 		var nid notifyIconDataW
 		nid.cbSize = uint32(unsafe.Sizeof(nid))
 		nid.hWnd = h

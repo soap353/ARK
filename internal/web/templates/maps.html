@@ -249,7 +249,7 @@
 
       {{ if not .MapArchives }}
       <div class="map-empty-overlay">
-        <h2 style="margin-bottom: 0.5rem;">No Offline Map Files Found</h2>
+        <h2 style="margin-bottom: 0.5rem;">No Map Files Found</h2>
         <p class="secondary-text" style="max-width: 460px; margin-bottom: 1rem;">
           Download a country or US state <code>.pmtiles</code> map file below (or from Get Content) to explore all your maps seamlessly offline.
         </p>
@@ -272,7 +272,7 @@
 
   <!-- Waypoints & Pins Sidebar -->
   <aside class="pins-sidebar">
-    <section class="card" style="margin-bottom: 0;" aria-label="Add Offline Waypoint">
+    <section class="card" style="margin-bottom: 0;" aria-label="Add Waypoint">
       <div class="card-header" style="margin-bottom: 0.65rem;">
         <h2 style="margin: 0; font-size: 17px;">Save Waypoint</h2>
         <button type="button" onclick="toggleDropPinMode()" class="btn" style="min-height: 30px; padding: 0.15rem 0.6rem; font-size: 12px;">Pick on Map</button>
@@ -310,7 +310,7 @@
       </form>
     </section>
 
-    <section class="card" style="margin-bottom: 0;" aria-label="Saved Offline Map Pins">
+    <section class="card" style="margin-bottom: 0;" aria-label="Saved Map Pins">
       <div class="card-header" style="margin-bottom: 0.65rem;">
         <h2 style="margin: 0; font-size: 17px;">Saved Pins (<span id="pins-count">{{ len .MapPins }}</span>)</h2>
       </div>

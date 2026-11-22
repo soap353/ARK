@@ -190,7 +190,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Print(`Ark — Offline Internet Archive (Command Center)
+	fmt.Print(`Ark — Local Internet Archive (Command Center)
 
 Usage:
   ark [command] [options]

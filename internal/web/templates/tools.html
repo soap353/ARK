@@ -2,10 +2,10 @@
 <div class="card">
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
     <div>
-      <h1 style="margin:0;">Offline Field &amp; Reference Calculators</h1>
-      <p class="secondary-text" style="margin:0.3rem 0 0;">Instant offline calculators for medical dosing, solar/battery sizing, RF antennas, coordinates, and unit conversions.</p>
+      <h1 style="margin:0;">Field &amp; Reference Calculators</h1>
+      <p class="secondary-text" style="margin:0.3rem 0 0;">Instant calculators for graphing, medical dosing, solar/battery sizing, RF antennas, coordinates, and unit conversions.</p>
     </div>
-    <span class="badge badge-success">100% Offline</span>
+    <span class="badge badge-success">Local</span>
   </div>
 
   <div id="calc-tabs" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
@@ -25,7 +25,6 @@
     <div style="display:flex;align-items:center;gap:0.65rem;">
       <button type="button" id="gc-sidebar-toggle" class="btn" title="Show/Hide Expression List" style="min-height:30px;padding:0.2rem 0.6rem;font-size:13px;background:#2A4338;color:#F5F2EB;border-color:#436153;" onclick="gcToggleSidebar()">&laquo;</button>
       <strong style="font-size:15px;">Graphing Calculator</strong>
-      <span id="gc-top-hint" style="font-size:12px;color:#A9BEB3;">y=f(x), x&sup2;+y&sup2;=25, r=sin(3&theta;), (cos t, sin t), a=2, y&lt;x</span>
     </div>
     <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;">
       <select id="gc-preset-sel" style="min-height:30px;padding:0.2rem 0.55rem;font-size:12px;width:auto;border-radius:6px;border:1px solid #436153;background:#2A4338;color:#F5F2EB;cursor:pointer;" onchange="if(this.value){gcLoadPreset(this.value);this.value='';}">
@@ -325,7 +324,7 @@
 
 <!-- 5. Unit Converter -->
 <div id="tab-units" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Offline Unit Converter</h2>
+  <h2 style="margin-top:0;">Unit Converter</h2>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1rem;">
     <div class="form-group">
       <label class="form-label" for="unit-cat">Category</label>

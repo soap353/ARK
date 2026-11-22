@@ -319,7 +319,7 @@ func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {
 	pinsJSON, _ := json.Marshal(pins)
 
 	data := PageData{
-		Title:           "Offline Maps",
+		Title:           "Maps",
 		ActiveNav:       "maps",
 		MapArchives:     archives,
 		MapArchivesJSON: template.JS(archivesJSON),

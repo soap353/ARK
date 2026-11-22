@@ -1632,7 +1632,7 @@ func (s *Server) renderZIMStartPage(w http.ResponseWriter, stem, zimPath string,
   <div class="wiki-sub">
     <span>%d indexed entries</span>
     <span>&middot;</span>
-    <span>Local Offline Archive</span>
+    <span>Local Archive</span>
     %s
   </div>
   <form action="/read/zim/%s/" method="GET" class="wiki-search-box">
@@ -2470,7 +2470,7 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 	}
 	return `<nav id="ark-proxy-nav" style="position:fixed;top:0;left:0;right:0;width:100%;height:46px;max-height:46px;box-sizing:border-box;flex:none;align-self:flex-start;z-index:2147483647;background:#1B2E26;border-bottom:1px solid #2A4338;padding:6px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;gap:12px;overflow-x:auto;box-shadow:0 2px 6px rgba(27,46,38,.18);line-height:1.3;">` +
 		`<button id="ark-toc-toggle" type="button" aria-expanded="false" aria-controls="ark-toc-panel" data-stem="` + safeStemAttr + `" style="display:inline-flex;align-items:center;gap:5px;background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">&#9776; Pages</button>` +
-		`<a href="/" style="color:#F5F2EB;font-weight:700;text-decoration:none;font-size:14px;white-space:nowrap;">&#8592; Ark Home</a>` +
+		`<a href="/" style="color:#F5F2EB;font-weight:700;text-decoration:none;font-size:14px;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;">&#8592; Ark <img src="/static/ark-logo.png" alt="" style="width:20px;height:20px;border-radius:4px;object-fit:cover;"> Home</a>` +
 		`<span style="color:#436153;">|</span>` +
 		`<a href="/library" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Library</a>` +
 		`<a href="/read/zim/` + escStem + `/" style="color:#C9DAD1;font-weight:500;text-decoration:none;font-size:13px;white-space:nowrap;">Main Page</a>` +

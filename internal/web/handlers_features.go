@@ -160,29 +160,154 @@ func (s *Server) fetchLANDropPosts(limit int) []LANDropPostView {
 	return posts
 }
 
+type lanClientRecord struct {
+	Addr     string
+	Device   string
+	LastSeen time.Time
+}
+
+func clientHostFromReq(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.RemoteAddr)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host
+}
+
+func detectDeviceKind(ua string) string {
+	low := strings.ToLower(ua)
+	switch {
+	case strings.Contains(low, "iphone"):
+		return "iPhone"
+	case strings.Contains(low, "ipad"):
+		return "iPad"
+	case strings.Contains(low, "android"):
+		return "Android"
+	case strings.Contains(low, "windows"):
+		return "Windows"
+	case strings.Contains(low, "macintosh") || strings.Contains(low, "mac os"):
+		return "Mac"
+	case strings.Contains(low, "linux"):
+		return "Linux"
+	default:
+		return "Device"
+	}
+}
+
+func isLoopbackAddr(addr string) bool {
+	return addr == "" || addr == "127.0.0.1" || addr == "::1" || addr == "localhost"
+}
+
+func (s *Server) trackLANClient(r *http.Request) {
+	addr := clientHostFromReq(r)
+	if addr == "" {
+		return
+	}
+	s.lanClients.Store(addr, lanClientRecord{
+		Addr:     addr,
+		Device:   detectDeviceKind(r.UserAgent()),
+		LastSeen: time.Now(),
+	})
+}
+
+func (s *Server) buildConnectedDevices(posts []LANDropPostView) []LANDropDeviceView {
+	byAddr := make(map[string]*LANDropDeviceView)
+	ensure := func(addr string) *LANDropDeviceView {
+		if d, ok := byAddr[addr]; ok {
+			return d
+		}
+		remote := !isLoopbackAddr(addr)
+		lbl := addr
+		if !remote {
+			lbl = "Host (" + addr + ")"
+		}
+		d := &LANDropDeviceView{
+			Addr:     addr,
+			Label:    lbl,
+			IsRemote: remote,
+		}
+		byAddr[addr] = d
+		return d
+	}
+
+	now := time.Now()
+	s.lanClients.Range(func(_, val any) bool {
+		rec, ok := val.(lanClientRecord)
+		if !ok || now.Sub(rec.LastSeen) > 30*time.Minute {
+			return true
+		}
+		d := ensure(rec.Addr)
+		d.Online = now.Sub(rec.LastSeen) <= 5*time.Minute
+		d.LastSeen = rec.LastSeen.Format("15:04:05")
+		if d.IsRemote && rec.Device != "" {
+			d.Label = rec.Device + " · " + rec.Addr
+		} else if !d.IsRemote {
+			d.Label = "Host (" + rec.Device + ")"
+		}
+		return true
+	})
+
+	for _, p := range posts {
+		addr := strings.TrimSpace(p.RemoteAddr)
+		if addr == "" {
+			continue
+		}
+		d := ensure(addr)
+		d.PostCount++
+		if d.IsRemote && p.Author != "" && p.Author != "Guest" && !strings.Contains(d.Label, p.Author) {
+			d.Label = p.Author + " (" + addr + ")"
+		}
+	}
+
+	out := make([]LANDropDeviceView, 0, len(byAddr))
+	for _, d := range byAddr {
+		out = append(out, *d)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsRemote != out[j].IsRemote {
+			return out[i].IsRemote
+		}
+		if out[i].Online != out[j].Online {
+			return out[i].Online
+		}
+		if out[i].PostCount != out[j].PostCount {
+			return out[i].PostCount > out[j].PostCount
+		}
+		return out[i].Addr < out[j].Addr
+	})
+	return out
+}
+
 func (s *Server) handleLANDropPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	s.trackLANClient(r)
 	enabled := s.isSettingEnabled("lan_drop_enabled", true)
 	var posts []LANDropPostView
+	var devices []LANDropDeviceView
 	if enabled {
 		posts = s.fetchLANDropPosts(200)
+		devices = s.buildConnectedDevices(posts)
 	}
 	var shareURLs []string
 	for _, base := range s.listLANShareBaseURLs() {
 		shareURLs = append(shareURLs, base+"/lan-drop")
 	}
 	data := PageData{
-		Title:          "LAN Drop & Bulletin Board",
-		ActiveNav:      "lan-drop",
-		LANDropEnabled: enabled,
-		LANDropPosts:   posts,
-		LANShareURLs:   shareURLs,
-		Settings:       s.fetchSettings(),
-		FlashMsg:       strings.TrimSpace(r.URL.Query().Get("msg")),
-		FlashErr:       strings.TrimSpace(r.URL.Query().Get("err")),
+		Title:            "LAN Drop & Bulletin Board",
+		ActiveNav:        "lan-drop",
+		LANDropEnabled:   enabled,
+		LANDropPosts:     posts,
+		ConnectedDevices: devices,
+		LANShareURLs:     shareURLs,
+		Settings:         s.fetchSettings(),
+		FlashMsg:         strings.TrimSpace(r.URL.Query().Get("msg")),
+		FlashErr:         strings.TrimSpace(r.URL.Query().Get("err")),
 	}
 	s.render(w, "lan_drop.html", data)
 }
@@ -192,15 +317,34 @@ func (s *Server) handleAPILANDropPosts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	s.trackLANClient(r)
 	if !s.isSettingEnabled("lan_drop_enabled", true) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "enabled": false, "error": "LAN Drop is disabled in Settings."})
 		return
 	}
-	posts := s.fetchLANDropPosts(200)
+	allPosts := s.fetchLANDropPosts(200)
+	devices := s.buildConnectedDevices(allPosts)
+	filterDev := strings.TrimSpace(r.URL.Query().Get("device"))
+	posts := allPosts
+	if filterDev == "remote" {
+		posts = make([]LANDropPostView, 0)
+		for _, p := range allPosts {
+			if !isLoopbackAddr(strings.TrimSpace(p.RemoteAddr)) {
+				posts = append(posts, p)
+			}
+		}
+	} else if filterDev != "" {
+		posts = make([]LANDropPostView, 0)
+		for _, p := range allPosts {
+			if strings.TrimSpace(p.RemoteAddr) == filterDev {
+				posts = append(posts, p)
+			}
+		}
+	}
 	if posts == nil {
 		posts = []LANDropPostView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": true, "posts": posts})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": true, "posts": posts, "devices": devices})
 }
 
 func (s *Server) handleAPILANDropPost(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +365,7 @@ func (s *Server) handleAPILANDropPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	s.trackLANClient(r)
 	s.ensureLANDropTable()
 
 	const maxUploadBytes = 256 << 20
@@ -608,9 +753,9 @@ func (s *Server) serveOPDSRoot(w http.ResponseWriter) {
 		XmlnsO:  "http://opds-spec.org/2010/catalog",
 		XmlnsDC: "http://purl.org/dc/terms/",
 		ID:      "urn:ark:opds:root",
-		Title:   dev + " — Offline OPDS Catalog",
+		Title:   dev + " — OPDS Catalog",
 		Updated: now,
-		Author:  &opdsAuthor{Name: dev + " Offline Almanac"},
+		Author:  &opdsAuthor{Name: dev + " Almanac"},
 		Links:   s.baseOPDSLinks("/opds"),
 		Entries: []opdsEntry{
 			{

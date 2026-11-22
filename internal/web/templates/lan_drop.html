@@ -77,12 +77,26 @@
   </div>
 
   <div class="card" style="margin-bottom:0;">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.65rem;">
       <h2 style="margin:0;">Bulletin Feed</h2>
       <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         <input id="ld-filter" type="search" class="form-control" placeholder="Filter messages..." style="min-height:36px;padding:0.35rem 0.65rem;width:190px;">
         <button type="button" class="btn" style="min-height:36px;padding:0.35rem 0.75rem;" onclick="refreshLANDropFeed()">Refresh</button>
       </div>
+    </div>
+
+    <!-- Connected Devices Bar -->
+    <div id="ld-devices-bar" style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.9rem;padding:0.55rem 0.75rem;border-radius:8px;background:rgba(42,67,56,0.05);border:1px solid var(--color-border);">
+      <span class="secondary-text" style="font-size:12px;font-weight:600;margin-right:0.2rem;">Connected Devices:</span>
+      <button type="button" class="btn btn-primary ld-dev-btn" data-dev="" onclick="setLANDropDevice('')" style="min-height:28px;padding:0.15rem 0.6rem;font-size:12px;">All</button>
+      <button type="button" class="btn ld-dev-btn" data-dev="remote" onclick="setLANDropDevice('remote')" style="min-height:28px;padding:0.15rem 0.6rem;font-size:12px;">Remote LAN Only</button>
+      {{ range .ConnectedDevices }}
+      <button type="button" class="btn ld-dev-btn" data-dev="{{ .Addr }}" onclick="setLANDropDevice('{{ .Addr }}')" style="min-height:28px;padding:0.15rem 0.6rem;font-size:12px;display:inline-flex;align-items:center;gap:5px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:{{ if .Online }}#16A34A{{ else }}#9CA3AF{{ end }};display:inline-block;"></span>
+        <span>{{ .Label }}</span>
+        {{ if gt .PostCount 0 }}<span class="secondary-text">({{ .PostCount }})</span>{{ end }}
+      </button>
+      {{ end }}
     </div>
 
     <div id="ld-feed" style="display:flex;flex-direction:column;gap:0.75rem;">
@@ -167,20 +181,47 @@
   var filterEl = document.getElementById('ld-filter');
   if (filterEl) filterEl.addEventListener('input', applyFilter);
 
+  var selectedDevice = '';
+
+  function renderDevicesBar(devices) {
+    var bar = document.getElementById('ld-devices-bar');
+    if (!bar) return;
+    var html = '<span class="secondary-text" style="font-size:12px;font-weight:600;margin-right:0.2rem;">Connected Devices:</span>';
+    var mkBtn = function(dev, labelHtml) {
+      var cls = (selectedDevice === dev) ? 'btn btn-primary ld-dev-btn' : 'btn ld-dev-btn';
+      return '<button type="button" class="' + cls + '" data-dev="' + escHtml(dev) + '" onclick="setLANDropDevice(\'' + escHtml(dev) + '\')" style="min-height:28px;padding:0.15rem 0.6rem;font-size:12px;display:inline-flex;align-items:center;gap:5px;">' + labelHtml + '</button>';
+    };
+    html += mkBtn('', 'All');
+    html += mkBtn('remote', 'Remote LAN Only');
+    (devices || []).forEach(function(d) {
+      var dot = '<span style="width:7px;height:7px;border-radius:50%;background:' + (d.online ? '#16A34A' : '#9CA3AF') + ';display:inline-block;"></span>';
+      var cnt = d.post_count > 0 ? ' <span class="secondary-text">(' + d.post_count + ')</span>' : '';
+      html += mkBtn(d.addr, dot + '<span>' + escHtml(d.label || d.addr) + '</span>' + cnt);
+    });
+    bar.innerHTML = html;
+  }
+
+  window.setLANDropDevice = function(dev) {
+    selectedDevice = dev || '';
+    refreshLANDropFeed();
+  };
+
   window.refreshLANDropFeed = function() {
-    fetch('/api/lan-drop/posts')
+    var reqUrl = '/api/lan-drop/posts' + (selectedDevice ? ('?device=' + encodeURIComponent(selectedDevice)) : '');
+    fetch(reqUrl)
       .then(function(r) { return r.json(); })
       .then(function(d) {
         var feed = document.getElementById('ld-feed');
         if (!feed || !d || !d.ok) return;
+        if (d.devices) renderDevicesBar(d.devices);
         var posts = d.posts || [];
         if (posts.length === 0) {
-          feed.innerHTML = '<p class="secondary-text" id="ld-empty">No messages or files dropped yet. Post a message or drop a file on the left.</p>';
+          feed.innerHTML = '<p class="secondary-text" id="ld-empty">' + (selectedDevice ? 'No posts from this device filter yet.' : 'No messages or files dropped yet. Post a message or drop a file on the left.') + '</p>';
           return;
         }
         var html = '';
         posts.forEach(function(p) {
-          html += '<div class="ld-post-card" data-search="' + escHtml((p.author||'') + ' ' + (p.category||'') + ' ' + (p.message||'') + ' ' + (p.file_name||'')) + '" style="border:1px solid var(--color-border);border-radius:8px;padding:0.9rem 1rem;">' +
+          html += '<div class="ld-post-card" data-search="' + escHtml((p.author||'') + ' ' + (p.category||'') + ' ' + (p.message||'') + ' ' + (p.file_name||'') + ' ' + (p.remote_addr||'')) + '" style="border:1px solid var(--color-border);border-radius:8px;padding:0.9rem 1rem;">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.4rem;">' +
               '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">' +
                 '<strong>' + escHtml(p.author || 'Guest') + '</strong>' +

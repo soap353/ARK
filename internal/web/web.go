@@ -162,7 +162,18 @@ type PageData struct {
 	LANDropEnabled      bool
 	OPDSEnabled         bool
 	LANDropPosts        []LANDropPostView
+	ConnectedDevices    []LANDropDeviceView
 	LANShareURLs        []string
+}
+
+// LANDropDeviceView summarizes a connected LAN/local device for /lan-drop.
+type LANDropDeviceView struct {
+	Addr      string `json:"addr"`
+	Label     string `json:"label"`
+	Online    bool   `json:"online"`
+	IsRemote  bool   `json:"is_remote"`
+	PostCount int    `json:"post_count"`
+	LastSeen  string `json:"last_seen,omitempty"`
 }
 
 // LANDropPostView represents a message or file drop on /lan-drop.
@@ -216,6 +227,7 @@ type Server struct {
 	proxy        *apps.ProxyManager
 	queue        *jobs.QueueManager
 	sessionStart time.Time
+	lanClients   sync.Map
 }
 
 // NewServer initializes templates and returns a configured Server
@@ -456,6 +468,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	s.trackLANClient(r)
 
 	installedApps, _ := s.fetchApps()
 

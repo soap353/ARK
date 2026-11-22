@@ -2444,13 +2444,25 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	toolsHTML := w.Body.String()
-	for _, want := range []string{"Graphing Calculator", `id="gc-canvas"`, `id="gc-settings-pop"`, `id="gc-keypad"`, "Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Offline Unit Converter", "<strong>Inputs:</strong>", "<strong>Outputs:</strong>"} {
+	for _, want := range []string{"Graphing Calculator", `id="gc-canvas"`, `id="gc-settings-pop"`, `id="gc-keypad"`, "Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Unit Converter", "<strong>Inputs:</strong>", "<strong>Outputs:</strong>"} {
 		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
 			t.Errorf("expected /tools (status=%d) to contain %q", w.Code, want)
 		}
 	}
 	if strings.Contains(toolsHTML, "cdn.jsdelivr.net") || strings.Contains(toolsHTML, "unpkg.com") {
 		t.Errorf("/tools must not reference external CDNs")
+	}
+	if strings.Contains(toolsHTML, "r=sin(3") || strings.Contains(toolsHTML, "<title>Field Calculators — Ark Offline") {
+		t.Errorf("/tools must omit old hint text and Offline in page title")
+	}
+	logoReq := httptest.NewRequest(http.MethodGet, "/static/ark-logo.png", nil)
+	logoW := httptest.NewRecorder()
+	mux.ServeHTTP(logoW, logoReq)
+	if logoW.Code != http.StatusOK || logoW.Body.Len() < 100 {
+		t.Errorf("expected /static/ark-logo.png to serve PNG, got %d len=%d", logoW.Code, logoW.Body.Len())
+	}
+	if !strings.Contains(toolsHTML, `src="/static/ark-logo.png"`) {
+		t.Errorf("expected layout to include /static/ark-logo.png next to Ark brand")
 	}
 
 	// 2. Settings renders toggles for LAN Drop and OPDS Feed
@@ -2472,6 +2484,7 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 	_ = mw.Close()
 
 	req = httptest.NewRequest(http.MethodPost, "/api/lan-drop/post?ajax=1", &body)
+	req.RemoteAddr = "192.168.1.42:54321"
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 	w = httptest.NewRecorder()
@@ -2494,11 +2507,11 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 		t.Errorf("expected uploaded file bytes, got %d: %q", w.Code, w.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/lan-drop/posts", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/lan-drop/posts?device=remote", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Battery bank charged 100%") {
-		t.Errorf("expected posted message in /api/lan-drop/posts, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Battery bank charged 100%") || !strings.Contains(w.Body.String(), "192.168.1.42") {
+		t.Errorf("expected posted message and connected device in /api/lan-drop/posts?device=remote, got %d: %s", w.Code, w.Body.String())
 	}
 
 	delForm := url.Values{"id": {postResp.Post.ID}}
