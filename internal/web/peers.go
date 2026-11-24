@@ -1,14 +1,17 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path"
@@ -200,6 +203,7 @@ func (s *Server) runPeerListener(ctx context.Context) {
 			AllowDownloads: b.AllowDownloads,
 			LastSeen:       time.Now(),
 		})
+		s.peerByID.Store(b.InstanceID, baseURL)
 	}
 }
 
@@ -467,11 +471,13 @@ func (s *Server) handleAPIPeersList(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = base
 			}
+			normBase := strings.TrimRight(base, "/")
+			s.peerByID.Store(catResp.ID, normBase)
 			mu.Lock()
 			peers = append(peers, PeerLibraryView{
 				ID:             catResp.ID,
 				Name:           name,
-				BaseURL:        strings.TrimRight(base, "/"),
+				BaseURL:        normBase,
 				AllowDownloads: catResp.AllowDownloads,
 				Items:          filtered,
 			})
@@ -556,4 +562,96 @@ func (s *Server) handleAPIPeersPull(w http.ResponseWriter, r *http.Request) {
 		"job_id": job.ID,
 		"msg":    "Queued download from peer: " + label,
 	})
+}
+
+func (s *Server) resolvePeerBaseByID(peerID string) (string, bool) {
+	if v, ok := s.peerByID.Load(peerID); ok {
+		if base, ok2 := v.(string); ok2 && base != "" {
+			return base, true
+		}
+	}
+	var found string
+	s.discoveredPeers.Range(func(_, v any) bool {
+		if rec, ok := v.(discoveredPeerRecord); ok && rec.InstanceID == peerID && rec.BaseURL != "" {
+			found = rec.BaseURL
+			return false
+		}
+		return true
+	})
+	if found != "" {
+		s.peerByID.Store(peerID, found)
+		return found, true
+	}
+	return "", false
+}
+
+func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/peer/")
+	peerID, rest, hasSlash := strings.Cut(trimmed, "/")
+	if peerID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if decoded, err := url.PathUnescape(peerID); err == nil && decoded != "" {
+		peerID = decoded
+	}
+	baseURL, ok := s.resolvePeerBaseByID(peerID)
+	if !ok {
+		http.Error(w, "Peer Ark instance is not currently reachable.", http.StatusBadGateway)
+		return
+	}
+	target, err := url.Parse(baseURL)
+	if err != nil {
+		http.Error(w, "Invalid peer URL", http.StatusBadGateway)
+		return
+	}
+
+	targetPath := "/"
+	if hasSlash {
+		targetPath = "/" + rest
+	}
+	prefix := "/peer/" + url.PathEscape(peerID)
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	origDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		origDirector(req)
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		req.URL.Path = targetPath
+		req.URL.RawPath = ""
+		req.URL.RawQuery = r.URL.RawQuery
+		req.Host = target.Host
+		req.Header.Del("Accept-Encoding")
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			if strings.HasPrefix(loc, baseURL+"/") {
+				loc = strings.TrimPrefix(loc, baseURL)
+			}
+			if strings.HasPrefix(loc, "/read/zim/") || strings.HasPrefix(loc, "/media/") || strings.HasPrefix(loc, "/api/") {
+				resp.Header.Set("Location", prefix+loc)
+			}
+		}
+		ct := strings.ToLower(resp.Header.Get("Content-Type"))
+		if strings.Contains(ct, "text/html") && resp.Body != nil {
+			body, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			for _, p := range []string{"/read/zim/", "/media/", "/api/zim/", "/api/library/", "/api/reader/"} {
+				body = bytes.ReplaceAll(body, []byte(`"`+p), []byte(`"`+prefix+p))
+				body = bytes.ReplaceAll(body, []byte(`'`+p), []byte(`'`+prefix+p))
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			resp.ContentLength = int64(len(body))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+		}
+		return nil
+	}
+	proxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, _ error) {
+		http.Error(rw, "Peer Ark instance unreachable.", http.StatusBadGateway)
+	}
+	proxy.ServeHTTP(w, r)
 }

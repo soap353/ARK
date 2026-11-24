@@ -233,6 +233,7 @@ type Server struct {
 	lanClients      sync.Map
 	instanceID      string
 	discoveredPeers sync.Map
+	peerByID        sync.Map
 	onShutdown      func()
 }
 
@@ -442,6 +443,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/peers/download", s.handleAPIPeersDownload)
 	mux.HandleFunc("/api/peers/list", s.handleAPIPeersList)
 	mux.HandleFunc("/api/peers/pull", s.localOnly(s.handleAPIPeersPull))
+	mux.HandleFunc("/peer/", s.handlePeerProxy)
 
 	// App reverse proxy
 	if s.proxy != nil {

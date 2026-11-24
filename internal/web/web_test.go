@@ -2787,13 +2787,17 @@ func TestRemoteDeleteAndDownloadRestrictionsAndPeerDiscovery(t *testing.T) {
 		t.Errorf("expected remote GET /media/docs/local_guide.pdf to succeed, got %d", w.Code)
 	}
 
-	// Remote /library hides #ctx-delete; remote /get-content disables download buttons
+	// Remote /library hides #ctx-delete and omits category filter presets; remote /get-content disables download buttons
 	req = httptest.NewRequest(http.MethodGet, "/library", nil)
 	req.RemoteAddr = "192.168.1.99:55555"
 	w = httptest.NewRecorder()
 	muxA.ServeHTTP(w, req)
-	if strings.Contains(w.Body.String(), `id="ctx-delete"`) {
+	libRemoteBody := w.Body.String()
+	if strings.Contains(libRemoteBody, `id="ctx-delete"`) {
 		t.Errorf("expected remote /library to hide #ctx-delete")
+	}
+	if strings.Contains(libRemoteBody, "ZIM Archives") || strings.Contains(libRemoteBody, "/library?cat=Music") {
+		t.Errorf("expected /library to omit category filter preset buttons")
 	}
 	req = httptest.NewRequest(http.MethodGet, "/get-content", nil)
 	req.RemoteAddr = "192.168.1.99:55555"
@@ -2803,13 +2807,27 @@ func TestRemoteDeleteAndDownloadRestrictionsAndPeerDiscovery(t *testing.T) {
 		t.Errorf("expected remote /get-content to grey out download buttons")
 	}
 
-	// 2. Peer A discovers Peer B via /api/peers/list and sees Workshop-PC's item
+	// 2. Peer A discovers Peer B via /api/peers/list (both local and remote devices) and proxies peer content via /peer/<id>/...
 	req = httptest.NewRequest(http.MethodGet, "/api/peers/list", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
+	req.RemoteAddr = "192.168.1.99:55555"
 	w = httptest.NewRecorder()
 	muxA.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Workshop-PC") || !strings.Contains(w.Body.String(), "field_manual.pdf") {
-		t.Fatalf("expected /api/peers/list to return Workshop-PC with field_manual.pdf, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected remote /api/peers/list to return Workshop-PC with field_manual.pdf, got %d: %s", w.Code, w.Body.String())
+	}
+	var peerListResp struct {
+		Peers []PeerLibraryView `json:"peers"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &peerListResp)
+	if len(peerListResp.Peers) != 1 || peerListResp.Peers[0].ID == "" {
+		t.Fatalf("expected 1 peer with ID, got %+v", peerListResp.Peers)
+	}
+	peerProxyReq := httptest.NewRequest(http.MethodGet, "/peer/"+url.PathEscape(peerListResp.Peers[0].ID)+"/media/docs/field_manual.pdf", nil)
+	peerProxyReq.RemoteAddr = "192.168.1.99:55555"
+	peerProxyW := httptest.NewRecorder()
+	muxA.ServeHTTP(peerProxyW, peerProxyReq)
+	if peerProxyW.Code != http.StatusOK || !strings.Contains(peerProxyW.Body.String(), "peer manual bytes") {
+		t.Errorf("expected /peer/<id>/media/docs/field_manual.pdf to proxy peer file, got %d: %s", peerProxyW.Code, peerProxyW.Body.String())
 	}
 
 	// 3. Peer A pulls field_manual.pdf from Peer B via POST /api/peers/pull

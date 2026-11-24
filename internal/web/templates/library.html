@@ -29,17 +29,8 @@
 <div class="card">
   <form action="/library" method="GET" style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
     <input type="search" name="q" value="{{ .InitialQuery }}" placeholder="Filter library by filename or title..." class="form-control" style="flex: 1; min-width: 220px;">
-    {{ if .SelectedCategory }}<input type="hidden" name="cat" value="{{ .SelectedCategory }}">{{ end }}
     <button type="submit" class="btn btn-primary">Filter</button>
   </form>
-
-  <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-    <a href="/library{{ if .InitialQuery }}?q={{ .InitialQuery }}{{ end }}" class="btn {{ if or (eq .SelectedCategory "") (eq .SelectedCategory "all") }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">All</a>
-    <a href="/library?cat=ZIM{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "ZIM" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">ZIM Archives</a>
-    <a href="/library?cat=Documents{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Documents" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Documents</a>
-    <a href="/library?cat=Video{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Video" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Videos</a>
-    <a href="/library?cat=Music{{ if .InitialQuery }}&q={{ .InitialQuery }}{{ end }}" class="btn {{ if eq .SelectedCategory "Music" }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.2rem 0.9rem;">Music</a>
-  </div>
 
   {{ if .Items }}
     <div class="library-grid">
@@ -295,8 +286,9 @@
             '<div class="card" style="margin-bottom: 0;">' +
               '<div class="library-grid">';
           peer.items.forEach(function(it) {
-            var openHref = base + (it.open_url || '');
-            var iconHref = base + (it.icon_url || '');
+            var peerPrefix = '/peer/' + encodeURIComponent(peer.id || '');
+            var openHref = peerPrefix + (it.open_url || '');
+            var iconHref = peerPrefix + (it.icon_url || '');
             html += '<div class="library-tile peer-library-tile"' +
               ' style="flex-direction: column; align-items: stretch; gap: 0.65rem;"' +
               ' data-peer-base="' + escapeHTML(base) + '"' +
