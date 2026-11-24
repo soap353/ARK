@@ -111,6 +111,7 @@
   <div id="ark-dl-toast-wrap" aria-live="polite"></div>
 
   <script>
+    window.ARK_IS_LOCAL = {{ if .IsLocal }}true{{ else }}false{{ end }};
     function toggleSidebar() {
       var sb = document.getElementById('ark-sidebar');
       var bd = document.getElementById('sidebar-backdrop');
@@ -144,6 +145,16 @@
     function arkSyncDownloadButtons() {
       var forms = document.querySelectorAll('form[action="/api/jobs"], form[action="/api/maps/extract"]');
       if (!forms || forms.length === 0) return;
+      if (!window.ARK_IS_LOCAL) {
+        forms.forEach(function(form) {
+          var btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            btn.disabled = true;
+            btn.title = 'Downloads are only available on the host computer';
+          }
+        });
+        return;
+      }
       fetch('/api/jobs')
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(data) {

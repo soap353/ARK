@@ -223,14 +223,16 @@ type MapRegionView struct {
 
 // Server handles Ark web UI and API routing
 type Server struct {
-	db           *sql.DB
-	dataDir      string
-	templates    map[string]*template.Template
-	docker       *docker.Client
-	proxy        *apps.ProxyManager
-	queue        *jobs.QueueManager
-	sessionStart time.Time
-	lanClients   sync.Map
+	db              *sql.DB
+	dataDir         string
+	templates       map[string]*template.Template
+	docker          *docker.Client
+	proxy           *apps.ProxyManager
+	queue           *jobs.QueueManager
+	sessionStart    time.Time
+	lanClients      sync.Map
+	instanceID      string
+	discoveredPeers sync.Map
 }
 
 // NewServer initializes templates and returns a configured Server
@@ -274,6 +276,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		templates:    tmplMap,
 		proxy:        apps.NewProxyManager(),
 		sessionStart: time.Now().UTC().Truncate(time.Second),
+		instanceID:   generateInstanceID(),
 	}
 	s.seedDefaultApps()
 	s.ensureLANDropTable()
@@ -382,22 +385,22 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 
 	// API endpoints
 	mux.HandleFunc("/api/jobs", s.handleAPIJobs)
-	mux.HandleFunc("/api/jobs/cancel", s.handleAPIJobCancel)
-	mux.HandleFunc("/api/jobs/retry", s.handleAPIJobRetry)
-	mux.HandleFunc("/api/jobs/delete", s.handleAPIJobDelete)
+	mux.HandleFunc("/api/jobs/cancel", s.localOnly(s.handleAPIJobCancel))
+	mux.HandleFunc("/api/jobs/retry", s.localOnly(s.handleAPIJobRetry))
+	mux.HandleFunc("/api/jobs/delete", s.localOnly(s.handleAPIJobDelete))
 	mux.HandleFunc("/api/jobs/status", s.handleAPIJobStatus)
 	mux.HandleFunc("/api/kiwix/catalog", s.handleAPIKiwixCatalog)
-	mux.HandleFunc("/api/library/delete", s.handleAPILibraryDelete)
+	mux.HandleFunc("/api/library/delete", s.localOnly(s.handleAPILibraryDelete))
 	mux.HandleFunc("/api/library/updates", s.handleAPILibraryUpdates)
 	mux.HandleFunc("/api/library/icon", s.handleAPILibraryIcon)
 	mux.HandleFunc("/api/storage/check-space", s.handleAPIStorageCheckSpace)
 	mux.HandleFunc("/api/update/check", s.handleAPIUpdateCheck)
-	mux.HandleFunc("/api/apps/install", s.handleAPIAppInstall)
-	mux.HandleFunc("/api/apps/start", s.handleAPIAppStart)
-	mux.HandleFunc("/api/apps/stop", s.handleAPIAppStop)
-	mux.HandleFunc("/api/apps/uninstall", s.handleAPIAppUninstall)
-	mux.HandleFunc("/api/apps/custom", s.handleAPICustomAppSave)
-	mux.HandleFunc("/api/apps/update", s.handleAPIAppUpdateImage)
+	mux.HandleFunc("/api/apps/install", s.localOnly(s.handleAPIAppInstall))
+	mux.HandleFunc("/api/apps/start", s.localOnly(s.handleAPIAppStart))
+	mux.HandleFunc("/api/apps/stop", s.localOnly(s.handleAPIAppStop))
+	mux.HandleFunc("/api/apps/uninstall", s.localOnly(s.handleAPIAppUninstall))
+	mux.HandleFunc("/api/apps/custom", s.localOnly(s.handleAPICustomAppSave))
+	mux.HandleFunc("/api/apps/update", s.localOnly(s.handleAPIAppUpdateImage))
 	mux.HandleFunc("/api/system/sse", s.localOnly(system.NewSSEFeed(s.dataDir).ServeHTTP))
 	mux.HandleFunc("/api/system/runtime", s.localOnly(s.handleAPISystemRuntime))
 	mux.HandleFunc("/api/system/time", s.localOnly(s.handleAPISystemTime))
@@ -406,10 +409,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/zim/pages", s.handleAPIZIMPages)
 	mux.HandleFunc("/api/lan-drop/posts", s.handleAPILANDropPosts)
 	mux.HandleFunc("/api/lan-drop/post", s.handleAPILANDropPost)
-	mux.HandleFunc("/api/lan-drop/delete", s.handleAPILANDropDelete)
+	mux.HandleFunc("/api/lan-drop/delete", s.localOnly(s.handleAPILANDropDelete))
 	mux.HandleFunc("/api/lan-drop/file/", s.handleAPILANDropFile)
-	mux.HandleFunc("/api/containers/restart", s.handleAPIContainerRestart)
-	mux.HandleFunc("/api/containers/logs", s.handleAPIContainerLogs)
+	mux.HandleFunc("/api/containers/restart", s.localOnly(s.handleAPIContainerRestart))
+	mux.HandleFunc("/api/containers/logs", s.localOnly(s.handleAPIContainerLogs))
 	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
 	mux.HandleFunc("/api/ai/test", s.handleAPIAITest)
 	mux.HandleFunc("/api/ai/status", s.handleAPIAIStatus)
@@ -417,18 +420,22 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/ai/sessions", s.handleAPIAISessions)
 	mux.HandleFunc("/api/ai/sessions/get", s.handleAPIAISessionGet)
 	mux.HandleFunc("/api/ai/sessions/pin", s.handleAPIAISessionPin)
-	mux.HandleFunc("/api/ai/sessions/delete", s.handleAPIAISessionDelete)
-	mux.HandleFunc("/api/ai/index", s.handleAPIAIIndex)
-	mux.HandleFunc("/api/ai/index-article", s.handleAPIAIIndexArticle)
-	mux.HandleFunc("/api/ai/knowledge/remove", s.handleAPIAIKnowledgeRemove)
+	mux.HandleFunc("/api/ai/sessions/delete", s.localOnly(s.handleAPIAISessionDelete))
+	mux.HandleFunc("/api/ai/index", s.localOnly(s.handleAPIAIIndex))
+	mux.HandleFunc("/api/ai/index-article", s.localOnly(s.handleAPIAIIndexArticle))
+	mux.HandleFunc("/api/ai/knowledge/remove", s.localOnly(s.handleAPIAIKnowledgeRemove))
 	mux.HandleFunc("/api/ai/models", s.handleAPIAIModels)
-	mux.HandleFunc("/api/ai/models/pull", s.handleAPIAIModelPull)
-	mux.HandleFunc("/api/ai/models/delete", s.handleAPIAIModelDelete)
-	mux.HandleFunc("/api/ai/models/select", s.handleAPIAIModelSelect)
-	mux.HandleFunc("/api/maps/extract", s.handleAPIMapsExtract)
+	mux.HandleFunc("/api/ai/models/pull", s.localOnly(s.handleAPIAIModelPull))
+	mux.HandleFunc("/api/ai/models/delete", s.localOnly(s.handleAPIAIModelDelete))
+	mux.HandleFunc("/api/ai/models/select", s.localOnly(s.handleAPIAIModelSelect))
+	mux.HandleFunc("/api/maps/extract", s.localOnly(s.handleAPIMapsExtract))
 	mux.HandleFunc("/api/maps/pins", s.handleAPIMapPins)
 	mux.HandleFunc("/api/maps/tilejson", s.handleAPIMapsTileJSON)
 	mux.HandleFunc("/api/reader/theme", s.handleAPIReaderTheme)
+	mux.HandleFunc("/api/peers/catalog", s.handleAPIPeersCatalog)
+	mux.HandleFunc("/api/peers/download", s.handleAPIPeersDownload)
+	mux.HandleFunc("/api/peers/list", s.handleAPIPeersList)
+	mux.HandleFunc("/api/peers/pull", s.localOnly(s.handleAPIPeersPull))
 
 	// App reverse proxy
 	if s.proxy != nil {
@@ -694,6 +701,10 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isLocalRequest(r) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "forbidden: downloads are only allowed from the local host"})
 		return
 	}
 
@@ -1177,9 +1188,7 @@ func (s *Server) handleAPIAppStart(w http.ResponseWriter, r *http.Request) {
 		redirect = sanitizeLocalRedirect(redirect)
 	}
 	if appID != "" {
-		startCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		if err := s.startAppContainer(startCtx, appID); err != nil {
+		if err := s.startAppContainer(context.Background(), appID); err != nil {
 			log.Printf("[Ark] Failed to start app %s: %v", appID, err)
 			if s.db != nil {
 				_, _ = s.db.Exec("UPDATE app_states SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?", appID)

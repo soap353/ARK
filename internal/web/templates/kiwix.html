@@ -174,7 +174,7 @@ function fetchKiwixPage() {
             '<input type="hidden" name="type" value="kiwix_zim">' +
             '<input type="hidden" name="target" value="' + escHTML(item.download_url) + '">' +
             '<input type="hidden" name="size_bytes" value="' + (item.size_bytes || 0) + '">' +
-            '<button type="submit" class="' + btnCls + '" style="min-height:36px;padding:0.25rem 0.85rem;font-size:13px;white-space:nowrap;">' + btnTxt + '</button>' +
+            '<button type="submit" class="' + btnCls + '"' + (!window.ARK_IS_LOCAL ? ' disabled title="Downloads are only available on the host computer"' : '') + ' style="min-height:36px;padding:0.25rem 0.85rem;font-size:13px;white-space:nowrap;">' + btnTxt + '</button>' +
           '</form></td>' +
         '</tr>';
       }).join('');

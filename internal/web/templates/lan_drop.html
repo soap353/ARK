@@ -113,7 +113,7 @@
           </div>
           <div style="display:flex;align-items:center;gap:0.6rem;">
             <span class="secondary-text" style="font-size:12px;">{{ .CreatedAt }}</span>
-            <button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost('{{ .ID }}')">Delete</button>
+            {{ if $.IsLocal }}<button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost('{{ .ID }}')">Delete</button>{{ end }}
           </div>
         </div>
         {{ if .Message }}
@@ -230,7 +230,7 @@
               '</div>' +
               '<div style="display:flex;align-items:center;gap:0.6rem;">' +
                 '<span class="secondary-text" style="font-size:12px;">' + escHtml(p.created_at) + '</span>' +
-                '<button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost(\'' + escHtml(p.id) + '\')">Delete</button>' +
+                (window.ARK_IS_LOCAL ? '<button type="button" class="btn" style="min-height:28px;padding:0.2rem 0.55rem;font-size:12px;" onclick="deleteLANDropPost(\'' + escHtml(p.id) + '\')">Delete</button>' : '') +
               '</div>' +
             '</div>' +
             (p.message ? '<div style="white-space:pre-wrap;word-break:break-word;margin:0.25rem 0 0.4rem;">' + escHtml(p.message) + '</div>' : '') +

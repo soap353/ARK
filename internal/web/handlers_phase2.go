@@ -81,11 +81,14 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 		return "false"
 	}
 	_ = s.saveSettings(map[string]string{
-		"device_name":      strings.TrimSpace(r.FormValue("device_name")),
-		"port":             strings.TrimSpace(r.FormValue("port")),
-		"lan_enabled":      parseCheckbox("lan_enabled"),
-		"lan_drop_enabled": parseCheckbox("lan_drop_enabled"),
-		"opds_enabled":     parseCheckbox("opds_enabled"),
+		"device_name":          strings.TrimSpace(r.FormValue("device_name")),
+		"port":                 strings.TrimSpace(r.FormValue("port")),
+		"lan_enabled":          parseCheckbox("lan_enabled"),
+		"lan_drop_enabled":     parseCheckbox("lan_drop_enabled"),
+		"opds_enabled":         parseCheckbox("opds_enabled"),
+		"peer_discoverable":    parseCheckbox("peer_discoverable"),
+		"peer_allow_downloads": parseCheckbox("peer_allow_downloads"),
+		"peer_manual_hosts":    strings.TrimSpace(r.FormValue("peer_manual_hosts")),
 	})
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)
 }

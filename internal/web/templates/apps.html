@@ -233,10 +233,16 @@ function openAppModal(btn) {
     actions.appendChild(logBtn);
   }
 
-  if (status !== 'not_installed' || isCustom) {
+  if (window.ARK_IS_LOCAL && (status !== 'not_installed' || isCustom)) {
     var extra = isCustom ? '<input type="hidden" name="delete_custom" value="1">' : '';
     var rmLabel = status === 'not_installed' ? 'Delete Custom App' : 'Uninstall';
     actions.appendChild(makeActionForm('/api/apps/uninstall', id, rmLabel, 'btn-danger', '/apps', extra));
+  }
+  if (!window.ARK_IS_LOCAL) {
+    actions.querySelectorAll('form button[type="submit"]').forEach(function(b) {
+      b.disabled = true;
+      b.title = 'App management is only available on the host computer';
+    });
   }
 
   var dlg = document.getElementById('app-modal');

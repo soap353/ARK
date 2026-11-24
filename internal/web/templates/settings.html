@@ -47,6 +47,21 @@
         <label for="opds_enabled">Enable OPDS 1.2 XML feed at <a href="/opds" target="_blank">/opds</a> (for KOReader, ReadEra, Calibre)</label>
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">Ark Network Discovery</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px;">
+        <input type="checkbox" id="peer_discoverable" name="peer_discoverable" {{ if ne (index .Settings "peer_discoverable") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="peer_discoverable">Make this computer discoverable to other Ark instances on the same network</label>
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px;">
+        <input type="checkbox" id="peer_allow_downloads" name="peer_allow_downloads" {{ if ne (index .Settings "peer_allow_downloads") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="peer_allow_downloads">Allow other Ark instances to download library items from this computer</label>
+      </div>
+      <div style="margin-top: 0.5rem;">
+        <label for="peer_manual_hosts" class="secondary-text" style="display: block; font-size: 13px; margin-bottom: 0.25rem;">Manual Peer Addresses (optional, comma-separated, for networks blocking UDP broadcast)</label>
+        <input type="text" id="peer_manual_hosts" name="peer_manual_hosts" class="form-control" value="{{ index .Settings "peer_manual_hosts" }}" placeholder="e.g. 192.168.1.50:8080, 10.0.0.12:8080">
+      </div>
+    </div>
     <button type="submit" class="btn btn-primary">Save General Settings</button>
   </form>
 </div>

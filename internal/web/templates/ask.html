@@ -54,7 +54,7 @@
         </select>
         <button type="button" class="btn" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px;" onclick="startNewChat()">New Chat</button>
         <button type="button" id="ask-pin-btn" class="btn" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="togglePinSession()">Keep Permanently</button>
-        <button type="button" id="ask-del-btn" class="btn btn-danger" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="deleteCurrentSession()">Delete</button>
+        {{ if .IsLocal }}<button type="button" id="ask-del-btn" class="btn btn-danger" style="min-height: 34px; padding: 0.2rem 0.65rem; font-size: 13px; display: none;" onclick="deleteCurrentSession()">Delete</button>{{ end }}
       </div>
     </div>
     <div id="chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 0.75rem; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
@@ -139,10 +139,12 @@
           <td class="tabular">{{ .IndexedPages }}</td>
           <td class="secondary-text" style="font-size: 13px;">{{ .SourcePath }}</td>
           <td>
+            {{ if $.IsLocal }}
             <form action="/api/ai/knowledge/remove" method="POST" style="margin: 0;">
               <input type="hidden" name="id" value="{{ .ID }}">
               <button type="submit" class="btn btn-danger" style="min-height: 32px; padding: 0.15rem 0.65rem; font-size: 14px;">Remove</button>
             </form>
+            {{ end }}
           </td>
         </tr>
         {{ end }}

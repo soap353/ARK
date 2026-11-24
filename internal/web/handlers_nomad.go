@@ -426,8 +426,7 @@ func (s *Server) handleAPIAppUpdateImage(w http.ResponseWriter, r *http.Request)
 		http.Redirect(w, r, "/apps?err="+url.QueryEscape("Docker daemon unavailable"), http.StatusSeeOther)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-	defer cancel()
+	ctx := r.Context()
 	if !strings.HasPrefix(m.Image, "ark/") {
 		if err := s.docker.Pull(ctx, m.Image); err != nil {
 			http.Redirect(w, r, "/apps?err="+url.QueryEscape("Pull failed for "+m.Image+": "+err.Error()), http.StatusSeeOther)
@@ -866,6 +865,14 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		action := strings.TrimSpace(r.FormValue("action"))
 		if action == "delete" {
+			if !isLocalRequest(r) {
+				if wantsJSON {
+					writeJSONError(w, http.StatusForbidden, "forbidden: deleting pins is only allowed from the local host")
+					return
+				}
+				http.Error(w, "Forbidden: deleting pins is only allowed from the local host.", http.StatusForbidden)
+				return
+			}
 			id := strings.TrimSpace(r.FormValue("id"))
 			if s.db != nil && id != "" {
 				_, _ = s.db.Exec(`DELETE FROM map_markers WHERE id = ?`, id)

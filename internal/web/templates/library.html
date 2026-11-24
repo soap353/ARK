@@ -82,16 +82,29 @@
   {{ end }}
 </div>
 
-<!-- Right-click Context Menu for Library Items -->
+<!-- Discovered Peer Ark Instances on LAN (shown only when available and non-empty) -->
+<div id="peer-libraries-wrap" style="display: none; margin-top: 1.5rem;" data-query="{{ .InitialQuery }}" data-cat="{{ .SelectedCategory }}"></div>
+
+<!-- Right-click Context Menu for Local Library Items -->
 <div id="lib-context-menu" class="context-menu" role="menu" aria-label="Library item actions">
   <a id="ctx-open" href="#" target="_blank" rel="noopener noreferrer" role="menuitem">Open</a>
+  {{ if .IsLocal }}
   <button type="button" id="ctx-add-ai" role="menuitem">Add to AI</button>
   <button type="button" id="ctx-delete" class="ctx-danger" role="menuitem">Delete</button>
+  {{ end }}
 </div>
 
+<!-- Right-click Context Menu for Peer Ark Library Items -->
+<div id="peer-context-menu" class="context-menu" role="menu" aria-label="Peer library item actions">
+  <a id="peer-ctx-open" href="#" target="_blank" rel="noopener noreferrer" role="menuitem">Open</a>
+  <button type="button" id="peer-ctx-download" role="menuitem">Download to this computer</button>
+</div>
+
+{{ if .IsLocal }}
 <form id="ctx-delete-form" action="/api/library/delete" method="POST" style="display: none;">
   <input type="hidden" id="ctx-delete-rel" name="rel_path" value="">
 </form>
+{{ end }}
 
 <script>
 (function() {
@@ -101,20 +114,27 @@
   var delBtn = document.getElementById('ctx-delete');
   var delRelInput = document.getElementById('ctx-delete-rel');
   var delForm = document.getElementById('ctx-delete-form');
+  var peerMenu = document.getElementById('peer-context-menu');
+  var peerOpenEl = document.getElementById('peer-ctx-open');
+  var peerDlBtn = document.getElementById('peer-ctx-download');
   var activeTile = null;
+  var activePeerTile = null;
 
   function hideMenu() {
-    menu.style.display = 'none';
+    if (menu) menu.style.display = 'none';
+    if (peerMenu) peerMenu.style.display = 'none';
     activeTile = null;
+    activePeerTile = null;
   }
 
-  document.querySelectorAll('.library-tile').forEach(function(tile) {
+  document.querySelectorAll('.library-tile:not(.peer-library-tile)').forEach(function(tile) {
     tile.addEventListener('contextmenu', function(ev) {
       ev.preventDefault();
+      hideMenu();
       activeTile = tile;
       openEl.href = tile.getAttribute('data-open') || '#';
-      aiBtn.disabled = !tile.getAttribute('data-rel');
-      delBtn.disabled = !tile.getAttribute('data-rel');
+      if (aiBtn) aiBtn.disabled = !tile.getAttribute('data-rel');
+      if (delBtn) delBtn.disabled = !tile.getAttribute('data-rel');
 
       var x = Math.min(ev.clientX, window.innerWidth - 205);
       var y = Math.min(ev.clientY, window.innerHeight - 140);
@@ -125,7 +145,7 @@
   });
 
   document.addEventListener('click', function(ev) {
-    if (!menu.contains(ev.target)) hideMenu();
+    if ((!menu || !menu.contains(ev.target)) && (!peerMenu || !peerMenu.contains(ev.target))) hideMenu();
   });
   document.addEventListener('keydown', function(ev) {
     if (ev.key === 'Escape') hideMenu();
@@ -164,7 +184,7 @@
     });
   }
 
-  aiBtn.addEventListener('click', function() {
+  if (aiBtn) aiBtn.addEventListener('click', function() {
     if (!activeTile) return;
     var rel = activeTile.getAttribute('data-rel');
     var title = activeTile.getAttribute('data-title') || activeTile.getAttribute('data-file');
@@ -197,7 +217,7 @@
       });
   });
 
-  delBtn.addEventListener('click', function() {
+  if (delBtn) delBtn.addEventListener('click', function() {
     if (!activeTile) return;
     var rel = activeTile.getAttribute('data-rel');
     var name = activeTile.getAttribute('data-file') || activeTile.getAttribute('data-title');
@@ -208,6 +228,133 @@
       delForm.submit();
     }
   });
+
+  if (peerDlBtn) peerDlBtn.addEventListener('click', function() {
+    if (!activePeerTile || peerDlBtn.disabled) return;
+    var base = activePeerTile.getAttribute('data-peer-base') || '';
+    var rel = activePeerTile.getAttribute('data-rel') || '';
+    var title = activePeerTile.getAttribute('data-title') || activePeerTile.getAttribute('data-file') || '';
+    var sizeBytes = activePeerTile.getAttribute('data-size-bytes') || '0';
+    hideMenu();
+    if (!base || !rel) return;
+
+    showToast('<strong>Queueing download:</strong> ' + escapeHTML(title) + '...', false);
+    var body = new URLSearchParams();
+    body.set('peer_base_url', base);
+    body.set('rel_path', rel);
+    body.set('title', title);
+    body.set('size_bytes', sizeBytes);
+
+    fetch('/api/peers/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: body.toString()
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          showToast('<strong>' + escapeHTML(data.msg || 'Download queued') + '</strong>', false);
+          if (typeof arkShowDownloadToast === 'function' && !data.skipped) {
+            arkShowDownloadToast('Downloading ' + title);
+          }
+        } else {
+          showToast('<strong>Download failed:</strong> ' + escapeHTML(data.error || 'Could not start download.'), true);
+        }
+      })
+      .catch(function(err) {
+        showToast('<strong>Download failed:</strong> ' + escapeHTML(err.message), true);
+      });
+  });
+
+  function loadPeerLibraries() {
+    var wrap = document.getElementById('peer-libraries-wrap');
+    if (!wrap) return;
+    var q = wrap.getAttribute('data-query') || '';
+    var cat = wrap.getAttribute('data-cat') || '';
+    var url = '/api/peers/list?q=' + encodeURIComponent(q) + '&cat=' + encodeURIComponent(cat);
+    fetch(url)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        var peers = (data && Array.isArray(data.peers)) ? data.peers : [];
+        if (peers.length === 0) {
+          wrap.style.display = 'none';
+          wrap.innerHTML = '';
+          return;
+        }
+        var html = '';
+        peers.forEach(function(peer) {
+          if (!peer.items || peer.items.length === 0) return;
+          var base = (peer.base_url || '').replace(/\/+$/, '');
+          html += '<details class="peer-instance-section" open style="margin-bottom: 1.5rem;">' +
+            '<summary style="list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.85rem; user-select: none;">' +
+              '<span style="font-weight: 700; font-size: 16px; white-space: nowrap; color: var(--color-text-primary);">' + escapeHTML(peer.name || base) + '</span>' +
+              '<span class="badge tabular">' + peer.items.length + ' item' + (peer.items.length === 1 ? '' : 's') + '</span>' +
+              (!peer.allow_downloads ? '<span class="badge">View Only</span>' : '') +
+              '<span style="flex: 1; height: 2px; background: var(--color-border); border-radius: 2px;"></span>' +
+            '</summary>' +
+            '<div class="card" style="margin-bottom: 0;">' +
+              '<div class="library-grid">';
+          peer.items.forEach(function(it) {
+            var openHref = base + (it.open_url || '');
+            var iconHref = base + (it.icon_url || '');
+            html += '<div class="library-tile peer-library-tile"' +
+              ' style="flex-direction: column; align-items: stretch; gap: 0.65rem;"' +
+              ' data-peer-base="' + escapeHTML(base) + '"' +
+              ' data-peer-name="' + escapeHTML(peer.name || base) + '"' +
+              ' data-peer-allow-dl="' + (peer.allow_downloads ? '1' : '0') + '"' +
+              ' data-title="' + escapeHTML(it.title) + '"' +
+              ' data-file="' + escapeHTML(it.file_name) + '"' +
+              ' data-rel="' + escapeHTML(it.rel_path) + '"' +
+              ' data-size-bytes="' + (it.size_bytes || 0) + '"' +
+              ' data-open="' + escapeHTML(openHref) + '">' +
+              '<a href="' + escapeHTML(openHref) + '" target="_blank" rel="noopener noreferrer" style="display: flex; gap: 0.75rem; align-items: flex-start; text-decoration: none; color: inherit;">' +
+                '<img src="' + escapeHTML(iconHref) + '" alt="" class="library-tile-icon" loading="lazy">' +
+                '<div style="min-width: 0; flex: 1;">' +
+                  '<div style="font-weight: 700; font-size: 15px; line-height: 1.3; word-break: break-word;">' + escapeHTML(it.title) + '</div>' +
+                  (it.description ? '<div class="secondary-text" style="font-size: 12.5px; line-height: 1.35; margin-top: 0.25rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">' + escapeHTML(it.description) + '</div>' : '') +
+                  '<div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.3rem;">' + escapeHTML(it.category) + ' &bull; ' + escapeHTML(it.size) + ' &bull; ' + escapeHTML(it.date) + '</div>' +
+                '</div>' +
+              '</a>' +
+            '</div>';
+          });
+          html += '</div></div></details>';
+        });
+        if (!html) {
+          wrap.style.display = 'none';
+          wrap.innerHTML = '';
+          return;
+        }
+        wrap.innerHTML = html;
+        wrap.style.display = 'block';
+        wrap.querySelectorAll('.peer-library-tile').forEach(function(tile) {
+          tile.addEventListener('contextmenu', function(ev) {
+            ev.preventDefault();
+            hideMenu();
+            activePeerTile = tile;
+            peerOpenEl.href = tile.getAttribute('data-open') || '#';
+            var peerAllow = tile.getAttribute('data-peer-allow-dl') === '1';
+            if (!window.ARK_IS_LOCAL) {
+              peerDlBtn.disabled = true;
+              peerDlBtn.title = 'Downloads are only available on the host computer';
+            } else if (!peerAllow) {
+              peerDlBtn.disabled = true;
+              peerDlBtn.title = 'This Ark instance has disabled downloads';
+            } else {
+              peerDlBtn.disabled = false;
+              peerDlBtn.title = '';
+            }
+            var x = Math.min(ev.clientX, window.innerWidth - 225);
+            var y = Math.min(ev.clientY, window.innerHeight - 110);
+            peerMenu.style.left = Math.max(8, x) + 'px';
+            peerMenu.style.top = Math.max(8, y) + 'px';
+            peerMenu.style.display = 'block';
+          });
+        });
+      })
+      .catch(function() {});
+  }
+
+  document.addEventListener('DOMContentLoaded', loadPeerLibraries);
 })();
 
 function checkZimUpdates() {
@@ -228,7 +375,7 @@ function checkZimUpdates() {
         if (it.has_update) {
           html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.5rem;border:1px solid var(--color-border);border-radius:6px;">' +
             '<span><strong>' + it.title + '</strong> — update available (' + (it.latest_date || 'newer') + ')</span>' +
-            '<form action="/api/jobs" method="POST" style="margin:0;"><input type="hidden" name="type" value="kiwix_zim"><input type="hidden" name="target" value="' + it.latest_url + '"><button type="submit" class="btn btn-primary" style="min-height:32px;padding:0.15rem 0.7rem;font-size:13px;">Download Update</button></form></div>';
+            '<form action="/api/jobs" method="POST" style="margin:0;"><input type="hidden" name="type" value="kiwix_zim"><input type="hidden" name="target" value="' + it.latest_url + '"><button type="submit" class="btn btn-primary"' + (!window.ARK_IS_LOCAL ? ' disabled title="Downloads are only available on the host computer"' : '') + ' style="min-height:32px;padding:0.15rem 0.7rem;font-size:13px;">Download Update</button></form></div>';
         } else {
           html += '<div style="font-size:14px;">&#x2713; <strong>' + it.file_name + '</strong> is up to date.</div>';
         }

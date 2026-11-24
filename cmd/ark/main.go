@@ -388,11 +388,14 @@ func runServer(args []string) {
 	srv := &http.Server{
 		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 10 * time.Minute,
+		WriteTimeout: 0, // No write timeout so long streams and large LAN ZIM downloads never cut off
 		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start server in background
+	peerCtx, peerCancel := context.WithCancel(context.Background())
+	defer peerCancel()
+	webServer.StartPeerDiscovery(peerCtx)
 	go func() {
 		log.Printf("[Ark] Command Center listening on http://0.0.0.0:%s", port)
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {

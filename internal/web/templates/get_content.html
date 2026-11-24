@@ -13,7 +13,7 @@
     <form action="/api/jobs" method="POST" data-dl-label="Prepper Starter Pack" style="margin: 0;">
       <input type="hidden" name="type" value="preset">
       <input type="hidden" name="target" value="starter_pack">
-      <button type="submit" class="btn btn-primary" style="min-height: 40px; padding: 0.35rem 1rem; font-size: 15px;">Download Prepper Starter Pack (~27 GB)</button>
+      <button type="submit" class="btn btn-primary" {{ if not .IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }} style="min-height: 40px; padding: 0.35rem 1rem; font-size: 15px;">Download Prepper Starter Pack (~27 GB)</button>
     </form>
   </div>
 
@@ -34,7 +34,7 @@
         <form action="/api/jobs" method="POST" data-dl-label="{{ .Name }}" style="margin: 0;">
           <input type="hidden" name="type" value="preset">
           <input type="hidden" name="target" value="{{ .PresetTarget }}">
-          <button type="submit" class="btn {{ if not .Installed }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
+          <button type="submit" class="btn {{ if not .Installed }}btn-primary{{ end }}" {{ if not $.IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }} style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
             {{ if .Installed }}Downloaded{{ else }}Download{{ end }}
           </button>
         </form>
@@ -98,7 +98,7 @@
       <form action="/api/jobs" method="POST" style="margin: 0;">
         <input type="hidden" name="type" value="preset">
         <input type="hidden" id="tier-target-{{ $col.Slug }}" name="target" value="{{ .Slug }}">
-        <button type="submit" id="tier-btn-{{ $col.Slug }}" class="btn btn-primary" style="width: 100%; min-height: 40px; font-size: 15px;">
+        <button type="submit" id="tier-btn-{{ $col.Slug }}" class="btn btn-primary" {{ if not $.IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }} style="width: 100%; min-height: 40px; font-size: 15px;">
           Download {{ $col.Name }} ({{ .Name }})
         </button>
       </form>
@@ -140,7 +140,7 @@
         <form action="/api/jobs" method="POST" style="margin: 0;">
           <input type="hidden" name="type" value="preset">
           <input type="hidden" name="target" value="map-{{ .Slug }}">
-          <button type="submit" class="btn {{ if not .AllDownloaded }}btn-primary{{ end }}" style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
+          <button type="submit" class="btn {{ if not .AllDownloaded }}btn-primary{{ end }}" {{ if not $.IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }} style="min-height: 36px; padding: 0.25rem 0.85rem; font-size: 14px;">
             {{ if .AllDownloaded }}Re-download{{ else }}Download{{ end }}
           </button>
         </form>
@@ -169,7 +169,7 @@
         <form action="/api/jobs" method="POST" style="margin: 0;">
           <input type="hidden" name="type" value="preset">
           <input type="hidden" name="target" value="{{ .ID }}">
-          <button type="submit" class="btn btn-primary" style="min-height: 36px; padding: 0.2rem 0.85rem; font-size: 14px;">Download</button>
+          <button type="submit" class="btn btn-primary" {{ if not $.IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }} style="min-height: 36px; padding: 0.2rem 0.85rem; font-size: 14px;">Download</button>
         </form>
       </div>
     </div>
@@ -259,7 +259,7 @@
     </div>
 
     <div>
-      <button type="submit" class="btn btn-primary">Queue Download</button>
+      <button type="submit" class="btn btn-primary" {{ if not .IsLocal }}disabled title="Downloads are only available on the host computer"{{ end }}>Queue Download</button>
     </div>
   </form>
 </section>
@@ -288,7 +288,8 @@ function selectCollectionTier(slug, btn) {
   var tBtn = document.getElementById('tier-btn-' + slug);
   tBtn.textContent = 'Download ' + colTitle + ' (' + tierName + ')';
   tBtn.classList.add('btn-primary');
-  tBtn.disabled = false;
+  tBtn.disabled = !window.ARK_IS_LOCAL;
+  if (!window.ARK_IS_LOCAL) tBtn.title = 'Downloads are only available on the host computer';
   if (tBtn.closest('form')) tBtn.closest('form').setAttribute('data-dl-label', colTitle + ' (' + tierName + ')');
   if (typeof arkSyncDownloadButtons === 'function') arkSyncDownloadButtons();
 }
@@ -339,7 +340,7 @@ function searchKiwixCatalog() {
             '<input type="hidden" name="type" value="kiwix_zim">' +
             '<input type="hidden" name="target" value="' + escapeHTML(item.download_url) + '">' +
             '<input type="hidden" name="size_bytes" value="' + (item.size_bytes || 0) + '">' +
-            '<button type="submit" class="' + btnClass + '" style="min-height:34px; padding:0.2rem 0.75rem; font-size:13px; white-space:nowrap;">' + btnLabel + '</button>' +
+            '<button type="submit" class="' + btnClass + '"' + (!window.ARK_IS_LOCAL ? ' disabled title="Downloads are only available on the host computer"' : '') + ' style="min-height:34px; padding:0.2rem 0.75rem; font-size:13px; white-space:nowrap;">' + btnLabel + '</button>' +
           '</form></td>' +
         '</tr>';
       }).join('');

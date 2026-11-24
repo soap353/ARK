@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"ark/internal/jobs"
 )
@@ -752,9 +751,7 @@ func (r *IndexJobRunner) Run(ctx context.Context, job *jobs.Job, progress jobs.P
 		}
 	}
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-	_, err := IndexSource(ctxTimeout, r.DB, conn, qdrant, DefaultCollection, sourceType, job.Target, title, cb)
+	_, err := IndexSource(ctx, r.DB, conn, qdrant, DefaultCollection, sourceType, job.Target, title, cb)
 	return err
 }
 

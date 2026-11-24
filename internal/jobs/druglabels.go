@@ -24,7 +24,7 @@ type DrugLabelsRunner struct {
 func NewDrugLabelsRunner() *DrugLabelsRunner {
 	return &DrugLabelsRunner{
 		ManifestURL: "https://api.fda.gov/download.json",
-		HTTPClient:  &http.Client{Timeout: 10 * time.Minute},
+		HTTPClient:  &http.Client{Timeout: 0},
 	}
 }
 

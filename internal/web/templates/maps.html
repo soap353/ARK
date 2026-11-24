@@ -681,8 +681,7 @@
           pin.lat.toFixed(4) + ', ' + pin.lng.toFixed(4) +
         '</div>' +
         (pin.note ? '<div style="font-size:12px;margin-bottom:6px;">' + escapeHTML(pin.note) + '</div>' : '') +
-        '<button type="button" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')" ' +
-          'style="background:#B91C1C;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;">Remove</button>';
+        (window.ARK_IS_LOCAL ? '<button type="button" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')" style="background:#B91C1C;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;">Remove</button>' : '');
 
       var popup = new maplibregl.Popup({ offset: 18 }).setHTML(popupHTML);
       var marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
@@ -731,7 +730,7 @@
           (p.note ? '<div class="secondary-text" style="font-size:12px;margin-top:0.2rem;">' + escapeHTML(p.note) + '</div>' : '') +
           '<div style="display:flex;gap:0.4rem;margin-top:0.5rem;">' +
             '<button type="button" class="btn" style="flex:1;min-height:28px;padding:0.15rem 0.5rem;font-size:12px;" onclick="flyToPin(\'' + escapeHTML(p.id) + '\')">Fly To</button>' +
-            '<button type="button" class="btn btn-danger" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="deletePinById(\'' + escapeHTML(p.id) + '\')">Remove</button>' +
+            (window.ARK_IS_LOCAL ? '<button type="button" class="btn btn-danger" style="min-height:28px;padding:0.15rem 0.55rem;font-size:12px;" onclick="deletePinById(\'' + escapeHTML(p.id) + '\')">Remove</button>' : '') +
           '</div>' +
         '</div>'
       );

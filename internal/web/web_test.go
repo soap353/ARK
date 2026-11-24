@@ -137,6 +137,7 @@ func TestAppLifecycleEndpoints(t *testing.T) {
 	// 1. Install cyberchef
 	form := url.Values{"id": {"cyberchef"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/install", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -156,6 +157,7 @@ func TestAppLifecycleEndpoints(t *testing.T) {
 
 	// 2. Start cyberchef -> status running and persisted auto_start = 1
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/start", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -177,6 +179,7 @@ func TestAppLifecycleEndpoints(t *testing.T) {
 
 	// 3. Stop cyberchef -> status stopped and persisted auto_start = 0 (must not start on next Ark boot)
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/stop", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -191,6 +194,7 @@ func TestAppLifecycleEndpoints(t *testing.T) {
 
 	// 4. Uninstall cyberchef
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/uninstall", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -282,6 +286,7 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 	// 1. Submit preset job via /api/jobs
 	form := url.Values{"type": {"preset"}, "target": {"wikimed"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -323,6 +328,7 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 	// 3. Cancel job via /api/jobs/cancel
 	cancelForm := url.Values{"id": {jobID}}
 	req = httptest.NewRequest(http.MethodPost, "/api/jobs/cancel", strings.NewReader(cancelForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -334,6 +340,7 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 
 	// 4. Retry job via /api/jobs/retry
 	req = httptest.NewRequest(http.MethodPost, "/api/jobs/retry", strings.NewReader(cancelForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -345,6 +352,7 @@ func TestJobQueueAndCancelEndpoints(t *testing.T) {
 
 	// 5. Delete job via /api/jobs/delete
 	req = httptest.NewRequest(http.MethodPost, "/api/jobs/delete", strings.NewReader(cancelForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -427,6 +435,7 @@ func TestPhase2SettingsAndAIEndpoints(t *testing.T) {
 		t.Fatalf("write sample doc: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/ai/index", strings.NewReader(url.Values{"path": {sampleDoc}}.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -608,6 +617,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	for _, tgt := range activeTargets {
 		form := url.Values{"type": {"preset"}, "target": {tgt}}
 		req := httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+		req.RemoteAddr = "127.0.0.1:12345"
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
@@ -714,6 +724,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	// Reject path traversal delete outside ArkData
 	delBad := url.Values{"rel_path": {"../outside.txt"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/library/delete", strings.NewReader(delBad.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -724,6 +735,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	// Delete valid library ZIM
 	delGood := url.Values{"rel_path": {"zim/wikipedia_en_mini_2026-06.zim"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/library/delete", strings.NewReader(delGood.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -761,6 +773,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS app_states (id TEXT PRIMARY KEY, name TEXT, category TEXT, image TEXT, container_id TEXT, status TEXT, port INTEGER, proxy_mode TEXT, auto_start BOOLEAN, created_at DATETIME, updated_at DATETIME);`)
 	customForm := url.Values{"name": {"My Wiki"}, "image": {"nginx:alpine"}, "port": {"80"}, "proxy_mode": {"path"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/custom", strings.NewReader(customForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -830,6 +843,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	server.queue = jobs.NewQueueManager(jobs.NewJobStore(db), jobs.QueueConfig{})
 	aiForm := url.Values{"path": {"zim/wikipedia_en_top_mini.zim"}, "ajax": {"1"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/ai/index", strings.NewReader(aiForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1216,6 +1230,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 
 	// 2. Ask UI renders large chat window + attach button + compact classes
 	req = httptest.NewRequest(http.MethodGet, "/ask", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	askHTML := w.Body.String()
@@ -1350,6 +1365,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	// Delete session
 	delForm := url.Values{"id": {chatOut.SessionID}}
 	req = httptest.NewRequest(http.MethodPost, "/api/ai/sessions/delete", strings.NewReader(delForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1375,6 +1391,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS app_states (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, image TEXT NOT NULL DEFAULT '', container_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'stopped', port INTEGER NOT NULL DEFAULT 0, proxy_mode TEXT NOT NULL DEFAULT 'path', auto_start INTEGER NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)`)
 	instForm := url.Values{"id": {"convertx"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/apps/install", strings.NewReader(instForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1953,6 +1970,7 @@ func TestStorageSpacePrecheckAndBlocking(t *testing.T) {
 		"size_bytes": {"99999999999999999"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	w = httptest.NewRecorder()
@@ -2082,6 +2100,7 @@ func TestSystemRuntimeZIMSearchAndAjaxDownloads(t *testing.T) {
 		"ajax":       {"1"},
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/jobs", strings.NewReader(form.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	w = httptest.NewRecorder()
@@ -2533,6 +2552,7 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 
 	delForm := url.Values{"id": {postResp.Post.ID}}
 	req = httptest.NewRequest(http.MethodPost, "/api/lan-drop/delete?ajax=1", strings.NewReader(delForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	w = httptest.NewRecorder()
@@ -2684,5 +2704,158 @@ func TestRemoteAccessBlocksSettingsAndSystemAndHidesCommandNav(t *testing.T) {
 				t.Errorf("local GET %s (%s) expected 200, got %d", path, addr, w.Code)
 			}
 		}
+	}
+}
+
+func TestRemoteDeleteAndDownloadRestrictionsAndPeerDiscovery(t *testing.T) {
+	// Peer B (remote Ark instance on LAN with a real document)
+	peerBDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(peerBDir, "media", "docs"), 0o755)
+	peerFile := filepath.Join(peerBDir, "media", "docs", "field_manual.pdf")
+	_ = os.WriteFile(peerFile, []byte("%PDF-1.4 peer manual bytes"), 0o644)
+
+	dbB, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open dbB: %v", err)
+	}
+	defer dbB.Close()
+	_, _ = dbB.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = dbB.Exec(`INSERT INTO settings (key, value) VALUES ('device_name', 'Workshop-PC')`)
+	srvB, err := NewServer(dbB, peerBDir)
+	if err != nil {
+		t.Fatalf("NewServer B: %v", err)
+	}
+	muxB := http.NewServeMux()
+	_ = srvB.RegisterRoutes(muxB)
+	tsB := httptest.NewServer(muxB)
+	defer tsB.Close()
+
+	// Peer A (this computer)
+	peerADir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(peerADir, "media", "docs"), 0o755)
+	_ = os.WriteFile(filepath.Join(peerADir, "media", "docs", "local_guide.pdf"), []byte("%PDF-1.4 local"), 0o644)
+
+	dbA, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open dbA: %v", err)
+	}
+	defer dbA.Close()
+	_, _ = dbA.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = dbA.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, error_msg TEXT, bytes_downloaded INTEGER, total_bytes INTEGER, eta_seconds INTEGER, metadata TEXT, created_at DATETIME, updated_at DATETIME, completed_at DATETIME)`)
+	_, _ = dbA.Exec(`INSERT INTO settings (key, value) VALUES ('peer_manual_hosts', ?)`, tsB.URL)
+
+	srvA, err := NewServer(dbA, peerADir)
+	if err != nil {
+		t.Fatalf("NewServer A: %v", err)
+	}
+	srvA.SetQueueManager(jobs.NewQueueManager(jobs.NewJobStore(dbA), jobs.QueueConfig{}))
+	muxA := http.NewServeMux()
+	_ = srvA.RegisterRoutes(muxA)
+
+	// 1. Remote devices are blocked from ALL delete & download endpoints, while still able to download installed media
+	remoteBlocked := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/jobs", "type=doc&target=https://example.com/a.pdf"},
+		{http.MethodPost, "/api/library/delete", "rel_path=media/docs/local_guide.pdf"},
+		{http.MethodPost, "/api/lan-drop/delete", "id=1"},
+		{http.MethodPost, "/api/maps/pins", "action=delete&id=1"},
+		{http.MethodPost, "/api/ai/sessions/delete", "id=1"},
+		{http.MethodPost, "/api/ai/knowledge/remove", "id=1"},
+		{http.MethodPost, "/api/apps/uninstall", "id=convertx"},
+		{http.MethodPost, "/api/peers/pull", "peer_base_url=" + url.QueryEscape(tsB.URL) + "&rel_path=media/docs/field_manual.pdf"},
+	}
+	for _, tc := range remoteBlocked {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.RemoteAddr = "192.168.1.99:55555"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		muxA.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("remote %s %s expected 403, got %d: %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+
+	// Remote device can still download already-installed media
+	req := httptest.NewRequest(http.MethodGet, "/media/docs/local_guide.pdf", nil)
+	req.RemoteAddr = "192.168.1.99:55555"
+	w := httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "local") {
+		t.Errorf("expected remote GET /media/docs/local_guide.pdf to succeed, got %d", w.Code)
+	}
+
+	// Remote /library hides #ctx-delete; remote /get-content disables download buttons
+	req = httptest.NewRequest(http.MethodGet, "/library", nil)
+	req.RemoteAddr = "192.168.1.99:55555"
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if strings.Contains(w.Body.String(), `id="ctx-delete"`) {
+		t.Errorf("expected remote /library to hide #ctx-delete")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/get-content", nil)
+	req.RemoteAddr = "192.168.1.99:55555"
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), `disabled title="Downloads are only available on the host computer"`) {
+		t.Errorf("expected remote /get-content to grey out download buttons")
+	}
+
+	// 2. Peer A discovers Peer B via /api/peers/list and sees Workshop-PC's item
+	req = httptest.NewRequest(http.MethodGet, "/api/peers/list", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Workshop-PC") || !strings.Contains(w.Body.String(), "field_manual.pdf") {
+		t.Fatalf("expected /api/peers/list to return Workshop-PC with field_manual.pdf, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 3. Peer A pulls field_manual.pdf from Peer B via POST /api/peers/pull
+	pullForm := url.Values{
+		"peer_base_url": {tsB.URL},
+		"rel_path":      {"media/docs/field_manual.pdf"},
+		"title":         {"Field Manual"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/peers/pull", strings.NewReader(pullForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"ok":true`) || !strings.Contains(w.Body.String(), `"job_id":"peer-`) {
+		t.Fatalf("expected /api/peers/pull to queue job, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// If file already exists locally, /api/peers/pull skips it
+	_ = os.WriteFile(filepath.Join(peerADir, "media", "docs", "field_manual.pdf"), []byte("already here"), 0o644)
+	req = httptest.NewRequest(http.MethodPost, "/api/peers/pull", strings.NewReader(pullForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"skipped":true`) {
+		t.Errorf("expected /api/peers/pull to skip existing file, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 4. Peer B disallows downloads -> /api/peers/download returns 403
+	_, _ = dbB.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('peer_allow_downloads', 'false')`)
+	resp, err := http.Get(tsB.URL + "/api/peers/download?rel=media/docs/field_manual.pdf")
+	if err != nil {
+		t.Fatalf("GET peer download: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 when peer_allow_downloads=false, got %d", resp.StatusCode)
+	}
+
+	// 5. Peer B disables discoverability -> /api/peers/list omits Workshop-PC
+	_, _ = dbB.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('peer_discoverable', 'false')`)
+	req = httptest.NewRequest(http.MethodGet, "/api/peers/list", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w = httptest.NewRecorder()
+	muxA.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "Workshop-PC") {
+		t.Errorf("expected /api/peers/list to omit non-discoverable peer, got %d: %s", w.Code, w.Body.String())
 	}
 }
