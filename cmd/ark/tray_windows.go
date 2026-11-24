@@ -129,7 +129,7 @@ func isServiceHealthy(port string) bool {
 // maybeDetachBackground relaunches Ark without a console window on Windows so the user
 // does not need to keep a terminal window open. Returns true if the caller should exit.
 func maybeDetachBackground(port string, args []string, openUI bool) bool {
-	if isServiceHealthy(port) {
+	if os.Getenv("ARK_RESTART") != "1" && isServiceHealthy(port) {
 		if openUI {
 			openBrowser(fmt.Sprintf("http://localhost:%s/", port))
 		}

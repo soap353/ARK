@@ -233,6 +233,12 @@ type Server struct {
 	lanClients      sync.Map
 	instanceID      string
 	discoveredPeers sync.Map
+	onShutdown      func()
+}
+
+// SetOnShutdown registers a callback used by /settings/restart and /settings/shutdown to trigger graceful exit.
+func (s *Server) SetOnShutdown(fn func()) {
+	s.onShutdown = fn
 }
 
 // NewServer initializes templates and returns a configured Server

@@ -298,6 +298,7 @@ func (s *Server) handleSettingsRestart(w http.ResponseWriter, r *http.Request) {
 	if exe, err := os.Executable(); err == nil && os.Getenv("ARK_IN_CONTAINER") != "1" {
 		cmd := exec.Command(exe, os.Args[1:]...)
 		cmd.Env = append(os.Environ(), "ARK_RESTART=1", "ARK_NO_BROWSER=1")
+		prepareRestartCmd(cmd)
 		if err := cmd.Start(); err != nil {
 			log.Printf("[Ark] Restart relaunch failed: %v", err)
 		} else {
@@ -306,7 +307,9 @@ func (s *Server) handleSettingsRestart(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		time.Sleep(350 * time.Millisecond)
-		if p, err := os.FindProcess(os.Getpid()); err == nil {
+		if s.onShutdown != nil {
+			s.onShutdown()
+		} else if p, err := os.FindProcess(os.Getpid()); err == nil {
 			_ = p.Signal(syscall.SIGTERM)
 		}
 		time.Sleep(4500 * time.Millisecond)
@@ -327,7 +330,9 @@ func (s *Server) handleSettingsShutdown(w http.ResponseWriter, r *http.Request) 
 	}
 	go func() {
 		time.Sleep(250 * time.Millisecond)
-		if p, err := os.FindProcess(os.Getpid()); err == nil {
+		if s.onShutdown != nil {
+			s.onShutdown()
+		} else if p, err := os.FindProcess(os.Getpid()); err == nil {
 			_ = p.Signal(syscall.SIGTERM)
 		}
 		time.Sleep(3500 * time.Millisecond)

@@ -423,6 +423,7 @@ func runServer(args []string) {
 		}
 	}
 	registerConsoleCloseHandler(triggerStop, shutdownDone)
+	webServer.SetOnShutdown(triggerStop)
 	stopTray := startTrayIcon(port, triggerStop)
 	defer stopTray()
 
