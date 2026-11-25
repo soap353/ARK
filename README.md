@@ -1,94 +1,77 @@
-# Ark — Offline Internet Archive
+<p align="center">
+  <img src="internal/web/static/ark-logo.png" alt="Ark Logo" width="140">
+</p>
 
-> **Self-hosted "internet in a box" for preppers and offline independence.**
+<h1 align="center">Ark — Offline Internet Archive</h1>
 
-Ark archives essential human knowledge, reference manuals, education, medical documentation, vector maps, and multimedia so you can access and query them on your local network with **zero external dependencies** when the grid goes down.
+<p align="center">
+  <strong>Self-hosted, offline-first knowledge hub for local networks and grid-down independence.</strong>
+</p>
+
+Ark runs as a single native Go binary (Windows & Linux) with zero external runtime dependencies. It packages offline encyclopedias, vector maps, medical references, local AI search, LAN file sharing, LoRa mesh messaging, and optional Docker apps behind a clean web interface.
 
 ---
 
-## Features
+## Core Features
 
-- **Native Command Center**: Fast, lightweight Go dashboard running directly on Windows or Linux with real-time hardware telemetry and zero container overhead.
-- **Docker Modularity**: Applications run in isolated, disposable Docker containers dynamically reverse-proxied under `/a/<id>/`.
-  - **Kiwix**: Wikipedia (Full, No-pics, Mini, Top 100), Wiktionary, WikiMed, Project Gutenberg, Stack Exchange, and iFixit.
-  - **Protomaps**: OpenStreetMap offline vector tiles with offline vector styles, fonts, and sprites.
-  - **CyberChef**: GCHQ's 300+ offline analysis and decoding tools ("digital Swiss Army knife").
-  - **FlatNotes**: Local markdown knowledge base and notebook.
-  - **ConvertX**: Universal multi-format document, audio, video, and ebook converter.
-  - **FDA Drug Labels**: Full offline database of ~200k+ FDA drug labels searchable by brand, generic, or symptom/situation with SQLite FTS5.
-  - **Kolibri**: Offline educational platform with Khan Academy courses.
-- **Kiwix Catalog Integration**: Search, filter, and bulk-download thousands of ZIM files directly from Kiwix OPDS feeds with `.meta4` multi-mirror resume.
-- **Low-Density, Accessible UI**: Field-terminal dark aesthetic adhering strictly to **WCAG 2.2 AAA** contrast standards (`#0B0D10` background, `#F4F4F0` primary text at 17.7:1, `#FFB000` action accent at 10.6:1).
-- **Disk & Storage Safety**: Category storage tracking, live free-capacity checks, and cascading delete preventing orphaned files or vector points.
+- **Offline Library & Native ZIM Reader**: Browse, search, and read Wikipedia, WikiMed, Project Gutenberg, iFixit, and other `.zim` archives natively with saved reader themes and Kiwix OPDS catalog downloads.
+- **Offline Vector Maps (`/maps`)**: Unified MapLibre + PMTiles v3 viewer with multi-region switching, country/state downloads, and persistent custom waypoints.
+- **Ask AI (`/ask`)**: Local OpenAI/Ollama-compatible RAG chat with live citations, direct ZIM/document/map links, and zero external APIs.
+- **Field Guide & Tools (`/field-guide`, `/tools`)**: Offline medical/remedy reference, unit/dosage/RF calculators, graphing calculator, and real-time celestial sky chart.
+- **LAN Drop, OPDS & Peer Sync (`/lan-drop`, `/opds`, `/library`)**: Local bulletin board and file drop, OPDS 1.2 feed for e-readers (KOReader, Calibre), and automatic UDP LAN discovery between Ark instances.
+- **LoRa Mesh Radio (`/mesh`)**: USB Serial and Web Bluetooth support for Meshtastic and MeshCore radios with live message feed and node telemetry.
+- **Optional Docker Apps (`/apps`)**: Isolated containers proxied under `/a/<id>/` (CyberChef, FlatNotes, ConvertX, FDA Drug Labels, Kolibri, LibreTranslate).
+- **LAN Security & Offline Updates**: Host-only admin controls, optional LAN passcode + IP allowlist, auto-generated self-signed HTTPS (`/tls/ark.crt`), sanitized USB export, and Ed25519-signed offline updates with automatic rollback.
 
 ---
 
 ## Quick Start
 
-### Release Assets
-Prebuilt standalone binaries are published on the [GitHub Releases](https://github.com/soap353/ARK/releases) page:
+### Release Binaries
+Prebuilt binaries are published on [GitHub Releases](https://github.com/soap353/ARK/releases) (`ark-windows-amd64.exe`, `ark-linux-amd64`, `ark-linux-arm64`, `ark-darwin-arm64`, plus `checksums.txt`).
 
-| Asset | Target Platform |
-| :--- | :--- |
-| `ark-linux-amd64` | Intel / AMD 64-bit Linux (`x86_64`) |
-| `ark-linux-arm64` | ARM 64-bit Linux (`aarch64`, e.g. Raspberry Pi 4/5) |
-| `ark-darwin-arm64` | macOS Apple Silicon (M1–M4) |
-| `ark-windows-amd64.exe` | Windows 64-bit (Intel / AMD) |
-| `checksums.txt` | SHA-256 checksums for verifying binary integrity |
+### Build & Run from Source
+Requires [Go 1.27+](https://go.dev/) (and optionally Docker/Podman for containerized apps):
 
-### Prerequisites
-- [Go 1.27+](https://go.dev/) (to build from source)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux)
-
-### Build & Run
 ```bash
-# Clone the repository
 git clone https://github.com/soap353/ARK.git
 cd ARK
 
-# Build the native Command Center binary
 go build -o ark.exe ./cmd/ark
-
-# Start Ark Command Center
-./ark.exe run -data ./data -port 8080
+./ark.exe run -data-dir ./data -port 8080
 ```
 
 Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
-                      Browser (PC / Phone on LAN)
-                                 │
-                                 ▼
-                     Ark Command Center (:8080)
-               Native Go Service · SQLite WAL · SSE
-                                 │
-                 ┌───────────────┴───────────────┐
-                 ▼                               ▼
-       Dynamic Reverse Proxy               Job Queue
-            (/a/<id>/)               aria2c · zimit · yt-dlp
-                 │                               │
-    ┌────────────┼────────────┐                  ▼
-    ▼            ▼            ▼             ArkData Folder
-  Kiwix      CyberChef    ConvertX      (ZIM, Maps, Media, DBs)
-(Wikipedia)   (Tools)    (Conversion)
+Browser / Phone / E-Reader (LAN)
+               │
+               ▼
+   Ark Command Center (:8080)
+ Native Go · SQLite WAL · TLS
+               │
+   ┌───────────┼───────────┐
+   ▼           ▼           ▼
+Native      /a/<id>/    Job Queue
+Readers     App Proxy   (Downloads,
+(ZIM, Maps, (Docker)    USB, Index)
+ AI, Mesh)
 ```
 
 ---
 
 ## Testing
 
-Ark includes automated unit and integration tests across all packages:
-
 ```bash
-go test -v ./...
+go test -count=1 ./...
 ```
 
 ---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE).
