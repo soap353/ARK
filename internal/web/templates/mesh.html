@@ -1,0 +1,774 @@
+{{ define "content" }}
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0;">Meshtastic / LoRa Radio Bridge</h1>
+      <p class="secondary-text" style="margin:0.3rem 0 0;">Connect a Meshtastic, MeshCore, or generic LoRa transceiver over USB Serial or Bluetooth LE for off-grid messaging and node telemetry.</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+      <span id="mesh-conn-badge" class="badge">Disconnected</span>
+      <span id="mesh-node-badge" class="badge" style="display:none;"></span>
+    </div>
+  </div>
+
+  <!-- Connection Bar -->
+  <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:flex-end;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--color-border);">
+    <div>
+      <label for="mesh-proto" class="form-label" style="font-size:12px;margin-bottom:0.2rem;">Protocol</label>
+      <select id="mesh-proto" class="form-control" style="min-height:38px;padding:0.3rem 0.65rem;font-size:14px;width:auto;">
+        <option value="meshtastic">Meshtastic (Protobuf)</option>
+        <option value="meshcore">MeshCore (Companion)</option>
+        <option value="generic">Generic LoRa / Serial / AT</option>
+      </select>
+    </div>
+    <div>
+      <label for="mesh-baud" class="form-label" style="font-size:12px;margin-bottom:0.2rem;">USB Baud</label>
+      <select id="mesh-baud" class="form-control" style="min-height:38px;padding:0.3rem 0.65rem;font-size:14px;width:auto;">
+        <option value="115200" selected>115200</option>
+        <option value="9600">9600</option>
+        <option value="38400">38400</option>
+        <option value="57600">57600</option>
+        <option value="230400">230400</option>
+        <option value="921600">921600</option>
+      </select>
+    </div>
+    {{ if .IsLocal }}
+    <button type="button" id="mesh-btn-usb" class="btn btn-primary" style="min-height:38px;padding:0.3rem 0.9rem;font-size:14px;" onclick="meshConnectUSB()">Connect USB</button>
+    <button type="button" id="mesh-btn-ble" class="btn btn-primary" style="min-height:38px;padding:0.3rem 0.9rem;font-size:14px;" onclick="meshConnectBLE()">Connect Bluetooth</button>
+    <button type="button" id="mesh-btn-disc" class="btn" style="min-height:38px;padding:0.3rem 0.85rem;font-size:14px;display:none;" onclick="meshDisconnect()">Disconnect</button>
+    <button type="button" id="mesh-btn-sync" class="btn" style="min-height:38px;padding:0.3rem 0.85rem;font-size:14px;display:none;" onclick="meshRequestConfig()">Sync Nodes</button>
+    <button type="button" class="btn btn-danger" style="min-height:38px;padding:0.3rem 0.8rem;font-size:13px;margin-left:auto;" onclick="meshClearLog()">Clear Log</button>
+    {{ else }}
+    <span class="secondary-text" style="font-size:13px;margin-left:auto;">Read-only LAN view — connect radios &amp; transmit from the host computer.</span>
+    {{ end }}
+  </div>
+
+  <div id="mesh-status-msg" class="secondary-text" style="font-size:13px;margin-top:0.65rem;"></div>
+</div>
+
+<!-- Main Split: Messages + Nodes -->
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(340px, 1fr));gap:1rem;align-items:start;">
+  <!-- Messages Panel -->
+  <div class="card" style="display:flex;flex-direction:column;gap:0.75rem;">
+    <div class="card-header" style="margin-bottom:0;">
+      <h2 style="margin:0;font-size:19px;">Mesh Messages</h2>
+      <span id="mesh-msg-count" class="badge tabular">0</span>
+    </div>
+
+    <div id="mesh-msg-feed" style="max-height:420px;min-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:0.55rem;padding:0.65rem;border:1px solid var(--color-border);border-radius:var(--border-radius);background:var(--color-bg);">
+      <div class="secondary-text" style="font-size:13px;text-align:center;padding:2rem 0.5rem;">No mesh messages yet. Connect a radio via USB or Bluetooth to start receiving.</div>
+    </div>
+
+    {{ if .IsLocal }}
+    <form id="mesh-tx-form" onsubmit="meshSendMessage(event)" style="display:flex;flex-direction:column;gap:0.5rem;">
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <input type="text" id="mesh-tx-ch" class="form-control" value="0" placeholder="Channel (0)" aria-label="Channel" style="width:95px;min-height:36px;padding:0.25rem 0.55rem;font-size:13px;">
+        <input type="text" id="mesh-tx-to" class="form-control" value="^all" placeholder="To (^all or !nodeid)" aria-label="Destination node" style="flex:1;min-width:140px;min-height:36px;padding:0.25rem 0.55rem;font-size:13px;">
+      </div>
+      <div style="display:flex;gap:0.5rem;">
+        <input type="text" id="mesh-tx-body" class="form-control" placeholder="Type LoRa message or AT command..." required style="flex:1;min-height:40px;padding:0.35rem 0.7rem;font-size:14px;">
+        <button type="submit" id="mesh-tx-btn" class="btn btn-primary" style="min-height:40px;padding:0.35rem 1.1rem;font-size:14px;">Send</button>
+      </div>
+    </form>
+    {{ end }}
+  </div>
+
+  <!-- Discovered Nodes Panel -->
+  <div class="card" style="display:flex;flex-direction:column;gap:0.75rem;">
+    <div class="card-header" style="margin-bottom:0;">
+      <h2 style="margin:0;font-size:19px;">Discovered Nodes</h2>
+      <span id="mesh-node-count" class="badge tabular">0</span>
+    </div>
+
+    <div class="table-wrapper" style="max-height:480px;overflow-y:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Node</th>
+            <th>Signal</th>
+            <th>Battery</th>
+            <th>GPS</th>
+          </tr>
+        </thead>
+        <tbody id="mesh-nodes-tbody">
+          <tr><td colspan="4" class="secondary-text" style="text-align:center;padding:1.5rem;">No nodes heard yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Raw Packet / Serial Console -->
+<details class="card" style="margin-top:0.25rem;">
+  <summary style="cursor:pointer;font-weight:700;font-size:15px;">Raw Radio Packet &amp; Serial Console</summary>
+  <pre id="mesh-raw-console" style="margin:0.75rem 0 0;padding:0.75rem;max-height:220px;overflow:auto;background:#12201A;color:#DCE8E1;border-radius:6px;font-size:12px;line-height:1.45;white-space:pre-wrap;word-break:break-all;">[Console ready — connect a USB or Bluetooth LoRa device]</pre>
+</details>
+
+<script>
+(function() {
+  var MESHTASTIC_SVC      = '6ba1b218-15a8-461f-9fa8-5dcae273eafd';
+  var MESHTASTIC_TORADIO  = 'f75c76d2-129e-4dad-a1dd-7866124401e7';
+  var MESHTASTIC_FROMRADIO= '2c55e69e-4993-11ed-b878-0242ac120002';
+  var MESHTASTIC_FROMNUM  = 'ed9da18c-a800-4f66-a670-aa7547e34453';
+  var NUS_SVC             = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  var NUS_RX              = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  var NUS_TX              = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+  var transport = null; // 'usb' | 'ble' | null
+  var serialPort = null, serialReader = null, serialWriter = null, serialKeepReading = false;
+  var bleDevice = null, bleServer = null, bleWriteChar = null, bleFromRadioChar = null, bleFromNumChar = null, bleMode = null;
+  var rxBuf = new Uint8Array(0);
+  var myNodeNum = 0;
+  var nodeNames = {};
+  var rawLines = [];
+  var textDec = new TextDecoder('utf-8', { fatal: false });
+  var textEnc = new TextEncoder();
+
+  function esc(s) {
+    return String(s || '').replace(/[&<>"']/g, function(c) {
+      return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c];
+    });
+  }
+
+  function hexStr(u8) {
+    var out = [];
+    for (var i = 0; i < u8.length && i < 64; i++) {
+      out.push(('0' + u8[i].toString(16)).slice(-2));
+    }
+    if (u8.length > 64) out.push('...');
+    return out.join(' ');
+  }
+
+  function logRaw(dir, text) {
+    var ts = new Date().toLocaleTimeString();
+    rawLines.push('[' + ts + '] ' + dir + ' ' + text);
+    if (rawLines.length > 120) rawLines = rawLines.slice(-120);
+    var el = document.getElementById('mesh-raw-console');
+    if (el) {
+      el.textContent = rawLines.join('\n');
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  function setStatus(text, connected) {
+    var badge = document.getElementById('mesh-conn-badge');
+    var msg = document.getElementById('mesh-status-msg');
+    if (badge) {
+      badge.textContent = connected ? ('Connected (' + (transport === 'usb' ? 'USB' : 'Bluetooth') + ')') : 'Disconnected';
+      badge.className = 'badge ' + (connected ? 'badge-success' : '');
+    }
+    if (msg) msg.textContent = text || '';
+    var bUsb = document.getElementById('mesh-btn-usb');
+    var bBle = document.getElementById('mesh-btn-ble');
+    var bDisc = document.getElementById('mesh-btn-disc');
+    var bSync = document.getElementById('mesh-btn-sync');
+    if (bUsb) bUsb.style.display = connected ? 'none' : '';
+    if (bBle) bBle.style.display = connected ? 'none' : '';
+    if (bDisc) bDisc.style.display = connected ? '' : 'none';
+    if (bSync) bSync.style.display = connected ? '' : 'none';
+  }
+
+  // ---- Minimal Protobuf Codec (Meshtastic) ----
+  function pbVarint(v) {
+    var out = [];
+    v = v >>> 0;
+    while (v > 0x7f) {
+      out.push((v & 0x7f) | 0x80);
+      v >>>= 7;
+    }
+    out.push(v);
+    return out;
+  }
+  function pbTag(field, wire) { return pbVarint((field << 3) | wire); }
+  function pbBytes(field, u8) {
+    var a = pbTag(field, 2).concat(pbVarint(u8.length));
+    var out = new Uint8Array(a.length + u8.length);
+    out.set(a, 0);
+    out.set(u8, a.length);
+    return out;
+  }
+  function pbFixed32(field, val) {
+    var tag = pbTag(field, 5);
+    var out = new Uint8Array(tag.length + 4);
+    out.set(tag, 0);
+    var dv = new DataView(out.buffer);
+    dv.setUint32(tag.length, val >>> 0, true);
+    return out;
+  }
+  function pbUint(field, val) {
+    return new Uint8Array(pbTag(field, 0).concat(pbVarint(val)));
+  }
+  function concatU8(list) {
+    var len = 0;
+    list.forEach(function(a) { len += a.length; });
+    var out = new Uint8Array(len);
+    var off = 0;
+    list.forEach(function(a) { out.set(a, off); off += a.length; });
+    return out;
+  }
+  function pbDecode(buf) {
+    var fields = {};
+    var i = 0;
+    while (i < buf.length) {
+      var tag = 0, shift = 0;
+      while (i < buf.length) {
+        var b = buf[i++];
+        tag |= (b & 0x7f) << shift;
+        if ((b & 0x80) === 0) break;
+        shift += 7;
+      }
+      var fnum = tag >>> 3;
+      var wire = tag & 7;
+      var val = null;
+      if (wire === 0) {
+        var n = 0, mul = 1;
+        while (i < buf.length) {
+          var vb = buf[i++];
+          n += (vb & 0x7f) * mul;
+          if ((vb & 0x80) === 0) break;
+          mul *= 128;
+        }
+        val = n;
+      } else if (wire === 1) {
+        if (i + 8 > buf.length) break;
+        val = buf.slice(i, i + 8);
+        i += 8;
+      } else if (wire === 2) {
+        var l = 0, s2 = 0;
+        while (i < buf.length) {
+          var lb = buf[i++];
+          l |= (lb & 0x7f) << s2;
+          if ((lb & 0x80) === 0) break;
+          s2 += 7;
+        }
+        if (i + l > buf.length) break;
+        val = buf.slice(i, i + l);
+        i += l;
+      } else if (wire === 5) {
+        if (i + 4 > buf.length) break;
+        val = buf.slice(i, i + 4);
+        i += 4;
+      } else {
+        break;
+      }
+      if (!fields[fnum]) fields[fnum] = [];
+      fields[fnum].push(val);
+    }
+    return fields;
+  }
+  function u8ToUint32LE(u8) {
+    if (!u8 || u8.length < 4) return 0;
+    return new DataView(u8.buffer, u8.byteOffset, 4).getUint32(0, true);
+  }
+  function u8ToFloat32LE(u8) {
+    if (!u8 || u8.length < 4) return 0;
+    return new DataView(u8.buffer, u8.byteOffset, 4).getFloat32(0, true);
+  }
+  function u8ToInt32LE(u8) {
+    if (!u8 || u8.length < 4) return 0;
+    return new DataView(u8.buffer, u8.byteOffset, 4).getInt32(0, true);
+  }
+  function fmtNodeID(num) {
+    if (!num) return '';
+    return '!' + (num >>> 0).toString(16).padStart(8, '0');
+  }
+
+  function handleMeshtasticProtobuf(payload) {
+    var fr = pbDecode(payload);
+    // field 3 = my_info
+    if (fr[3] && fr[3][0] instanceof Uint8Array) {
+      var mi = pbDecode(fr[3][0]);
+      if (mi[1]) {
+        myNodeNum = mi[1][0] >>> 0;
+        var nb = document.getElementById('mesh-node-badge');
+        if (nb) { nb.textContent = 'My Node: ' + fmtNodeID(myNodeNum); nb.style.display = ''; }
+        logRaw('RX', 'Meshtastic my_info node=' + fmtNodeID(myNodeNum));
+      }
+    }
+    // field 4 = node_info
+    if (fr[4] && fr[4][0] instanceof Uint8Array) {
+      var ni = pbDecode(fr[4][0]);
+      var num = ni[1] ? (ni[1][0] >>> 0) : 0;
+      if (num) {
+        var nid = fmtNodeID(num);
+        var shortName = '', longName = '', hw = '', lat = 0, lng = 0, batt = -1, snr = 0;
+        if (ni[2] && ni[2][0] instanceof Uint8Array) {
+          var u = pbDecode(ni[2][0]);
+          if (u[2] && u[2][0] instanceof Uint8Array) longName = textDec.decode(u[2][0]);
+          if (u[3] && u[3][0] instanceof Uint8Array) shortName = textDec.decode(u[3][0]);
+          if (u[5]) hw = 'HW#' + u[5][0];
+        }
+        if (ni[3] && ni[3][0] instanceof Uint8Array) {
+          var pos = pbDecode(ni[3][0]);
+          if (pos[1] && pos[1][0] instanceof Uint8Array) lat = u8ToInt32LE(pos[1][0]) / 1e7;
+          if (pos[2] && pos[2][0] instanceof Uint8Array) lng = u8ToInt32LE(pos[2][0]) / 1e7;
+        }
+        if (ni[4] && ni[4][0] instanceof Uint8Array) snr = u8ToFloat32LE(ni[4][0]);
+        if (ni[6] && ni[6][0] instanceof Uint8Array) {
+          var dm = pbDecode(ni[6][0]);
+          if (dm[1]) batt = Math.round(dm[1][0]);
+        }
+        if (longName || shortName) nodeNames[nid] = longName || shortName;
+        persistNode({ node_id: nid, short_name: shortName, long_name: longName, hardware: hw, protocol: 'meshtastic', lat: lat, lng: lng, battery: batt, snr: snr, rssi: 0 });
+        logRaw('RX', 'Meshtastic node_info ' + nid + ' (' + (longName || shortName || 'unknown') + ')');
+      }
+    }
+    // field 2 = MeshPacket
+    if (fr[2] && fr[2][0] instanceof Uint8Array) {
+      var pkt = pbDecode(fr[2][0]);
+      var fromNum = pkt[1] ? u8ToUint32LE(pkt[1][0]) : 0;
+      var toNum = pkt[2] ? u8ToUint32LE(pkt[2][0]) : 0xffffffff;
+      var ch = pkt[3] ? String(pkt[3][0]) : '0';
+      var snrVal = pkt[8] ? u8ToFloat32LE(pkt[8][0]) : 0;
+      var rssiVal = pkt[12] ? (pkt[12][0] | 0) : 0;
+      if (pkt[4] && pkt[4][0] instanceof Uint8Array) {
+        var dataMsg = pbDecode(pkt[4][0]);
+        var portnum = dataMsg[1] ? dataMsg[1][0] : 0;
+        var payBytes = dataMsg[2] && dataMsg[2][0] instanceof Uint8Array ? dataMsg[2][0] : null;
+        if (portnum === 1 && payBytes) {
+          var txt = textDec.decode(payBytes);
+          var fid = fmtNodeID(fromNum);
+          var tid = toNum === 0xffffffff ? '^all' : fmtNodeID(toNum);
+          persistMessage({
+            protocol: 'meshtastic',
+            direction: 'rx',
+            channel: ch,
+            from_id: fid,
+            from_name: nodeNames[fid] || fid,
+            to_id: tid,
+            body: txt,
+            snr: snrVal,
+            rssi: rssiVal
+          });
+          logRaw('RX', 'Meshtastic TEXT from ' + fid + ' ch=' + ch + ': ' + txt);
+        }
+      }
+    }
+  }
+
+  function encodeMeshtasticWantConfig() {
+    var cid = (Math.floor(Math.random() * 0x7fffffff) + 1) >>> 0;
+    return pbUint(3, cid);
+  }
+
+  function encodeMeshtasticText(text, chNum, toStr) {
+    var dest = 0xffffffff;
+    if (toStr && toStr !== '^all') {
+      var hex = toStr.replace(/^!/, '');
+      var parsed = parseInt(hex, 16);
+      if (!isNaN(parsed)) dest = parsed >>> 0;
+    }
+    var dataPb = concatU8([pbUint(1, 1), pbBytes(2, textEnc.encode(text))]);
+    var pktId = (Math.floor(Math.random() * 0x7fffffff) + 1) >>> 0;
+    var parts = [
+      pbFixed32(2, dest),
+      pbBytes(4, dataPb),
+      pbFixed32(6, pktId),
+      pbUint(10, 1) // want_ack
+    ];
+    if (chNum > 0) parts.push(pbUint(3, chNum));
+    var meshPkt = concatU8(parts);
+    return pbBytes(1, meshPkt);
+  }
+
+  function wrapMeshtasticSerial(pb) {
+    var out = new Uint8Array(4 + pb.length);
+    out[0] = 0x94; out[1] = 0xC3;
+    out[2] = (pb.length >> 8) & 0xff;
+    out[3] = pb.length & 0xff;
+    out.set(pb, 4);
+    return out;
+  }
+
+  function wrapMeshCoreFrame(payload) {
+    var out = new Uint8Array(3 + payload.length);
+    out[0] = 0x3C;
+    out[1] = payload.length & 0xff;
+    out[2] = (payload.length >> 8) & 0xff;
+    out.set(payload, 3);
+    return out;
+  }
+
+  function onIncomingBytes(chunk) {
+    var proto = document.getElementById('mesh-proto').value;
+    var merged = new Uint8Array(rxBuf.length + chunk.length);
+    merged.set(rxBuf, 0);
+    merged.set(chunk, rxBuf.length);
+    rxBuf = merged;
+
+    if (proto === 'meshtastic') {
+      while (rxBuf.length >= 4) {
+        var idx = -1;
+        for (var i = 0; i < rxBuf.length - 1; i++) {
+          if (rxBuf[i] === 0x94 && rxBuf[i + 1] === 0xC3) { idx = i; break; }
+        }
+        if (idx < 0) {
+          // Non-framed debug text line
+          var nl = rxBuf.indexOf(10);
+          if (nl >= 0) {
+            var dbg = textDec.decode(rxBuf.slice(0, nl)).trim();
+            if (dbg) logRaw('DBG', dbg);
+            rxBuf = rxBuf.slice(nl + 1);
+            continue;
+          }
+          if (rxBuf.length > 512) rxBuf = rxBuf.slice(-4);
+          break;
+        }
+        if (idx > 0) rxBuf = rxBuf.slice(idx);
+        if (rxBuf.length < 4) break;
+        var plen = (rxBuf[2] << 8) | rxBuf[3];
+        if (plen > 1024) { rxBuf = rxBuf.slice(2); continue; }
+        if (rxBuf.length < 4 + plen) break;
+        var frame = rxBuf.slice(4, 4 + plen);
+        rxBuf = rxBuf.slice(4 + plen);
+        handleMeshtasticProtobuf(frame);
+      }
+      return;
+    }
+
+    if (proto === 'meshcore') {
+      while (rxBuf.length >= 3) {
+        if (rxBuf[0] === 0x3E) {
+          var mlen = rxBuf[1] | (rxBuf[2] << 8);
+          if (mlen > 1024) { rxBuf = rxBuf.slice(1); continue; }
+          if (rxBuf.length < 3 + mlen) break;
+          var mpay = rxBuf.slice(3, 3 + mlen);
+          rxBuf = rxBuf.slice(3 + mlen);
+          handleMeshCorePayload(mpay);
+          continue;
+        }
+        var nl2 = rxBuf.indexOf(10);
+        if (nl2 >= 0) {
+          var line = textDec.decode(rxBuf.slice(0, nl2)).trim();
+          rxBuf = rxBuf.slice(nl2 + 1);
+          if (line) {
+            logRaw('RX', line);
+            persistMessage({ protocol: 'meshcore', direction: 'rx', channel: '0', from_id: 'meshcore', from_name: 'MeshCore', to_id: '^all', body: line, snr: 0, rssi: 0 });
+          }
+        } else {
+          break;
+        }
+      }
+      return;
+    }
+
+    // Generic LoRa / Serial / AT line-oriented mode
+    while (true) {
+      var nl3 = rxBuf.indexOf(10);
+      if (nl3 < 0) break;
+      var gline = textDec.decode(rxBuf.slice(0, nl3)).replace(/\r$/, '').trim();
+      rxBuf = rxBuf.slice(nl3 + 1);
+      if (gline) {
+        logRaw('RX', gline);
+        persistMessage({ protocol: 'generic', direction: 'rx', channel: '0', from_id: 'radio', from_name: 'LoRa Radio', to_id: '^all', body: gline, snr: 0, rssi: 0 });
+      }
+    }
+  }
+
+  function handleMeshCorePayload(payload) {
+    if (!payload || payload.length === 0) return;
+    var code = payload[0];
+    logRaw('RX', 'MeshCore code=0x' + code.toString(16) + ' hex=' + hexStr(payload));
+    // Companion channel / direct text frames carry UTF-8 text after header bytes
+    if ((code === 0x07 || code === 0x08 || code === 0x10 || code === 0x11) && payload.length > 8) {
+      var txt = textDec.decode(payload.slice(8)).replace(/\0/g, '').trim();
+      if (txt) {
+        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: '0', from_id: 'meshcore', from_name: 'MeshCore Peer', to_id: '^all', body: txt, snr: 0, rssi: 0 });
+      }
+    } else if (code === 0x05 && payload.length > 2) {
+      var info = textDec.decode(payload.slice(1)).replace(/[^\x20-\x7E]/g, ' ').trim();
+      if (info) {
+        persistNode({ node_id: 'meshcore-self', short_name: 'MC', long_name: info.slice(0, 32), hardware: 'MeshCore', protocol: 'meshcore', lat: 0, lng: 0, battery: -1, snr: 0, rssi: 0 });
+      }
+    }
+  }
+
+  async function writeRaw(bytes) {
+    if (transport === 'usb' && serialWriter) {
+      await serialWriter.write(bytes);
+      logRaw('TX', hexStr(bytes));
+      return;
+    }
+    if (transport === 'ble' && bleWriteChar) {
+      // Chunk to <=200 bytes for BLE MTU safety
+      for (var off = 0; off < bytes.length; off += 200) {
+        await bleWriteChar.writeValue(bytes.slice(off, off + 200));
+      }
+      logRaw('TX', hexStr(bytes));
+      return;
+    }
+    throw new Error('No radio connected');
+  }
+
+  async function drainMeshtasticBLE() {
+    if (!bleFromRadioChar) return;
+    for (var i = 0; i < 64; i++) {
+      var dv = await bleFromRadioChar.readValue();
+      if (!dv || dv.byteLength === 0) break;
+      var u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+      handleMeshtasticProtobuf(u8);
+    }
+  }
+
+  window.meshRequestConfig = async function() {
+    var proto = document.getElementById('mesh-proto').value;
+    try {
+      if (proto === 'meshtastic') {
+        var pb = encodeMeshtasticWantConfig();
+        await writeRaw(transport === 'usb' ? wrapMeshtasticSerial(pb) : pb);
+        if (transport === 'ble' && bleMode === 'meshtastic') await drainMeshtasticBLE();
+      } else if (proto === 'meshcore') {
+        // MeshCore AppStart (0x01) + version 0x03 + "Ark"
+        var mc = new Uint8Array([0x01, 0x03, 0x41, 0x72, 0x6B]);
+        await writeRaw(wrapMeshCoreFrame(mc));
+      } else {
+        await writeRaw(textEnc.encode('AT\r\n'));
+      }
+    } catch (e) {
+      setStatus('Sync error: ' + e.message, !!transport);
+    }
+  };
+
+  window.meshConnectUSB = async function() {
+    if (!('serial' in navigator)) {
+      setStatus('Web Serial API is not supported in this browser. Open Ark on localhost in Chrome or Edge to connect via USB.', false);
+      return;
+    }
+    try {
+      serialPort = await navigator.serial.requestPort();
+      var baud = parseInt(document.getElementById('mesh-baud').value, 10) || 115200;
+      await serialPort.open({ baudRate: baud });
+      transport = 'usb';
+      rxBuf = new Uint8Array(0);
+      serialWriter = serialPort.writable.getWriter();
+      serialKeepReading = true;
+      setStatus('Connected over USB Serial at ' + baud + ' baud.', true);
+      logRaw('SYS', 'USB Serial opened @ ' + baud + ' baud');
+      (async function readLoop() {
+        while (serialPort && serialPort.readable && serialKeepReading) {
+          serialReader = serialPort.readable.getReader();
+          try {
+            while (true) {
+              var res = await serialReader.read();
+              if (res.done) break;
+              if (res.value) onIncomingBytes(res.value);
+            }
+          } catch (err) {
+            if (serialKeepReading) logRaw('ERR', 'Serial read: ' + err.message);
+          } finally {
+            try { serialReader.releaseLock(); } catch (_) {}
+          }
+        }
+      })();
+      await window.meshRequestConfig();
+    } catch (err) {
+      setStatus('USB connection cancelled or failed: ' + err.message, false);
+    }
+  };
+
+  window.meshConnectBLE = async function() {
+    if (!('bluetooth' in navigator)) {
+      setStatus('Web Bluetooth API is not supported in this browser. Open Ark on localhost in Chrome or Edge to connect via Bluetooth.', false);
+      return;
+    }
+    try {
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [
+          { services: [MESHTASTIC_SVC] },
+          { services: [NUS_SVC] }
+        ],
+        optionalServices: [MESHTASTIC_SVC, NUS_SVC]
+      });
+      bleDevice.addEventListener('gattserverdisconnected', function() {
+        setStatus('Bluetooth device disconnected.', false);
+        transport = null;
+      });
+      bleServer = await bleDevice.gatt.connect();
+      transport = 'ble';
+      rxBuf = new Uint8Array(0);
+
+      // Prefer Meshtastic GATT service if present, else Nordic UART (MeshCore / LoRa BLE)
+      var svc = null;
+      try {
+        svc = await bleServer.getPrimaryService(MESHTASTIC_SVC);
+        bleMode = 'meshtastic';
+        document.getElementById('mesh-proto').value = 'meshtastic';
+        bleWriteChar = await svc.getCharacteristic(MESHTASTIC_TORADIO);
+        bleFromRadioChar = await svc.getCharacteristic(MESHTASTIC_FROMRADIO);
+        bleFromNumChar = await svc.getCharacteristic(MESHTASTIC_FROMNUM);
+        await bleFromNumChar.startNotifications();
+        bleFromNumChar.addEventListener('characteristicvaluechanged', function() {
+          drainMeshtasticBLE().catch(function() {});
+        });
+      } catch (_) {
+        svc = await bleServer.getPrimaryService(NUS_SVC);
+        bleMode = 'nus';
+        bleWriteChar = await svc.getCharacteristic(NUS_RX);
+        var txChar = await svc.getCharacteristic(NUS_TX);
+        await txChar.startNotifications();
+        txChar.addEventListener('characteristicvaluechanged', function(ev) {
+          var v = ev.target.value;
+          onIncomingBytes(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+        });
+      }
+
+      setStatus('Connected over Bluetooth LE to ' + (bleDevice.name || 'LoRa Node') + '.', true);
+      logRaw('SYS', 'BLE connected: ' + (bleDevice.name || 'device') + ' (' + bleMode + ')');
+      await window.meshRequestConfig();
+    } catch (err) {
+      setStatus('Bluetooth connection cancelled or failed: ' + err.message, false);
+    }
+  };
+
+  window.meshDisconnect = async function() {
+    serialKeepReading = false;
+    try { if (serialReader) await serialReader.cancel(); } catch (_) {}
+    try { if (serialWriter) serialWriter.releaseLock(); } catch (_) {}
+    try { if (serialPort) await serialPort.close(); } catch (_) {}
+    try { if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) bleDevice.gatt.disconnect(); } catch (_) {}
+    serialPort = null; serialReader = null; serialWriter = null;
+    bleDevice = null; bleServer = null; bleWriteChar = null; bleFromRadioChar = null; bleFromNumChar = null;
+    transport = null;
+    setStatus('Disconnected.', false);
+    logRaw('SYS', 'Disconnected');
+  };
+
+  window.meshSendMessage = async function(ev) {
+    ev.preventDefault();
+    var bodyEl = document.getElementById('mesh-tx-body');
+    var chEl = document.getElementById('mesh-tx-ch');
+    var toEl = document.getElementById('mesh-tx-to');
+    var text = (bodyEl.value || '').trim();
+    if (!text) return;
+    var proto = document.getElementById('mesh-proto').value;
+    var ch = (chEl.value || '0').trim();
+    var to = (toEl.value || '^all').trim();
+
+    if (!transport) {
+      setStatus('Connect a USB or Bluetooth radio before transmitting.', false);
+      return;
+    }
+    try {
+      if (proto === 'meshtastic') {
+        var pb = encodeMeshtasticText(text, parseInt(ch, 10) || 0, to);
+        await writeRaw(transport === 'usb' ? wrapMeshtasticSerial(pb) : pb);
+      } else if (proto === 'meshcore') {
+        var txtBytes = textEnc.encode(text);
+        var chIdx = parseInt(ch, 10) || 0;
+        var ts = Math.floor(Date.now() / 1000);
+        var hdr = new Uint8Array(7 + txtBytes.length);
+        hdr[0] = 0x03; // CMD_SEND_CHANNEL_TXT_MSG
+        hdr[1] = 0x00; // txt_type plain
+        hdr[2] = chIdx & 0xff;
+        new DataView(hdr.buffer).setUint32(3, ts >>> 0, true);
+        hdr.set(txtBytes, 7);
+        await writeRaw(wrapMeshCoreFrame(hdr));
+      } else {
+        await writeRaw(textEnc.encode(text + '\r\n'));
+      }
+      bodyEl.value = '';
+      await persistMessage({
+        protocol: proto,
+        direction: 'tx',
+        channel: ch,
+        from_id: myNodeNum ? fmtNodeID(myNodeNum) : 'local',
+        from_name: 'This Node',
+        to_id: to,
+        body: text,
+        snr: 0,
+        rssi: 0
+      });
+    } catch (err) {
+      setStatus('Transmit failed: ' + err.message, !!transport);
+    }
+  };
+
+  async function persistMessage(m) {
+    if (!window.ARK_IS_LOCAL) return;
+    var fd = new URLSearchParams();
+    Object.keys(m).forEach(function(k) { fd.set(k, String(m[k] == null ? '' : m[k])); });
+    await fetch('/api/mesh/message', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd.toString() }).catch(function() {});
+    loadState();
+  }
+
+  async function persistNode(n) {
+    if (!window.ARK_IS_LOCAL) return;
+    var fd = new URLSearchParams();
+    Object.keys(n).forEach(function(k) { fd.set(k, String(n[k] == null ? '' : n[k])); });
+    await fetch('/api/mesh/node', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd.toString() }).catch(function() {});
+    loadState();
+  }
+
+  window.meshClearLog = async function() {
+    if (!confirm('Clear all saved mesh messages and discovered nodes?')) return;
+    await fetch('/api/mesh/clear', { method: 'POST' }).catch(function() {});
+    loadState();
+  };
+
+  function loadState() {
+    fetch('/api/mesh/state')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.ok) return;
+        var msgs = data.messages || [];
+        var nodes = data.nodes || [];
+        var mc = document.getElementById('mesh-msg-count');
+        var nc = document.getElementById('mesh-node-count');
+        if (mc) mc.textContent = String(msgs.length);
+        if (nc) nc.textContent = String(nodes.length);
+
+        var feed = document.getElementById('mesh-msg-feed');
+        if (feed) {
+          if (msgs.length === 0) {
+            feed.innerHTML = '<div class="secondary-text" style="font-size:13px;text-align:center;padding:2rem 0.5rem;">No mesh messages yet. Connect a radio via USB or Bluetooth to start receiving.</div>';
+          } else {
+            feed.innerHTML = msgs.slice().reverse().map(function(m) {
+              var isTx = m.direction === 'tx';
+              var sig = (m.snr || m.rssi) ? ('<span class="secondary-text tabular" style="font-size:11px;">' + (m.snr ? ('SNR ' + m.snr.toFixed(1) + ' dB ') : '') + (m.rssi ? ('RSSI ' + m.rssi + ' dBm') : '') + '</span>') : '';
+              return '<div style="padding:0.55rem 0.7rem;border-radius:8px;border:1px solid var(--color-border);background:' + (isTx ? 'rgba(42,67,56,0.08)' : 'var(--color-surface)') + ';">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.2rem;">' +
+                  '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">' +
+                    '<span class="badge ' + (isTx ? 'badge-accent' : 'badge-success') + '" style="font-size:10px;">' + (isTx ? 'TX' : 'RX') + '</span>' +
+                    '<strong style="font-size:13.5px;">' + esc(m.from_name || m.from_id || 'Node') + '</strong>' +
+                    '<span class="secondary-text" style="font-size:11.5px;">&rarr; ' + esc(m.to_id || '^all') + ' (ch ' + esc(m.channel) + ')</span>' +
+                  '</div>' +
+                  '<span class="secondary-text tabular" style="font-size:11px;">' + esc(m.created_at) + '</span>' +
+                '</div>' +
+                '<div style="white-space:pre-wrap;word-break:break-word;font-size:14px;">' + esc(m.body) + '</div>' +
+                (sig ? '<div style="margin-top:0.2rem;">' + sig + '</div>' : '') +
+              '</div>';
+            }).join('');
+            feed.scrollTop = feed.scrollHeight;
+          }
+        }
+
+        var tbody = document.getElementById('mesh-nodes-tbody');
+        if (tbody) {
+          if (nodes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="secondary-text" style="text-align:center;padding:1.5rem;">No nodes heard yet.</td></tr>';
+          } else {
+            tbody.innerHTML = nodes.map(function(n) {
+              if (n.long_name || n.short_name) nodeNames[n.node_id] = n.long_name || n.short_name;
+              var gps = (n.lat || n.lng) ? ('<a href="/maps" style="font-size:12px;">' + n.lat.toFixed(4) + ', ' + n.lng.toFixed(4) + '</a>') : '<span class="secondary-text">—</span>';
+              var batt = n.battery >= 0 ? (n.battery + '%') : '—';
+              var sig = (n.snr ? (n.snr.toFixed(1) + ' dB') : '—') + (n.rssi ? (' / ' + n.rssi + ' dBm') : '');
+              return '<tr>' +
+                '<td><strong>' + esc(n.long_name || n.short_name || n.node_id) + '</strong><div class="secondary-text tabular" style="font-size:11.5px;">' + esc(n.node_id) + (n.short_name ? ' &bull; ' + esc(n.short_name) : '') + ' &bull; ' + esc(n.protocol) + '</div></td>' +
+                '<td class="tabular" style="font-size:12.5px;">' + esc(sig) + '</td>' +
+                '<td class="tabular" style="font-size:12.5px;">' + esc(batt) + '</td>' +
+                '<td class="tabular" style="font-size:12.5px;">' + gps + '</td>' +
+              '</tr>';
+            }).join('');
+          }
+        }
+      })
+      .catch(function() {});
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    loadState();
+    setInterval(loadState, 4000);
+  });
+})();
+</script>
+{{ end }}

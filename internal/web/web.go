@@ -255,6 +255,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		"system.html",
 		"settings.html",
 		"maps.html",
+		"mesh.html",
 		"lan_drop.html",
 		"tools.html",
 	}
@@ -287,6 +288,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 	}
 	s.seedDefaultApps()
 	s.ensureLANDropTable()
+	s.ensureMeshTables()
 	return s, nil
 }
 
@@ -381,6 +383,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/settings/restart", s.localOnly(s.handleSettingsRestart))
 	mux.HandleFunc("/settings/shutdown", s.localOnly(s.handleSettingsShutdown))
 	mux.HandleFunc("/maps", s.handleMapsViewer)
+	mux.HandleFunc("/mesh", s.handleMeshPage)
 	mux.HandleFunc("/maps/files/", s.handleMapsFiles)
 	mux.HandleFunc("/maps/tiles/", s.handleUnifiedMapTiles)
 	mux.HandleFunc("/read/zim", s.handleZIMReader)
@@ -443,6 +446,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/peers/download", s.handleAPIPeersDownload)
 	mux.HandleFunc("/api/peers/list", s.handleAPIPeersList)
 	mux.HandleFunc("/api/peers/pull", s.localOnly(s.handleAPIPeersPull))
+	mux.HandleFunc("/api/mesh/state", s.handleAPIMeshState)
+	mux.HandleFunc("/api/mesh/message", s.localOnly(s.handleAPIMeshMessage))
+	mux.HandleFunc("/api/mesh/node", s.localOnly(s.handleAPIMeshNode))
+	mux.HandleFunc("/api/mesh/clear", s.localOnly(s.handleAPIMeshClear))
 	mux.HandleFunc("/peer/", s.handlePeerProxy)
 
 	// App reverse proxy
@@ -450,6 +457,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 		mux.Handle("/a/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/a/maps" || r.URL.Path == "/a/maps/" {
 				http.Redirect(w, r, "/maps", http.StatusSeeOther)
+				return
+			}
+			if r.URL.Path == "/a/meshtastic" || r.URL.Path == "/a/meshtastic/" || r.URL.Path == "/a/mesh" || r.URL.Path == "/a/mesh/" {
+				http.Redirect(w, r, "/mesh", http.StatusSeeOther)
 				return
 			}
 			if r.URL.Path == "/a/kiwix" || strings.HasPrefix(r.URL.Path, "/a/kiwix/") {
@@ -1367,7 +1378,12 @@ func (s *Server) fetchApps() ([]AppView, []AppView) {
 			IsCustom:    customSet[m.ID],
 		}
 
-		if found {
+		if m.ID == "meshtastic" {
+			app.Status = "running"
+			app.ProxyMode = "native"
+			app.OpenURL = "/mesh"
+			installed = append(installed, app)
+		} else if found {
 			app.Status = effectiveStatus
 			if effectiveStatus == "running" || effectiveStatus == "stopped" {
 				installed = append(installed, app)
@@ -1460,6 +1476,8 @@ func renderAppIconSVG(appID string) template.HTML {
 		body = `<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>`
 	case "maps":
 		body = `<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>`
+	case "meshtastic":
+		body = `<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/><line x1="12" y1="14" x2="12" y2="22"/>`
 	case "ollama":
 		body = `<path d="M12 2a4 4 0 0 1 4 4v1a3 3 0 0 1 2.5 3 3 3 0 0 1-1 5.2V18a2 2 0 0 1-2 2H8.5a2 2 0 0 1-2-2v-2.8A3 3 0 0 1 5.5 10 3 3 0 0 1 8 7V6a4 4 0 0 1 4-4z"/><circle cx="9.5" cy="10.5" r="1"/><circle cx="14.5" cy="10.5" r="1"/>`
 	case "libretranslate":

@@ -2877,3 +2877,96 @@ func TestRemoteDeleteAndDownloadRestrictionsAndPeerDiscovery(t *testing.T) {
 		t.Errorf("expected /api/peers/list to omit non-discoverable peer, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestMeshRadioBridgeAndCelestialTracker(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE app_states (id TEXT PRIMARY KEY, name TEXT, category TEXT, image TEXT, container_id TEXT, status TEXT, port INTEGER, proxy_mode TEXT, auto_start BOOLEAN, created_at DATETIME, updated_at DATETIME)`)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	// 1. /apps lists Meshtastic / LoRa Bridge natively
+	req := httptest.NewRequest(http.MethodGet, "/apps", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Meshtastic / LoRa Bridge") || !strings.Contains(w.Body.String(), `data-open-url="/mesh"`) {
+		t.Errorf("expected /apps to include native Meshtastic / LoRa Bridge app")
+	}
+
+	// 2. /mesh renders USB + Bluetooth + Meshtastic/MeshCore UI offline
+	req = httptest.NewRequest(http.MethodGet, "/mesh", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	meshHTML := w.Body.String()
+	for _, want := range []string{"Meshtastic / LoRa Radio Bridge", "Connect USB", "Connect Bluetooth", "MeshCore", `id="mesh-msg-feed"`, `id="mesh-nodes-tbody"`} {
+		if w.Code != http.StatusOK || !strings.Contains(meshHTML, want) {
+			t.Errorf("expected /mesh (status=%d) to contain %q", w.Code, want)
+		}
+	}
+	if strings.Contains(meshHTML, "cdn.jsdelivr.net") || strings.Contains(meshHTML, "unpkg.com") {
+		t.Errorf("expected /mesh to have zero external CDN references")
+	}
+
+	// 3. Mesh API persistence (local write, remote read-only)
+	nodeForm := url.Values{"node_id": {"!a1b2c3d4"}, "short_name": {"BASE"}, "long_name": {"Base Camp"}, "protocol": {"meshtastic"}, "lat": {"45.5"}, "lng": {"-122.6"}, "battery": {"92"}, "snr": {"8.5"}}
+	req = httptest.NewRequest(http.MethodPost, "/api/mesh/node", strings.NewReader(nodeForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/mesh/node status=%d: %s", w.Code, w.Body.String())
+	}
+
+	msgForm := url.Values{"protocol": {"meshtastic"}, "direction": {"rx"}, "channel": {"0"}, "from_id": {"!a1b2c3d4"}, "from_name": {"Base Camp"}, "to_id": {"^all"}, "body": {"Radio check loud and clear"}}
+	req = httptest.NewRequest(http.MethodPost, "/api/mesh/message", strings.NewReader(msgForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/mesh/message status=%d: %s", w.Code, w.Body.String())
+	}
+
+	// Remote read allowed, remote write blocked
+	req = httptest.NewRequest(http.MethodGet, "/api/mesh/state", nil)
+	req.RemoteAddr = "192.168.1.99:55555"
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Radio check loud and clear") || !strings.Contains(w.Body.String(), "Base Camp") {
+		t.Errorf("expected remote GET /api/mesh/state to return persisted node and message, got %d: %s", w.Code, w.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/mesh/clear", nil)
+	req.RemoteAddr = "192.168.1.99:55555"
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected remote POST /api/mesh/clear to return 403, got %d", w.Code)
+	}
+
+	// 4. /tools includes Celestial & Stars tracker tab with moon phase and compass
+	req = httptest.NewRequest(http.MethodGet, "/tools", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	toolsHTML := w.Body.String()
+	for _, want := range []string{"Celestial &amp; Stars", `id="tab-celestial"`, `id="cel-canvas"`, `id="cel-moon-canvas"`, `id="cel-heading"`, `id="cel-lat"`, `id="cel-lon"`, `id="cel-ephem-tbody"`} {
+		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
+			t.Errorf("expected /tools to contain %q", want)
+		}
+	}
+}

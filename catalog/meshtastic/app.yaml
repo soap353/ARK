@@ -1,0 +1,13 @@
+version: 1
+id: meshtastic
+name: Meshtastic / LoRa Bridge
+category: tools
+description: Connect Meshtastic, MeshCore, or LoRa radios via USB Serial or Bluetooth LE for off-grid messaging and node telemetry.
+icon: radio.svg
+image: native/ark-mesh
+port: 8080
+proxy: path
+open_url: /mesh
+healthcheck: /mesh
+lan: read
+memory_mb: 32

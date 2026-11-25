@@ -3,7 +3,7 @@
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
     <div>
       <h1 style="margin:0;">Field &amp; Reference Calculators</h1>
-      <p class="secondary-text" style="margin:0.3rem 0 0;">Instant calculators for graphing, medical dosing, solar/battery sizing, RF antennas, coordinates, and unit conversions.</p>
+      <p class="secondary-text" style="margin:0.3rem 0 0;">Instant calculators for graphing, medical dosing, solar/battery sizing, RF antennas, coordinates, unit conversions, and real-time celestial tracking.</p>
     </div>
     <span class="badge badge-success">Local</span>
   </div>
@@ -15,6 +15,7 @@
     <button type="button" class="btn calc-tab-btn" data-tab="radio" onclick="showCalcTab('radio')">Radio &amp; Antenna</button>
     <button type="button" class="btn calc-tab-btn" data-tab="coords" onclick="showCalcTab('coords')">Coordinates &amp; Bearing</button>
     <button type="button" class="btn calc-tab-btn" data-tab="units" onclick="showCalcTab('units')">Unit Converter</button>
+    <button type="button" class="btn calc-tab-btn" data-tab="celestial" onclick="showCalcTab('celestial')">Celestial &amp; Stars</button>
   </div>
 </div>
 
@@ -353,6 +354,98 @@
   </ul>
 </div>
 
+<!-- 6. Real-Time Celestial Body & Star Tracker -->
+<div id="tab-celestial" class="card calc-panel" style="display:none;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.85rem;">
+    <div>
+      <h2 style="margin:0;">Real-Time Celestial &amp; Star Tracker</h2>
+      <p class="secondary-text" style="margin:0.2rem 0 0;font-size:13.5px;">Live all-sky dome, ingrained 360&deg; compass, Moon phase, Sun, naked-eye planets, and navigation stars for any latitude &amp; longitude.</p>
+    </div>
+    <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;">
+      <button type="button" class="btn" style="min-height:34px;padding:0.2rem 0.7rem;font-size:13px;" onclick="celUseGPS()">Use My Location</button>
+      <button type="button" id="cel-sensor-btn" class="btn" style="min-height:34px;padding:0.2rem 0.7rem;font-size:13px;" onclick="celToggleCompassSensor()">Device Compass</button>
+    </div>
+  </div>
+
+  <!-- Observer Inputs -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:0.75rem;margin-bottom:0.85rem;">
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" for="cel-lat">Latitude (&deg;N / -&deg;S)</label>
+      <input id="cel-lat" type="number" step="0.0001" min="-90" max="90" value="39.8283" class="form-control tabular" oninput="celUpdate()">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" for="cel-lon">Longitude (&deg;E / -&deg;W)</label>
+      <input id="cel-lon" type="number" step="0.0001" min="-180" max="180" value="-98.5795" class="form-control tabular" oninput="celUpdate()">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" for="cel-heading">Compass Facing: <span id="cel-heading-lbl" class="tabular">0&deg; N</span></label>
+      <input id="cel-heading" type="range" min="0" max="359" step="1" value="0" style="width:100%;margin-top:0.55rem;" oninput="celUpdate()">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" for="cel-datetime">Time (<label style="font-weight:500;cursor:pointer;"><input type="checkbox" id="cel-live" checked onchange="celToggleLive()"> Live</label>)</label>
+      <input id="cel-datetime" type="datetime-local" class="form-control tabular" disabled onchange="celUpdate()">
+    </div>
+  </div>
+
+  <!-- Live Time / Sidereal / Twilight Strip -->
+  <div id="cel-meta-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.65rem;padding:0.75rem 0.9rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);margin-bottom:1rem;"></div>
+
+  <!-- Sky Dome + Moon Phase Side-by-Side -->
+  <div style="display:grid;grid-template-columns:minmax(300px, 1.35fr) minmax(260px, 0.9fr);gap:1rem;align-items:start;">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:0.55rem;">
+      <div style="position:relative;width:100%;max-width:520px;aspect-ratio:1/1;">
+        <canvas id="cel-canvas" width="520" height="520" style="width:100%;height:100%;display:block;border-radius:12px;background:#0B131E;box-shadow:0 4px 18px rgba(0,0,0,0.22);cursor:crosshair;"></canvas>
+      </div>
+      <div style="display:flex;gap:0.85rem;flex-wrap:wrap;justify-content:center;font-size:13px;">
+        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-const" checked onchange="celUpdate()"> Constellations</label>
+        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-labels" checked onchange="celUpdate()"> Star Labels</label>
+        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-planets" checked onchange="celUpdate()"> Planets</label>
+      </div>
+      <div id="cel-hover-info" class="secondary-text tabular" style="font-size:13px;min-height:1.4em;text-align:center;">Hover or tap any star, planet, Sun, or Moon on the sky dome for exact Altitude &amp; Azimuth.</div>
+    </div>
+
+    <!-- Moon Phase & Solar Card -->
+    <div style="display:flex;flex-direction:column;gap:0.85rem;">
+      <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+          <canvas id="cel-moon-canvas" width="110" height="110" style="width:96px;height:96px;border-radius:50%;background:#0B131E;flex-shrink:0;"></canvas>
+          <div style="min-width:140px;flex:1;">
+            <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Lunar Phase</div>
+            <div id="cel-moon-phase-name" style="font-size:19px;font-weight:700;margin:0.15rem 0;">—</div>
+            <div id="cel-moon-stats" class="secondary-text tabular" style="font-size:13px;line-height:1.5;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
+        <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem;">Solar &amp; Compass Summary</div>
+        <div id="cel-sun-stats" class="tabular" style="font-size:13.5px;line-height:1.6;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ephemeris Table -->
+  <div class="table-wrapper" style="margin-top:1rem;">
+    <table>
+      <thead>
+        <tr>
+          <th>Celestial Body</th>
+          <th>Altitude</th>
+          <th>Azimuth / Bearing</th>
+          <th>Status</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="cel-ephem-tbody"></tbody>
+    </table>
+  </div>
+
+  <ul class="secondary-text" style="margin:0.85rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
+    <li><strong>Inputs:</strong> Latitude &amp; Longitude (observer position in decimal degrees), Compass Facing (rotates the sky dome to match your heading, or use Device Compass), and Live/Manual Time.</li>
+    <li><strong>Outputs:</strong> Real-time Local Sidereal Time, all-sky dome with ingrained 360&deg; compass bezel, illuminated Moon phase &amp; lunar age, Sun twilight state, and Altitude/Azimuth bearings for the Sun, Moon, naked-eye planets, and major navigation stars.</li>
+  </ul>
+</div>
+
 <script>
 function showCalcTab(name) {
   document.querySelectorAll('.calc-panel').forEach(function(el) {
@@ -364,6 +457,9 @@ function showCalcTab(name) {
   });
   if (name === 'graph' && window.gcDraw) {
     setTimeout(window.gcDraw, 10);
+  }
+  if (name === 'celestial' && window.celUpdate) {
+    setTimeout(window.celUpdate, 10);
   }
 }
 
@@ -2156,9 +2252,10 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     'sol-ah', 'sol-v', 'sol-dod', 'sol-eff', 'sol-load', 'sol-panel',
     'rf-freq', 'rf-vf', 'coord-dd', 'coord-b',
     'unit-cat', 'unit-val', 'unit-from',
+    'cel-lat', 'cel-lon', 'cel-heading',
     'gc-int-a', 'gc-int-b', 'gc-tbl-start', 'gc-tbl-step', 'gc-tbl-count'
   ];
-  var CHECK_IDS = ['gc-opt-grid', 'gc-opt-minor', 'gc-opt-nums', 'gc-opt-arrows', 'gc-int-show'];
+  var CHECK_IDS = ['gc-opt-grid', 'gc-opt-minor', 'gc-opt-nums', 'gc-opt-arrows', 'gc-int-show', 'cel-opt-const', 'cel-opt-labels', 'cel-opt-planets'];
 
   function activeCalcTabName() {
     var btn = document.querySelector('.calc-tab-btn.btn-primary');
@@ -2239,6 +2336,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       calcRadio();
       calcCoords();
       calcUnits();
+      if (window.celUpdate) window.celUpdate();
       if (saved.activeTab && saved.activeTab !== 'graph') {
         showCalcTab(saved.activeTab);
       }
@@ -2251,7 +2349,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     origShowCalcTab(name);
     saveToolsState();
   };
-  ['tab-dosage', 'tab-solar', 'tab-radio', 'tab-coords', 'tab-units', 'gc-settings-pop', 'gc-table-pop', 'gc-calc-strip'].forEach(function(cid) {
+  ['tab-dosage', 'tab-solar', 'tab-radio', 'tab-coords', 'tab-units', 'tab-celestial', 'gc-settings-pop', 'gc-table-pop', 'gc-calc-strip'].forEach(function(cid) {
     var el = document.getElementById(cid);
     if (el) {
       el.addEventListener('input', saveToolsState);
@@ -2267,6 +2365,623 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   restoreToolsState();
   renderExprRows();
   setTimeout(function() { gcDraw(); syncExprNotes(); gcRenderTable(); }, 30);
+})();
+
+/* =========================================================================
+   Real-Time Celestial Body & Star Tracker (Offline Meeus / J2000 Ephemeris)
+   ========================================================================= */
+(function() {
+  var RAD = Math.PI / 180;
+  var DEG = 180 / Math.PI;
+  var OBLIQ = 23.4393 * RAD;
+
+  // Bright Navigation Stars: [Name, RA_hours, Dec_deg, Mag, Constellation]
+  var STARS = [
+    ['Polaris', 2.5303, 89.2641, 1.98, 'Ursa Minor'],
+    ['Kochab', 14.8451, 74.1555, 2.08, 'Ursa Minor'],
+    ['Sirius', 6.7525, -16.7161, -1.46, 'Canis Major'],
+    ['Canopus', 6.3992, -52.6957, -0.74, 'Carina'],
+    ['Rigil Kent', 14.6601, -60.8340, -0.27, 'Centaurus'],
+    ['Arcturus', 14.2610, 19.1824, -0.05, 'Bootes'],
+    ['Vega', 18.6156, 38.7837, 0.03, 'Lyra'],
+    ['Capella', 5.2782, 45.9980, 0.08, 'Auriga'],
+    ['Rigel', 5.2423, -8.2016, 0.13, 'Orion'],
+    ['Procyon', 7.6550, 5.2250, 0.34, 'Canis Minor'],
+    ['Betelgeuse', 5.9195, 7.4071, 0.50, 'Orion'],
+    ['Achernar', 1.6286, -57.2368, 0.46, 'Eridanus'],
+    ['Altair', 19.8464, 8.8683, 0.76, 'Aquila'],
+    ['Aldebaran', 4.5987, 16.5093, 0.86, 'Taurus'],
+    ['Antares', 16.4901, -26.4320, 0.96, 'Scorpius'],
+    ['Spica', 13.4199, -11.1613, 0.97, 'Virgo'],
+    ['Pollux', 7.7553, 28.0262, 1.14, 'Gemini'],
+    ['Fomalhaut', 22.9608, -29.6222, 1.16, 'Piscis Austrinus'],
+    ['Deneb', 20.6905, 45.2803, 1.25, 'Cygnus'],
+    ['Regulus', 10.1395, 11.9672, 1.35, 'Leo'],
+    ['Castor', 7.5767, 31.8883, 1.58, 'Gemini'],
+    ['Bellatrix', 5.4189, 6.3497, 1.64, 'Orion'],
+    ['Alnilam', 5.6036, -1.2019, 1.69, 'Orion'],
+    ['Alnitak', 5.6793, -1.9426, 1.77, 'Orion'],
+    ['Mintaka', 5.5334, -0.2991, 2.23, 'Orion'],
+    ['Saiph', 5.7959, -9.6696, 2.09, 'Orion'],
+    ['Dubhe', 11.0621, 61.7510, 1.79, 'Ursa Major'],
+    ['Merak', 11.0307, 56.3824, 2.37, 'Ursa Major'],
+    ['Phecda', 11.8972, 53.6948, 2.44, 'Ursa Major'],
+    ['Megrez', 12.2570, 57.0326, 3.31, 'Ursa Major'],
+    ['Alioth', 12.9005, 55.9598, 1.77, 'Ursa Major'],
+    ['Mizar', 13.3988, 54.9254, 2.27, 'Ursa Major'],
+    ['Alkaid', 13.7923, 49.3133, 1.86, 'Ursa Major'],
+    ['Schedar', 0.6751, 56.5373, 2.23, 'Cassiopeia'],
+    ['Caph', 0.1529, 59.1498, 2.27, 'Cassiopeia'],
+    ['Gamma Cas', 0.9451, 60.7167, 2.47, 'Cassiopeia'],
+    ['Ruchbah', 1.4303, 60.2353, 2.68, 'Cassiopeia'],
+    ['Acrux', 12.4433, -63.0991, 0.76, 'Crux'],
+    ['Mimosa', 12.7953, -59.6888, 1.25, 'Crux'],
+    ['Gacrux', 12.5194, -57.1132, 1.63, 'Crux']
+  ];
+
+  // Constellation stick pairs by star name
+  var CONST_LINES = [
+    ['Dubhe','Merak'],['Merak','Phecda'],['Phecda','Megrez'],['Megrez','Dubhe'],
+    ['Megrez','Alioth'],['Alioth','Mizar'],['Mizar','Alkaid'],
+    ['Betelgeuse','Bellatrix'],['Bellatrix','Mintaka'],['Mintaka','Alnilam'],['Alnilam','Alnitak'],
+    ['Alnitak','Betelgeuse'],['Mintaka','Rigel'],['Alnitak','Saiph'],['Rigel','Saiph'],
+    ['Caph','Schedar'],['Schedar','Gamma Cas'],['Gamma Cas','Ruchbah'],
+    ['Acrux','Gacrux'],['Polaris','Kochab'],['Castor','Pollux']
+  ];
+
+  // J2000 low-precision Keplerian elements: [N0, Nd, i0, id, w0, wd, a, e0, ed, M0, Md, color]
+  var PLANETS = {
+    Mercury: [48.3313, 3.24587e-5, 7.0047, 5.00e-8, 29.1241, 1.01444e-5, 0.387098, 0.205635, 5.59e-10, 168.6562, 4.0923344368, '#D1C7B7'],
+    Venus:   [76.6799, 2.46590e-5, 3.3946, 2.75e-8, 54.8910, 1.38374e-5, 0.723330, 0.006773, -1.302e-9, 48.0052, 1.6021302244, '#FDE68A'],
+    Mars:    [49.5574, 2.11081e-5, 1.8497, -1.78e-8, 286.5016, 2.92961e-5, 1.523688, 0.093405, 2.516e-9, 18.6021, 0.5240207766, '#F87171'],
+    Jupiter: [100.4542, 2.76854e-5, 1.3030, -1.557e-7, 273.8777, 1.64505e-5, 5.20256, 0.048498, 4.469e-9, 19.8950, 0.0830853001, '#FDBA74'],
+    Saturn:  [113.6634, 2.38980e-5, 2.4886, -1.081e-7, 339.3939, 2.97661e-5, 9.55475, 0.055546, -9.499e-9, 316.9670, 0.0334442282, '#FCD34D']
+  };
+
+  function normDeg(x) { return ((x % 360) + 360) % 360; }
+  function compassDir(az) {
+    var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(normDeg(az) / 22.5) % 16];
+  }
+  function toJulian(date) { return date.getTime() / 86400000 + 2440587.5; }
+
+  function raDecToAltAz(raRad, decRad, latRad, lstRad) {
+    var ha = lstRad - raRad;
+    var sinAlt = Math.sin(decRad) * Math.sin(latRad) + Math.cos(decRad) * Math.cos(latRad) * Math.cos(ha);
+    sinAlt = Math.max(-1, Math.min(1, sinAlt));
+    var alt = Math.asin(sinAlt);
+    var cosAz = (Math.sin(decRad) - Math.sin(alt) * Math.sin(latRad)) / (Math.cos(alt) * Math.cos(latRad) + 1e-12);
+    cosAz = Math.max(-1, Math.min(1, cosAz));
+    var az = Math.acos(cosAz);
+    if (Math.sin(ha) > 0) az = 2 * Math.PI - az;
+    return { alt: alt * DEG, az: az * DEG };
+  }
+
+  function sunPosition(d) {
+    var w = (282.9404 + 4.70935e-5 * d) * RAD;
+    var e = 0.016709 - 1.151e-9 * d;
+    var M = normDeg(356.0470 + 0.9856002585 * d) * RAD;
+    var E = M + e * Math.sin(M) * (1 + e * Math.cos(M));
+    var xv = Math.cos(E) - e;
+    var yv = Math.sqrt(1 - e * e) * Math.sin(E);
+    var v = Math.atan2(yv, xv);
+    var r = Math.hypot(xv, yv);
+    var lon = v + w;
+    var xs = r * Math.cos(lon), ys = r * Math.sin(lon);
+    var xe = xs;
+    var ye = ys * Math.cos(OBLIQ);
+    var ze = ys * Math.sin(OBLIQ);
+    return { ra: Math.atan2(ye, xe), dec: Math.atan2(ze, Math.hypot(xe, ye)), lon: normDeg(lon * DEG), xs: xs, ys: ys };
+  }
+
+  function moonPosition(d, sunLonDeg) {
+    var N = normDeg(125.1228 - 0.0529538083 * d) * RAD;
+    var i = 5.1454 * RAD;
+    var w = normDeg(318.0634 + 0.1643573223 * d) * RAD;
+    var a = 60.2666;
+    var e = 0.054900;
+    var M = normDeg(115.3654 + 13.0649929509 * d) * RAD;
+    var E = M + e * Math.sin(M) * (1 + e * Math.cos(M));
+    var xv = a * (Math.cos(E) - e);
+    var yv = a * Math.sqrt(1 - e * e) * Math.sin(E);
+    var v = Math.atan2(yv, xv);
+    var r = Math.hypot(xv, yv);
+    var xh = r * (Math.cos(N) * Math.cos(v + w) - Math.sin(N) * Math.sin(v + w) * Math.cos(i));
+    var yh = r * (Math.sin(N) * Math.cos(v + w) + Math.cos(N) * Math.sin(v + w) * Math.cos(i));
+    var zh = r * (Math.sin(v + w) * Math.sin(i));
+    var lon = Math.atan2(yh, xh);
+    var lat = Math.atan2(zh, Math.hypot(xh, yh));
+    var xe = Math.cos(lon) * Math.cos(lat);
+    var ye = Math.sin(lon) * Math.cos(lat) * Math.cos(OBLIQ) - Math.sin(lat) * Math.sin(OBLIQ);
+    var ze = Math.sin(lon) * Math.cos(lat) * Math.sin(OBLIQ) + Math.sin(lat) * Math.cos(OBLIQ);
+    var phaseAngle = normDeg(lon * DEG - sunLonDeg);
+    var illum = (1 - Math.cos(phaseAngle * RAD)) / 2;
+    var synodic = 29.53058867;
+    var ageDays = (phaseAngle / 360) * synodic;
+    var pName = 'New Moon';
+    if (phaseAngle < 11.25 || phaseAngle >= 348.75) pName = 'New Moon';
+    else if (phaseAngle < 78.75) pName = 'Waxing Crescent';
+    else if (phaseAngle < 101.25) pName = 'First Quarter';
+    else if (phaseAngle < 168.75) pName = 'Waxing Gibbous';
+    else if (phaseAngle < 191.25) pName = 'Full Moon';
+    else if (phaseAngle < 258.75) pName = 'Waning Gibbous';
+    else if (phaseAngle < 281.25) pName = 'Last Quarter';
+    else pName = 'Waning Crescent';
+    return {
+      ra: Math.atan2(ye, xe),
+      dec: Math.atan2(ze, Math.hypot(xe, ye)),
+      phaseAngle: phaseAngle,
+      illum: illum,
+      ageDays: ageDays,
+      phaseName: pName,
+      daysToFull: normDeg(180 - phaseAngle) / 360 * synodic,
+      daysToNew: normDeg(360 - phaseAngle) / 360 * synodic
+    };
+  }
+
+  function planetPosition(el, d, sun) {
+    var N = normDeg(el[0] + el[1] * d) * RAD;
+    var i = (el[2] + el[3] * d) * RAD;
+    var w = normDeg(el[4] + el[5] * d) * RAD;
+    var a = el[6];
+    var e = el[7] + el[8] * d;
+    var M = normDeg(el[9] + el[10] * d) * RAD;
+    var E = M + e * Math.sin(M) * (1 + e * Math.cos(M));
+    E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    var xv = a * (Math.cos(E) - e);
+    var yv = a * Math.sqrt(1 - e * e) * Math.sin(E);
+    var v = Math.atan2(yv, xv);
+    var r = Math.hypot(xv, yv);
+    var xh = r * (Math.cos(N) * Math.cos(v + w) - Math.sin(N) * Math.sin(v + w) * Math.cos(i));
+    var yh = r * (Math.sin(N) * Math.cos(v + w) + Math.cos(N) * Math.sin(v + w) * Math.cos(i));
+    var zh = r * (Math.sin(v + w) * Math.sin(i));
+    var xg = xh + sun.xs, yg = yh + sun.ys, zg = zh;
+    var xe = xg;
+    var ye = yg * Math.cos(OBLIQ) - zg * Math.sin(OBLIQ);
+    var ze = yg * Math.sin(OBLIQ) + zg * Math.cos(OBLIQ);
+    return { ra: Math.atan2(ye, xe), dec: Math.atan2(ze, Math.hypot(xe, ye)), distAU: Math.hypot(xg, yg, zg), color: el[11] };
+  }
+
+  function drawMoonDisc(phaseAngle, latDeg) {
+    var cv = document.getElementById('cel-moon-canvas');
+    if (!cv) return;
+    var ctx = cv.getContext('2d');
+    var W = cv.width, H = cv.height, cx = W / 2, cy = H / 2, R = W * 0.42;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0B131E';
+    ctx.fillRect(0, 0, W, H);
+
+    // Dark side of Moon
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = '#1E293B';
+    ctx.fill();
+
+    // Lit side using waxing/waning terminator ellipse
+    var waxing = phaseAngle < 180;
+    if (latDeg < 0) waxing = !waxing; // Southern hemisphere flips illumination side
+    var k = Math.cos(phaseAngle * RAD); // +1 new, 0 quarter, -1 full
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Fill lit half
+    ctx.fillStyle = '#F5F0DC';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, waxing ? -Math.PI / 2 : Math.PI / 2, waxing ? Math.PI / 2 : 3 * Math.PI / 2);
+    ctx.fill();
+
+    // Terminator ellipse
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, Math.abs(k) * R, R, 0, 0, Math.PI * 2);
+    ctx.fillStyle = (k > 0) ? '#1E293B' : '#F5F0DC';
+    ctx.fill();
+    ctx.restore();
+
+    // Subtle rim
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(245,240,220,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  var plottedObjects = [];
+
+  window.celUpdate = function() {
+    var lat = parseFloat(document.getElementById('cel-lat').value);
+    var lon = parseFloat(document.getElementById('cel-lon').value);
+    if (isNaN(lat)) lat = 39.8283;
+    if (isNaN(lon)) lon = -98.5795;
+    lat = Math.max(-90, Math.min(90, lat));
+    lon = Math.max(-180, Math.min(180, lon));
+
+    var heading = parseFloat(document.getElementById('cel-heading').value) || 0;
+    var hLbl = document.getElementById('cel-heading-lbl');
+    if (hLbl) hLbl.textContent = Math.round(heading) + '\u00B0 ' + compassDir(heading);
+
+    var live = document.getElementById('cel-live').checked;
+    var dtInput = document.getElementById('cel-datetime');
+    var now = new Date();
+    if (!live && dtInput && dtInput.value) {
+      var parsed = new Date(dtInput.value);
+      if (!isNaN(parsed.getTime())) now = parsed;
+    } else if (dtInput && live) {
+      var localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      dtInput.value = localISO;
+    }
+
+    var jd = toJulian(now);
+    var d = jd - 2451543.5; // days since 1999 Dec 31.0 UT (Meeus/Schlyter epoch)
+    var gmstDeg = normDeg(280.46061837 + 360.98564736629 * (jd - 2451545.0));
+    var lstDeg = normDeg(gmstDeg + lon);
+    var lstRad = lstDeg * RAD;
+    var latRad = lat * RAD;
+
+    var lstHours = lstDeg / 15;
+    var lstH = Math.floor(lstHours);
+    var lstM = Math.floor((lstHours - lstH) * 60);
+    var lstStr = String(lstH).padStart(2, '0') + 'h ' + String(lstM).padStart(2, '0') + 'm';
+
+    var sun = sunPosition(d);
+    var sunAA = raDecToAltAz(sun.ra, sun.dec, latRad, lstRad);
+    var moon = moonPosition(d, sun.lon);
+    var moonAA = raDecToAltAz(moon.ra, moon.dec, latRad, lstRad);
+
+    var twilight = 'Night (Dark Sky)';
+    if (sunAA.alt >= 0) twilight = 'Daylight';
+    else if (sunAA.alt >= -6) twilight = 'Civil Twilight';
+    else if (sunAA.alt >= -12) twilight = 'Nautical Twilight';
+    else if (sunAA.alt >= -18) twilight = 'Astronomical Twilight';
+
+    var strip = document.getElementById('cel-meta-strip');
+    if (strip) {
+      strip.innerHTML =
+        statBox('Local Time', now.toLocaleTimeString(), now.toLocaleDateString()) +
+        statBox('UTC', now.toISOString().slice(11, 19) + 'Z', 'JD ' + jd.toFixed(3)) +
+        statBox('Local Sidereal Time', lstStr, lstDeg.toFixed(1) + '\u00B0') +
+        statBox('Sky Condition', twilight, 'Sun Alt ' + sunAA.alt.toFixed(1) + '\u00B0');
+    }
+
+    // Moon card
+    drawMoonDisc(moon.phaseAngle, lat);
+    var mpName = document.getElementById('cel-moon-phase-name');
+    var mpStats = document.getElementById('cel-moon-stats');
+    if (mpName) mpName.textContent = moon.phaseName;
+    if (mpStats) {
+      mpStats.innerHTML =
+        'Illumination: <strong>' + (moon.illum * 100).toFixed(1) + '%</strong><br>' +
+        'Lunar Age: <strong>' + moon.ageDays.toFixed(1) + ' / 29.5 d</strong><br>' +
+        'Alt / Az: <strong>' + moonAA.alt.toFixed(1) + '\u00B0 / ' + moonAA.az.toFixed(0) + '\u00B0 ' + compassDir(moonAA.az) + '</strong><br>' +
+        'Next Full: <strong>' + moon.daysToFull.toFixed(1) + ' d</strong> &bull; Next New: <strong>' + moon.daysToNew.toFixed(1) + ' d</strong>';
+    }
+    var sunStats = document.getElementById('cel-sun-stats');
+    if (sunStats) {
+      sunStats.innerHTML =
+        'Sun Altitude: <strong>' + sunAA.alt.toFixed(1) + '\u00B0</strong> (' + (sunAA.alt >= 0 ? 'Above Horizon' : 'Below Horizon') + ')<br>' +
+        'Sun Azimuth: <strong>' + sunAA.az.toFixed(1) + '\u00B0 ' + compassDir(sunAA.az) + '</strong><br>' +
+        'Compass Top Facing: <strong>' + Math.round(heading) + '\u00B0 ' + compassDir(heading) + '</strong><br>' +
+        'Observer: <strong>' + lat.toFixed(4) + '\u00B0, ' + lon.toFixed(4) + '\u00B0</strong>';
+    }
+
+    // Draw All-Sky Dome + Ingrained Compass
+    var cv = document.getElementById('cel-canvas');
+    if (!cv) return;
+    var ctx = cv.getContext('2d');
+    var W = cv.width, H = cv.height, cx = W / 2, cy = H / 2;
+    var outerR = W * 0.46;
+    var skyR = W * 0.375;
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0B131E';
+    ctx.fillRect(0, 0, W, H);
+
+    // Sky gradient based on Sun altitude
+    var skyGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, skyR);
+    if (sunAA.alt > 2) {
+      skyGrad.addColorStop(0, '#1D4E89');
+      skyGrad.addColorStop(1, '#3B82B6');
+    } else if (sunAA.alt > -12) {
+      skyGrad.addColorStop(0, '#111C33');
+      skyGrad.addColorStop(1, '#2D3A59');
+    } else {
+      skyGrad.addColorStop(0, '#070C14');
+      skyGrad.addColorStop(1, '#122033');
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, skyR, 0, Math.PI * 2);
+    ctx.fillStyle = skyGrad;
+    ctx.fill();
+
+    // Ingrained 360-degree Compass Bezel (rotates with heading so facing direction is at top)
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    for (var deg = 0; deg < 360; deg += 5) {
+      // Sky map azimuth: when looking UP at the sky with heading at top, East is to the LEFT (standard sky chart)
+      var ang = -((deg - heading) * RAD) - Math.PI / 2;
+      var isMajor = deg % 30 === 0;
+      var isMid = deg % 15 === 0;
+      var r0 = skyR + 2;
+      var r1 = skyR + (isMajor ? 12 : (isMid ? 8 : 5));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * r0, cy + Math.sin(ang) * r0);
+      ctx.lineTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+      ctx.strokeStyle = deg === 0 ? '#EF4444' : (isMajor ? '#CBD5E1' : '#475569');
+      ctx.lineWidth = deg === 0 ? 2.5 : (isMajor ? 1.5 : 1);
+      ctx.stroke();
+    }
+
+    var cardinals = [
+      [0, 'N', '#EF4444', 15], [45, 'NE', '#94A3B8', 11], [90, 'E', '#E2E8F0', 13], [135, 'SE', '#94A3B8', 11],
+      [180, 'S', '#E2E8F0', 13], [225, 'SW', '#94A3B8', 11], [270, 'W', '#E2E8F0', 13], [315, 'NW', '#94A3B8', 11]
+    ];
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    cardinals.forEach(function(c) {
+      var ang = -((c[0] - heading) * RAD) - Math.PI / 2;
+      var rx = cx + Math.cos(ang) * (skyR + 26);
+      var ry = cy + Math.sin(ang) * (skyR + 26);
+      ctx.font = 'bold ' + c[3] + 'px system-ui, sans-serif';
+      ctx.fillStyle = c[2];
+      ctx.fillText(c[1], rx, ry);
+    });
+
+    // Fixed top lubber triangle (your facing direction)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outerR - 8);
+    ctx.lineTo(cx - 6, cy - outerR + 3);
+    ctx.lineTo(cx + 6, cy - outerR + 3);
+    ctx.closePath();
+    ctx.fillStyle = '#C25E28';
+    ctx.fill();
+
+    // Altitude rings (30°, 60°, Horizon 0°) and Zenith cross
+    ctx.strokeStyle = 'rgba(148,163,184,0.22)';
+    ctx.lineWidth = 1;
+    [30, 60].forEach(function(aDeg) {
+      var rr = skyR * (1 - aDeg / 90);
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(148,163,184,0.55)';
+      ctx.fillText(aDeg + '\u00B0', cx + 10, cy - rr + 8);
+    });
+    ctx.beginPath();
+    ctx.arc(cx, cy, skyR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(203,213,225,0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, cy); ctx.lineTo(cx + 5, cy);
+    ctx.moveTo(cx, cy - 5); ctx.lineTo(cx, cy + 5);
+    ctx.strokeStyle = 'rgba(203,213,225,0.4)';
+    ctx.stroke();
+
+    function projectSky(altDeg, azDeg) {
+      var r = skyR * (1 - altDeg / 90);
+      var ang = -((azDeg - heading) * RAD) - Math.PI / 2;
+      return { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r };
+    }
+
+    plottedObjects = [];
+    var showConst = document.getElementById('cel-opt-const').checked;
+    var showLabels = document.getElementById('cel-opt-labels').checked;
+    var showPlanets = document.getElementById('cel-opt-planets').checked;
+
+    // Compute all star positions
+    var starPosMap = {};
+    var visibleStars = [];
+    STARS.forEach(function(st) {
+      var aa = raDecToAltAz(st[1] * 15 * RAD, st[2] * RAD, latRad, lstRad);
+      if (aa.alt > 0) {
+        var pt = projectSky(aa.alt, aa.az);
+        starPosMap[st[0]] = pt;
+        visibleStars.push({ name: st[0], alt: aa.alt, az: aa.az, mag: st[3], con: st[4], x: pt.x, y: pt.y });
+      }
+    });
+
+    // Constellation stick lines
+    if (showConst) {
+      ctx.strokeStyle = 'rgba(125,211,252,0.32)';
+      ctx.lineWidth = 1.1;
+      CONST_LINES.forEach(function(pair) {
+        var a = starPosMap[pair[0]], b = starPosMap[pair[1]];
+        if (a && b) {
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      });
+    }
+
+    // Draw Stars
+    visibleStars.forEach(function(st) {
+      var radius = Math.max(1.5, 3.8 - st.mag * 0.7);
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = st.name === 'Polaris' ? '#FDE047' : '#F8FAFC';
+      ctx.fill();
+      if (showLabels && (st.mag <= 1.85 || st.name === 'Polaris')) {
+        ctx.font = '10.5px system-ui, sans-serif';
+        ctx.fillStyle = st.name === 'Polaris' ? '#FDE047' : 'rgba(226,232,240,0.85)';
+        ctx.textAlign = 'left';
+        ctx.fillText(st.name, st.x + radius + 3, st.y - 2);
+      }
+      plottedObjects.push({ name: st.name, kind: st.con + ' (Mag ' + st.mag.toFixed(2) + ')', alt: st.alt, az: st.az, x: st.x, y: st.y, r: 9 });
+    });
+
+    // Draw Planets
+    var ephemRows = [];
+    ephemRows.push({ name: 'Sun', color: '#FACC15', alt: sunAA.alt, az: sunAA.az, detail: twilight });
+    ephemRows.push({ name: 'Moon', color: '#F5F0DC', alt: moonAA.alt, az: moonAA.az, detail: moon.phaseName + ' (' + (moon.illum * 100).toFixed(0) + '%)' });
+
+    Object.keys(PLANETS).forEach(function(pName) {
+      var pp = planetPosition(PLANETS[pName], d, sun);
+      var aa = raDecToAltAz(pp.ra, pp.dec, latRad, lstRad);
+      ephemRows.push({ name: pName, color: pp.color, alt: aa.alt, az: aa.az, detail: 'Planet (' + pp.distAU.toFixed(2) + ' AU)' });
+      if (showPlanets && aa.alt > 0) {
+        var pt = projectSky(aa.alt, aa.az);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4.8, 0, Math.PI * 2);
+        ctx.fillStyle = pp.color;
+        ctx.fill();
+        ctx.strokeStyle = '#0B131E';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.fillStyle = pp.color;
+        ctx.textAlign = 'left';
+        ctx.fillText(pName, pt.x + 7, pt.y + 3);
+        plottedObjects.push({ name: pName, kind: 'Planet (' + pp.distAU.toFixed(2) + ' AU)', alt: aa.alt, az: aa.az, x: pt.x, y: pt.y, r: 12 });
+      }
+    });
+
+    // Draw Moon on Sky Dome
+    if (moonAA.alt > 0) {
+      var mpt = projectSky(moonAA.alt, moonAA.az);
+      ctx.beginPath();
+      ctx.arc(mpt.x, mpt.y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = '#F5F0DC';
+      ctx.fill();
+      ctx.font = 'bold 11.5px system-ui, sans-serif';
+      ctx.fillStyle = '#F5F0DC';
+      ctx.textAlign = 'left';
+      ctx.fillText('Moon', mpt.x + 10, mpt.y + 3);
+      plottedObjects.push({ name: 'Moon', kind: moon.phaseName + ' (' + (moon.illum * 100).toFixed(0) + '%)', alt: moonAA.alt, az: moonAA.az, x: mpt.x, y: mpt.y, r: 14 });
+    }
+
+    // Draw Sun on Sky Dome
+    if (sunAA.alt > 0) {
+      var spt = projectSky(sunAA.alt, sunAA.az);
+      ctx.beginPath();
+      ctx.arc(spt.x, spt.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#FACC15';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(250,204,21,0.45)';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.font = 'bold 11.5px system-ui, sans-serif';
+      ctx.fillStyle = '#FDE047';
+      ctx.textAlign = 'left';
+      ctx.fillText('Sun', spt.x + 12, spt.y + 3);
+      plottedObjects.push({ name: 'Sun', kind: twilight, alt: sunAA.alt, az: sunAA.az, x: spt.x, y: spt.y, r: 15 });
+    }
+
+    // Add top 6 highest visible navigation stars to Ephemeris table
+    visibleStars.sort(function(a, b) { return a.mag - b.mag; });
+    visibleStars.slice(0, 6).forEach(function(st) {
+      ephemRows.push({ name: st.name, color: '#E2E8F0', alt: st.alt, az: st.az, detail: st.con + ' (Mag ' + st.mag.toFixed(2) + ')' });
+    });
+
+    var tbody = document.getElementById('cel-ephem-tbody');
+    if (tbody) {
+      tbody.innerHTML = ephemRows.map(function(row) {
+        var up = row.alt >= 0;
+        return '<tr>' +
+          '<td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + row.color + ';margin-right:6px;border:1px solid rgba(0,0,0,0.2);"></span><strong>' + row.name + '</strong></td>' +
+          '<td class="tabular">' + row.alt.toFixed(1) + '&deg;</td>' +
+          '<td class="tabular">' + row.az.toFixed(1) + '&deg; ' + compassDir(row.az) + '</td>' +
+          '<td><span class="badge ' + (up ? 'badge-success' : '') + '">' + (up ? 'Visible' : 'Below Horizon') + '</span></td>' +
+          '<td class="secondary-text" style="font-size:13px;">' + row.detail + '</td>' +
+        '</tr>';
+      }).join('');
+    }
+  };
+
+  window.celToggleLive = function() {
+    var live = document.getElementById('cel-live').checked;
+    var dt = document.getElementById('cel-datetime');
+    if (dt) dt.disabled = live;
+    window.celUpdate();
+  };
+
+  window.celUseGPS = function() {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported in this browser.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      document.getElementById('cel-lat').value = pos.coords.latitude.toFixed(4);
+      document.getElementById('cel-lon').value = pos.coords.longitude.toFixed(4);
+      window.celUpdate();
+      if (window.arkSaveToolsState) window.arkSaveToolsState();
+    }, function(err) {
+      alert('Could not read GPS location: ' + err.message);
+    });
+  };
+
+  var sensorOn = false;
+  function onOrientation(ev) {
+    var h = null;
+    if (typeof ev.webkitCompassHeading === 'number') h = ev.webkitCompassHeading;
+    else if (typeof ev.alpha === 'number') h = (360 - ev.alpha) % 360;
+    if (h !== null && !isNaN(h)) {
+      document.getElementById('cel-heading').value = String(Math.round(normDeg(h)));
+      window.celUpdate();
+    }
+  }
+  window.celToggleCompassSensor = function() {
+    var btn = document.getElementById('cel-sensor-btn');
+    if (sensorOn) {
+      window.removeEventListener('deviceorientation', onOrientation);
+      sensorOn = false;
+      if (btn) btn.classList.remove('btn-primary');
+      return;
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(function(res) {
+        if (res === 'granted') {
+          window.addEventListener('deviceorientation', onOrientation);
+          sensorOn = true;
+          if (btn) btn.classList.add('btn-primary');
+        }
+      }).catch(function() {});
+    } else if ('ondeviceorientation' in window) {
+      window.addEventListener('deviceorientation', onOrientation);
+      sensorOn = true;
+      if (btn) btn.classList.add('btn-primary');
+    } else {
+      alert('No device compass sensor available. Use the Compass Facing slider to rotate the sky dome.');
+    }
+  };
+
+  var cv = document.getElementById('cel-canvas');
+  if (cv) {
+    cv.addEventListener('mousemove', function(ev) {
+      var rect = cv.getBoundingClientRect();
+      var x = (ev.clientX - rect.left) * (cv.width / rect.width);
+      var y = (ev.clientY - rect.top) * (cv.height / rect.height);
+      var best = null, bestD = 18;
+      plottedObjects.forEach(function(o) {
+        var dist = Math.hypot(o.x - x, o.y - y);
+        if (dist < Math.max(bestD, o.r)) { best = o; bestD = dist; }
+      });
+      var info = document.getElementById('cel-hover-info');
+      if (info) {
+        if (best) {
+          info.innerHTML = '<strong>' + best.name + '</strong> (' + best.kind + ') &mdash; Alt <strong>' + best.alt.toFixed(1) + '&deg;</strong>, Az <strong>' + best.az.toFixed(1) + '&deg; ' + compassDir(best.az) + '</strong>';
+        } else {
+          info.textContent = 'Hover or tap any star, planet, Sun, or Moon on the sky dome for exact Altitude & Azimuth.';
+        }
+      }
+    });
+  }
+
+  // Real-time 1-second ticker when Celestial tab is visible and Live is checked
+  setInterval(function() {
+    var tab = document.getElementById('tab-celestial');
+    var live = document.getElementById('cel-live');
+    if (tab && tab.style.display !== 'none' && live && live.checked) {
+      window.celUpdate();
+    }
+  }, 1000);
 })();
 </script>
 {{ end }}
