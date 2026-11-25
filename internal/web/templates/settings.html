@@ -14,6 +14,16 @@
   <strong>{{ .FlashMsg }}</strong>
 </div>
 {{ end }}
+{{ if .RestartRequired }}
+<div class="card" style="border-color: #B45309; background: rgba(245, 158, 11, 0.10); padding: 0.9rem 1.25rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+  <div>
+    <strong>Restart required:</strong> Port or HTTPS changes take effect after restarting Ark.
+  </div>
+  <form action="/settings/restart" method="POST" style="margin: 0;">
+    <button type="submit" class="btn btn-primary" style="min-height: 36px; padding: 0.3rem 0.9rem; font-size: 14px;">Restart Ark Now</button>
+  </form>
+</div>
+{{ end }}
 
 <div class="card">
   <h2>General</h2>
@@ -44,6 +54,16 @@
         <input type="checkbox" id="https_enabled" name="https_enabled" {{ if eq (index .Settings "https_enabled") "true" }}checked{{ end }} style="width: 24px; height: 24px;">
         <label for="https_enabled">Encrypt LAN traffic with auto-generated Self-Signed HTTPS (takes effect on restart)</label>
       </div>
+      {{ if or (eq (index .Settings "https_enabled") "true") .TLSCertReady }}
+      <div style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+        {{ if .TLSCertReady }}
+        <a href="/tls/ark.crt" class="btn" style="min-height: 32px; padding: 0.2rem 0.75rem; font-size: 13px;">&#8595; Download Certificate (ark.crt)</a>
+        <span class="secondary-text" style="font-size: 12.5px;">Install on phones/tablets to trust Ark's local HTTPS certificate.</span>
+        {{ else }}
+        <span class="secondary-text" style="font-size: 12.5px;">Certificate will be generated automatically on next restart (<code>/tls/ark.crt</code>).</span>
+        {{ end }}
+      </div>
+      {{ end }}
     </div>
     <div class="form-group">
       <label class="form-label">Local Bulletin Board &amp; LAN Drop (#41)</label>
@@ -78,7 +98,14 @@
   </form>
 
   <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--color-border); max-width: 600px;">
-    <h3 style="margin: 0 0 0.35rem; font-size: 16px;">Trusted LAN Devices (IP Allowlist)</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+      <h3 style="margin: 0; font-size: 16px;">Trusted LAN Devices (IP Allowlist)</h3>
+      {{ if .LANAllowlist }}
+      <form action="/settings/lan-allowlist/clear" method="POST" style="margin: 0;" onsubmit="return confirm('Revoke all trusted LAN devices? They will need to re-enter the LAN passcode.');">
+        <button type="submit" class="btn btn-danger" style="min-height: 30px; padding: 0.15rem 0.7rem; font-size: 12.5px;">Revoke All Devices</button>
+      </form>
+      {{ end }}
+    </div>
     <p class="secondary-text" style="font-size: 13px; margin: 0 0 0.75rem;">
       Devices that enter the LAN passcode are automatically added here so they do not need to re-enter it. Remove an IP to revoke access.
     </p>
@@ -295,6 +322,11 @@
 
   <!-- Local / USB Bundle Update -->
   <form action="/settings/update" method="POST" style="max-width: 600px; margin-bottom: 1.25rem;">
+    {{ if not .UpdateSigningKeyConfigured }}
+    <div style="padding: 0.65rem 0.85rem; margin-bottom: 0.85rem; border: 1px solid #B45309; border-radius: 6px; background: rgba(245, 158, 11, 0.08); font-size: 13px;">
+      <strong>Offline update signing key not configured in this build.</strong> To verify air-gapped USB bundles, set <code>ARK_UPDATE_PUBKEY_HEX</code> or build with <code>-ldflags "-X ark/internal/update.EmbeddedPublicKeyHex=&lt;hex&gt;"</code>.
+    </div>
+    {{ end }}
     <div class="form-group">
       <label for="update_source" class="form-label">Offline Update Bundle Directory or USB Path</label>
       <input type="text" id="update_source" name="update_source" class="form-control" placeholder="/mnt/usb/ark-update or D:\ArkUpdate">
@@ -527,6 +559,10 @@ function applyUSBProfile(includeDocker, includeConfig, ...cats) {
   });
 }
 
+function escapeSettingsHTML(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
 function checkGitHubRelease() {
   const repo = (document.getElementById('github_repo') || {}).value || '';
   const st = document.getElementById('gh-release-status');
@@ -540,9 +576,9 @@ function checkGitHubRelease() {
       }
       const rel = data.release;
       if (rel.has_update) {
-        st.innerHTML = '<strong style="color:var(--color-accent);">Update available: v' + rel.version + '</strong> (' + (rel.published_at || '') + ') &mdash; asset: <code>' + (rel.asset_name || 'pending') + '</code>. Click <strong>Download &amp; Install Latest Release</strong>.';
+        st.innerHTML = '<strong style="color:var(--color-accent);">Update available: v' + escapeSettingsHTML(rel.version) + '</strong> (' + escapeSettingsHTML(rel.published_at || '') + ') &mdash; asset: <code>' + escapeSettingsHTML(rel.asset_name || 'pending') + '</code>. Click <strong>Download &amp; Install Latest Release</strong>.';
       } else {
-        st.innerHTML = '<strong style="color:var(--color-success);">Up to date:</strong> Running v' + rel.current_version + ' (latest published: ' + (rel.tag_name || '-') + ').';
+        st.innerHTML = '<strong style="color:var(--color-success);">Up to date:</strong> Running v' + escapeSettingsHTML(rel.current_version) + ' (latest published: ' + escapeSettingsHTML(rel.tag_name || '-') + ').';
       }
     })
     .catch(err => {

@@ -64,10 +64,10 @@
   {{ else }}
     <div style="text-align: center; padding: 2.75rem 1rem;">
       <h2>Your offline library is empty</h2>
-      <p class="secondary-text" style="margin-bottom: 1.5rem;">Browse the Kiwix Catalog or download curated NOMAD packs to populate your offline archive.</p>
+      <p class="secondary-text" style="margin-bottom: 1.5rem;">Browse the Kiwix Catalog or download curated Ark packs to populate your offline archive.</p>
       <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
         <a href="/kiwix" class="btn btn-primary">Browse Kiwix Catalog &rarr;</a>
-        <a href="/get-content" class="btn">Curated NOMAD Packs &rarr;</a>
+        <a href="/get-content" class="btn">Curated Ark Packs &rarr;</a>
       </div>
     </div>
   {{ end }}
@@ -362,14 +362,19 @@ function checkZimUpdates() {
         body.textContent = 'No .zim files installed in data/zim/ yet.';
         return;
       }
+      var esc = function(s) {
+        return String(s || '').replace(/[&<>"']/g, function(c) {
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+      };
       var html = '<div style="display:flex;flex-direction:column;gap:0.5rem;">';
       items.forEach(function(it) {
         if (it.has_update) {
           html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.5rem;border:1px solid var(--color-border);border-radius:6px;">' +
-            '<span><strong>' + it.title + '</strong> — update available (' + (it.latest_date || 'newer') + ')</span>' +
-            '<form action="/api/jobs" method="POST" style="margin:0;"><input type="hidden" name="type" value="kiwix_zim"><input type="hidden" name="target" value="' + it.latest_url + '"><button type="submit" class="btn btn-primary"' + (!window.ARK_IS_LOCAL ? ' disabled title="Downloads are only available on the host computer"' : '') + ' style="min-height:32px;padding:0.15rem 0.7rem;font-size:13px;">Download Update</button></form></div>';
+            '<span><strong>' + esc(it.title) + '</strong> — update available (' + esc(it.latest_date || 'newer') + ')</span>' +
+            '<form action="/api/jobs" method="POST" style="margin:0;"><input type="hidden" name="type" value="kiwix_zim"><input type="hidden" name="target" value="' + esc(it.latest_url) + '"><button type="submit" class="btn btn-primary"' + (!window.ARK_IS_LOCAL ? ' disabled title="Downloads are only available on the host computer"' : '') + ' style="min-height:32px;padding:0.15rem 0.7rem;font-size:13px;">Download Update</button></form></div>';
         } else {
-          html += '<div style="font-size:14px;">&#x2713; <strong>' + it.file_name + '</strong> is up to date.</div>';
+          html += '<div style="font-size:14px;">&#x2713; <strong>' + esc(it.file_name) + '</strong> is up to date.</div>';
         }
       });
       html += '</div>';

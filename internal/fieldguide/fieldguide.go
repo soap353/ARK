@@ -9,7 +9,7 @@ import (
 //go:embed data/*.json
 var guideFS embed.FS
 
-// Condition represents an offline medical / field condition entry from NOMAD.
+// Condition represents an offline medical / field condition entry for Ark.
 type Condition struct {
 	Slug        string   `json:"slug"`
 	Label       string   `json:"label"`
@@ -17,7 +17,7 @@ type Condition struct {
 	SearchTerms []string `json:"searchTerms"`
 }
 
-// Remedy represents an offline home or natural remedy entry from NOMAD.
+// Remedy represents an offline home or natural remedy entry for Ark.
 type Remedy struct {
 	Slug        string   `json:"slug"`
 	Name        string   `json:"name"`
@@ -31,7 +31,7 @@ type Remedy struct {
 	Kind        string   `json:"kind"` // "Home Remedy" or "Natural Remedy"
 }
 
-// CreatorPack represents an offline video/creator bundle from NOMAD creator-packs.json.
+// CreatorPack represents an offline video/creator bundle from creator-packs.json.
 type CreatorPack struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -50,7 +50,7 @@ type Guide struct {
 	Categories []string
 }
 
-// LoadGuide parses the embedded NOMAD conditions, home remedies, and natural remedies files.
+// LoadGuide parses the embedded Ark conditions, home remedies, and natural remedies files.
 func LoadGuide() (*Guide, error) {
 	g := &Guide{}
 
@@ -156,7 +156,7 @@ func (g *Guide) Search(query, conditionSlug, kind string) []Remedy {
 	return out
 }
 
-// GetCreatorPacks returns embedded NOMAD creator pack entries.
+// GetCreatorPacks returns embedded Ark creator pack entries.
 func GetCreatorPacks() ([]CreatorPack, error) {
 	var wrap struct {
 		Packs []CreatorPack `json:"packs"`

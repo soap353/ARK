@@ -16,7 +16,7 @@ type ContentResource struct {
 	Kind        string `json:"kind"` // "zim" or "pmtiles"
 }
 
-// WikipediaOption represents one of NOMAD's Wikipedia package tiers.
+// WikipediaOption represents one of Ark's Wikipedia package tiers.
 type WikipediaOption struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -28,8 +28,8 @@ type WikipediaOption struct {
 	MatchPrefix  string `json:"match_prefix"`
 }
 
-// NomadTier represents a curated difficulty/size tier within an Additional Content collection.
-type NomadTier struct {
+// ArkTier represents a curated difficulty/size tier within an Additional Content collection.
+type ArkTier struct {
 	Slug         string            `json:"slug"`
 	Name         string            `json:"name"` // Essential, Standard, Comprehensive
 	Description  string            `json:"description"`
@@ -39,13 +39,13 @@ type NomadTier struct {
 	Resources    []ContentResource `json:"resources"`
 }
 
-// NomadCollection represents one of the 6 NOMAD curated content collections.
-type NomadCollection struct {
-	Slug        string      `json:"slug"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	SizeRange   string      `json:"size_range"`
-	Tiers       []NomadTier `json:"tiers"`
+// ArkCollection represents one of the 6 Ark curated content collections.
+type ArkCollection struct {
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	SizeRange   string    `json:"size_range"`
+	Tiers       []ArkTier `json:"tiers"`
 }
 
 // MapRegion represents one of the 9 US regional PMTiles map bundles.
@@ -58,7 +58,7 @@ type MapRegion struct {
 	Resources   []ContentResource `json:"resources"`
 }
 
-// GetWikipediaOptions returns all 5 downloadable NOMAD Wikipedia package options.
+// GetWikipediaOptions returns all 5 downloadable Ark Wikipedia package options.
 func GetWikipediaOptions() []WikipediaOption {
 	return []WikipediaOption{
 		{
@@ -137,15 +137,15 @@ func mapRes(stateID, title string, sizeMB int) ContentResource {
 	}
 }
 
-// GetNomadCollections returns the 6 curated NOMAD Additional Content collections and their 3 tiers.
-func GetNomadCollections() []NomadCollection {
-	return []NomadCollection{
+// GetArkCollections returns the 6 curated Ark Additional Content collections and their 3 tiers.
+func GetArkCollections() []ArkCollection {
+	return []ArkCollection{
 		{
 			Slug:        "medicine",
 			Name:        "Medicine",
 			Description: "Medical references, guides, and encyclopedias for healthcare information and emergency preparedness.",
 			SizeRange:   "315 MB - 6.8 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "medicine-essential",
 					Name:        "Essential",
@@ -188,7 +188,7 @@ func GetNomadCollections() []NomadCollection {
 			Name:        "Survival & Preparedness",
 			Description: "Emergency preparedness, bug-out planning, and tactical survival skills for crisis situations.",
 			SizeRange:   "2.3 GB - 14.5 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "survival-essential",
 					Name:        "Essential",
@@ -238,7 +238,7 @@ func GetNomadCollections() []NomadCollection {
 			Name:        "Education & Reference",
 			Description: "Encyclopedias, textbooks, tutorials, and educational videos for self-directed learning.",
 			SizeRange:   "3 GB - 46.4 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "education-essential",
 					Name:        "Essential",
@@ -286,7 +286,7 @@ func GetNomadCollections() []NomadCollection {
 			Name:        "DIY & Repair",
 			Description: "Fix it yourself - repair guides, home improvement, woodworking, and vehicle maintenance.",
 			SizeRange:   "420 MB - 5.6 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "diy-essential",
 					Name:        "Essential",
@@ -325,7 +325,7 @@ func GetNomadCollections() []NomadCollection {
 			Name:        "Agriculture & Food",
 			Description: "Grow and prepare your own food - gardening, cooking techniques, and food preservation.",
 			SizeRange:   "40 MB - 9.2 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "agriculture-essential",
 					Name:        "Essential",
@@ -367,7 +367,7 @@ func GetNomadCollections() []NomadCollection {
 			Name:        "Computing & Technology",
 			Description: "Programming tutorials, electronics projects, and technical documentation for makers and developers.",
 			SizeRange:   "22 MB - 4.5 GB",
-			Tiers: []NomadTier{
+			Tiers: []ArkTier{
 				{
 					Slug:        "computing-essential",
 					Name:        "Essential",
@@ -414,8 +414,8 @@ func GetNomadCollections() []NomadCollection {
 	}
 }
 
-// GetNomadMapRegions returns all 9 US Census map regions from NOMAD.
-func GetNomadMapRegions() []MapRegion {
+// GetArkMapRegions returns all 9 US Census map regions for Ark.
+func GetArkMapRegions() []MapRegion {
 	return []MapRegion{
 		{
 			Slug:        "pacific",
@@ -551,7 +551,7 @@ func GetNomadMapRegions() []MapRegion {
 	}
 }
 
-// ResolvePresetResources expands any preset/NOMAD target slug (Wikipedia option,
+// ResolvePresetResources expands any preset/Ark target slug (Wikipedia option,
 // collection tier with inherited lower tiers, Starter Pack, legacy preset ID, or
 // US regional map pack) into a deduplicated ordered slice of ContentResource items.
 func ResolvePresetResources(target string) []ContentResource {
@@ -606,9 +606,9 @@ func ResolvePresetResources(target string) []ContentResource {
 		}
 	}
 
-	// 3. NOMAD collections & inherited tiers
-	tierIndex := make(map[string]NomadTier)
-	for _, col := range GetNomadCollections() {
+	// 3. Ark collections & inherited tiers
+	tierIndex := make(map[string]ArkTier)
+	for _, col := range GetArkCollections() {
 		for _, t := range col.Tiers {
 			tierIndex[t.Slug] = t
 		}
@@ -635,9 +635,9 @@ func ResolvePresetResources(target string) []ContentResource {
 		return collect(norm, make(map[string]bool))
 	}
 
-	// 4. NOMAD US Regional Map bundles (map-<slug> or maps-<slug> or <slug>)
+	// 4. Ark US Regional Map bundles (map-<slug> or maps-<slug> or <slug>)
 	mapSlug := strings.TrimPrefix(strings.TrimPrefix(norm, "maps-"), "map-")
-	for _, reg := range GetNomadMapRegions() {
+	for _, reg := range GetArkMapRegions() {
 		if mapSlug == reg.Slug {
 			return reg.Resources
 		}

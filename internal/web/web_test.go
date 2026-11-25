@@ -566,9 +566,9 @@ func TestSettingsUSBAndUpdateRoutes(t *testing.T) {
 	}
 }
 
-func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
+func TestHomeSessionJobsLimitAndGetContentArk(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(tmpDir, "test_nomad.db"))
+	db, err := sql.Open("sqlite", filepath.Join(tmpDir, "test_ark.db"))
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
@@ -661,7 +661,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 		}
 	}
 
-	// Verify /get-content includes all NOMAD options and Kiwix Library section
+	// Verify /get-content includes all Ark options and Kiwix Library section
 	req = httptest.NewRequest(http.MethodGet, "/get-content", nil)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -3290,5 +3290,36 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	}
 	if got := srv.getSavedReaderTheme(); got != "forest" {
 		t.Errorf("expected remote /api/reader/theme not to mutate host DB setting, got %q", got)
+	}
+
+	// 5i. Restart-required redirect when changing port or https_enabled + Revoke All Devices + /tls/ark.crt
+	httpsForm := url.Values{"device_name": {"Ark"}, "port": {"8080"}, "lan_enabled": {"on"}, "https_enabled": {"on"}}
+	httpsReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(httpsForm.Encode()))
+	httpsReq.RemoteAddr = "127.0.0.1:12345"
+	httpsReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	httpsW := httptest.NewRecorder()
+	handler.ServeHTTP(httpsW, httpsReq)
+	if httpsW.Code != http.StatusSeeOther || !strings.Contains(httpsW.Header().Get("Location"), "restart_required=1") {
+		t.Errorf("expected toggling https_enabled to redirect with restart_required=1, got %d -> %s", httpsW.Code, httpsW.Header().Get("Location"))
+	}
+
+	srv.addIPToAllowlist("192.168.1.51", "Phone")
+	srv.addIPToAllowlist("192.168.1.52", "Tablet")
+	clrReq := httptest.NewRequest(http.MethodPost, "/settings/lan-allowlist/clear", nil)
+	clrReq.RemoteAddr = "127.0.0.1:12345"
+	clrW := httptest.NewRecorder()
+	handler.ServeHTTP(clrW, clrReq)
+	if clrW.Code != http.StatusSeeOther || len(srv.listAllowlistEntries()) != 0 {
+		t.Errorf("expected /settings/lan-allowlist/clear to empty allowlist, got %d len=%d", clrW.Code, len(srv.listAllowlistEntries()))
+	}
+
+	_ = os.MkdirAll(filepath.Join(tmpDir, "tls"), 0o700)
+	_ = os.WriteFile(filepath.Join(tmpDir, "tls", "ark.crt"), []byte("-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n"), 0o644)
+	certReq := httptest.NewRequest(http.MethodGet, "/tls/ark.crt", nil)
+	certReq.RemoteAddr = "192.168.1.99:55555"
+	certW := httptest.NewRecorder()
+	handler.ServeHTTP(certW, certReq)
+	if certW.Code != http.StatusOK || !strings.Contains(certW.Body.String(), "BEGIN CERTIFICATE") {
+		t.Errorf("expected /tls/ark.crt to serve public cert over LAN, got %d", certW.Code)
 	}
 }

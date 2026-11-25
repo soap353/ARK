@@ -845,7 +845,7 @@
           } else {
             tbody.innerHTML = nodes.map(function(n) {
               if (n.long_name || n.short_name) nodeNames[n.node_id] = n.long_name || n.short_name;
-              var gps = (n.lat || n.lng) ? ('<a href="/maps" style="font-size:12px;">' + n.lat.toFixed(4) + ', ' + n.lng.toFixed(4) + '</a>') : '<span class="secondary-text">—</span>';
+              var gps = (n.lat || n.lng) ? ('<a href="/maps?lat=' + encodeURIComponent(n.lat.toFixed(6)) + '&lng=' + encodeURIComponent(n.lng.toFixed(6)) + '&zoom=13" style="font-size:12px;">' + n.lat.toFixed(4) + ', ' + n.lng.toFixed(4) + '</a>') : '<span class="secondary-text">—</span>';
               var batt = n.battery >= 0 ? (n.battery + '%') : '—';
               var sig = (n.snr ? (n.snr.toFixed(1) + ' dB') : '—') + (n.rssi ? (' / ' + n.rssi + ' dBm') : '');
               return '<tr>' +

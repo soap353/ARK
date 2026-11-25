@@ -248,19 +248,21 @@ function protectMathForMarkdown(text) {
 }
 
 function sanitizeRenderedDOM(root) {
-  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM']);
+  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'SVG', 'MATH', 'BASE', 'META', 'LINK']);
   const walk = (node) => {
     const children = Array.from(node.childNodes);
     for (const child of children) {
       if (child.nodeType === Node.ELEMENT_NODE) {
-        if (blockedTags.has(child.tagName)) {
+        if (blockedTags.has(child.tagName.toUpperCase())) {
           child.remove();
           continue;
         }
         for (const attr of Array.from(child.attributes)) {
           const name = attr.name.toLowerCase();
-          const val = (attr.value || '').trim().toLowerCase();
-          if (name.startsWith('on') || ((name === 'href' || name === 'src') && val.startsWith('javascript:'))) {
+          const val = (attr.value || '').replace(/[\u0000-\u001f\u007f\s]+/g, '').toLowerCase();
+          if (name.startsWith('on') || name === 'srcdoc' || name === 'xlink:href' ||
+              ((name === 'href' || name === 'src' || name === 'action' || name === 'formaction') &&
+               (val.startsWith('javascript:') || val.startsWith('vbscript:') || val.startsWith('data:')))) {
             child.removeAttribute(attr.name);
           }
         }
@@ -278,8 +280,11 @@ function renderMarkdownAndMath(targetEl, rawText) {
     return;
   }
   const { masked, mathTokens } = protectMathForMarkdown(src);
-  targetEl.innerHTML = window.marked.parse(masked, { gfm: true, breaks: true });
-  sanitizeRenderedDOM(targetEl);
+  // Parse inside a detached <template> so inline event handlers cannot fire before sanitization.
+  const tpl = document.createElement('template');
+  tpl.innerHTML = window.marked.parse(masked, { gfm: true, breaks: true });
+  sanitizeRenderedDOM(tpl.content);
+  targetEl.replaceChildren(tpl.content);
   targetEl.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
     cb.disabled = false;
   });

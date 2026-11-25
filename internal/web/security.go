@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +183,14 @@ func (s *Server) removeIPFromAllowlist(ip string) {
 	_, _ = s.db.Exec(`DELETE FROM lan_allowlist WHERE ip = ?`, ip)
 }
 
+func (s *Server) clearAllowlist() {
+	if s.db == nil {
+		return
+	}
+	s.ensureSecurityTables()
+	_, _ = s.db.Exec(`DELETE FROM lan_allowlist`)
+}
+
 func (s *Server) listAllowlistEntries() []LANAllowlistEntry {
 	if s.db == nil {
 		return nil
@@ -249,8 +259,8 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 			}
 
 			p := r.URL.Path
-			// Allow static assets, healthz, and peer discovery endpoints (governed by their own Settings toggles)
-			isExempt := strings.HasPrefix(p, "/static/") || p == "/healthz" || p == "/lan-auth" ||
+			// Allow static assets, healthz, public TLS cert download, and peer discovery endpoints (governed by their own Settings toggles)
+			isExempt := strings.HasPrefix(p, "/static/") || p == "/healthz" || p == "/lan-auth" || p == "/tls/ark.crt" ||
 				p == "/api/peers/catalog" || p == "/api/peers/download"
 
 			if !isExempt && s.isLANPasscodeRequired() {
@@ -376,4 +386,32 @@ func (s *Server) handleSettingsAllowlistAdd(w http.ResponseWriter, r *http.Reque
 	}
 	s.addIPToAllowlist(ip, label)
 	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("Added "+ip+" to trusted LAN allowlist."), http.StatusSeeOther)
+}
+
+func (s *Server) handleSettingsAllowlistClear(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	s.clearAllowlist()
+	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("Revoked all trusted LAN devices."), http.StatusSeeOther)
+}
+
+func (s *Server) handleTLSCertDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.dataDir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	certPath := filepath.Join(s.dataDir, "tls", "ark.crt")
+	info, err := os.Stat(certPath)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+	w.Header().Set("Content-Disposition", `attachment; filename="ark.crt"`)
+	http.ServeFile(w, r, certPath)
 }

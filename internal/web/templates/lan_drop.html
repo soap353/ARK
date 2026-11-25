@@ -221,7 +221,7 @@
         if (d.devices) renderDevicesBar(d.devices);
         var posts = d.posts || [];
         if (posts.length === 0) {
-          feed.innerHTML = '<p class="secondary-text" id="ld-empty">' + (selectedDevice ? 'No posts from this device filter yet.' : 'No messages or files dropped yet. Post a message or drop a file on the left.') + '</p>';
+          feed.innerHTML = '<p class="secondary-text" id="ld-empty">' + (selectedDevice ? 'No posts from this device filter yet.' : 'No messages or files dropped yet. Expand "Post Note or Drop File" above to post.') + '</p>';
           return;
         }
         var html = '';

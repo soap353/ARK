@@ -703,6 +703,10 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
+	// Serialize writes through a single pooled SQLite connection so PRAGMAs (WAL, foreign_keys,
+	// busy_timeout) stay active for every query and concurrent LAN/job writes never hit SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Pragmas for performance and data safety
 	pragmas := []string{
@@ -739,10 +743,25 @@ func initDatabase(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+func dirHasArkContent(dir string) bool {
+	for _, sub := range []string{"zim", "maps", "media", "notes", "landrop", "druglabels"} {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if err == nil && len(entries) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveDataDir(flagVal string) string {
 	dir := flagVal
 	if envDir := os.Getenv("ARK_DATA_DIR"); envDir != "" && dir == "./ArkData" {
 		dir = envDir
+	} else if dir == "./ArkData" && !dirHasArkContent("./ArkData") {
+		if st, err := os.Stat(filepath.Join("./data", "ark.db")); err == nil && !st.IsDir() {
+			log.Printf("[Ark] Auto-detected existing archive at ./data (./ArkData has no content)")
+			dir = "./data"
+		}
 	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		return abs

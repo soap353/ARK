@@ -80,19 +80,28 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 		}
 		return "false"
 	}
+	prev := s.fetchSettings()
+	newPort := strings.TrimSpace(r.FormValue("port"))
+	newHTTPS := parseCheckbox("https_enabled")
+	prevHTTPS := "false"
+	if s.isSettingEnabled("https_enabled", false) {
+		prevHTTPS = "true"
+	}
+	restartNeeded := (newPort != "" && newPort != strings.TrimSpace(prev["port"])) || newHTTPS != prevHTTPS
+
 	passcodeEnabled := parseCheckbox("lan_passcode_enabled")
 	pin := strings.TrimSpace(r.FormValue("lan_passcode"))
 	missingPasscode := false
-	if passcodeEnabled == "true" && pin == "" && s.fetchSettings()["lan_passcode_hash"] == "" {
+	if passcodeEnabled == "true" && pin == "" && prev["lan_passcode_hash"] == "" {
 		passcodeEnabled = "false"
 		missingPasscode = true
 	}
 	_ = s.saveSettings(map[string]string{
 		"device_name":          strings.TrimSpace(r.FormValue("device_name")),
-		"port":                 strings.TrimSpace(r.FormValue("port")),
+		"port":                 newPort,
 		"lan_enabled":          parseCheckbox("lan_enabled"),
 		"lan_passcode_enabled": passcodeEnabled,
-		"https_enabled":        parseCheckbox("https_enabled"),
+		"https_enabled":        newHTTPS,
 		"lan_drop_enabled":     parseCheckbox("lan_drop_enabled"),
 		"opds_enabled":         parseCheckbox("opds_enabled"),
 		"peer_discoverable":    parseCheckbox("peer_discoverable"),
@@ -104,6 +113,10 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 	}
 	if missingPasscode {
 		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Enter a LAN passcode before enabling LAN passcode protection."), http.StatusSeeOther)
+		return
+	}
+	if restartNeeded {
+		http.Redirect(w, r, "/settings?saved=1&restart_required=1", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/settings?saved=1", http.StatusSeeOther)

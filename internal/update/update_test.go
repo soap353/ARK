@@ -233,3 +233,22 @@ func TestGitHubReleaseCheckAndSelfUpdate(t *testing.T) {
 		t.Fatalf("expected updated binary payload, got %q", string(got))
 	}
 }
+
+func TestDefaultPublicKeyEnvOverride(t *testing.T) {
+	t.Setenv("ARK_UPDATE_PUBKEY_HEX", "")
+	if HasSigningKey() {
+		t.Fatalf("expected HasSigningKey() to be false when neither EmbeddedPublicKeyHex nor ARK_UPDATE_PUBKEY_HEX is set")
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	t.Setenv("ARK_UPDATE_PUBKEY_HEX", hex.EncodeToString(pub))
+	if !HasSigningKey() {
+		t.Fatalf("expected HasSigningKey() to be true when ARK_UPDATE_PUBKEY_HEX is set")
+	}
+	got, err := DefaultPublicKey()
+	if err != nil || string(got) != string(pub) {
+		t.Fatalf("DefaultPublicKey mismatch: err=%v", err)
+	}
+}

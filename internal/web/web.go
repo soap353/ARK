@@ -143,9 +143,9 @@ type PageData struct {
 	MapArchivesJSON     template.JS
 	SelectedMap         string
 	MapsRunning         bool
-	WikipediaOptions    []WikipediaOptionView
-	NomadCollections    []NomadCollectionView
-	MapRegions          []MapRegionView
+	WikipediaOptions           []WikipediaOptionView
+	ArkCollections             []ArkCollectionView
+	MapRegions                 []MapRegionView
 	CreatorVideoPacks   []kiwix.VideoCreatorPack
 	CountryMaps         []kiwix.CountryMapOption
 	MapPins             []MapPinView
@@ -166,9 +166,12 @@ type PageData struct {
 	OPDSEnabled         bool
 	LANDropPosts        []LANDropPostView
 	ConnectedDevices    []LANDropDeviceView
-	LANShareURLs        []string
-	LANAllowlist        []LANAllowlistEntry
-	LANPasscodeSet      bool
+	LANShareURLs               []string
+	LANAllowlist               []LANAllowlistEntry
+	LANPasscodeSet             bool
+	RestartRequired            bool
+	TLSCertReady               bool
+	UpdateSigningKeyConfigured bool
 }
 
 // LANDropDeviceView summarizes a connected LAN/local device for /lan-drop.
@@ -194,29 +197,29 @@ type LANDropPostView struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-// WikipediaOptionView decorates a NOMAD Wikipedia option with local install status.
+// WikipediaOptionView decorates an Ark Wikipedia option with local install status.
 type WikipediaOptionView struct {
 	kiwix.WikipediaOption
 	Installed bool
 }
 
-// NomadTierView decorates a NOMAD tier with exact 1-2 word bundle tags for the UI.
-type NomadTierView struct {
-	kiwix.NomadTier
+// ArkTierView decorates an Ark tier with exact 1-2 word bundle tags for the UI.
+type ArkTierView struct {
+	kiwix.ArkTier
 	BundleTags    []string
 	BundleTagsCSV string
 }
 
-// NomadCollectionView wraps a NOMAD collection and its 3 reactive tiers.
-type NomadCollectionView struct {
+// ArkCollectionView wraps an Ark collection and its 3 reactive tiers.
+type ArkCollectionView struct {
 	Slug        string
 	Name        string
 	Description string
 	SizeRange   string
-	Tiers       []NomadTierView
+	Tiers       []ArkTierView
 }
 
-// MapRegionView decorates a NOMAD US map region with local download counts.
+// MapRegionView decorates an Ark US map region with local download counts.
 type MapRegionView struct {
 	kiwix.MapRegion
 	DownloadedCount int
@@ -365,9 +368,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 		mux.HandleFunc("/media/", s.handleMediaFiles)
 	}
 
-	// Health check & LAN Auth endpoints
+	// Health check, public TLS cert, & LAN Auth endpoints
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/lan-auth", s.handleLANAuth)
+	mux.HandleFunc("/tls/ark.crt", s.handleTLSCertDownload)
 
 	// Pages
 	mux.HandleFunc("/", s.handleHome)
@@ -383,6 +387,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/settings/general", s.localOnly(s.handleSettingsGeneral))
 	mux.HandleFunc("/settings/lan-allowlist/remove", s.localOnly(s.handleSettingsAllowlistRemove))
 	mux.HandleFunc("/settings/lan-allowlist/add", s.localOnly(s.handleSettingsAllowlistAdd))
+	mux.HandleFunc("/settings/lan-allowlist/clear", s.localOnly(s.handleSettingsAllowlistClear))
 	mux.HandleFunc("/settings/ai", s.localOnly(s.handleSettingsAI))
 	mux.HandleFunc("/settings/downloads", s.localOnly(s.handleSettingsDownloads))
 	mux.HandleFunc("/settings/usb-export", s.localOnly(s.handleSettingsUSBExport))
@@ -555,9 +560,9 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	var colViews []NomadCollectionView
-	for _, col := range kiwix.GetNomadCollections() {
-		cv := NomadCollectionView{
+	var colViews []ArkCollectionView
+	for _, col := range kiwix.GetArkCollections() {
+		cv := ArkCollectionView{
 			Slug:        col.Slug,
 			Name:        col.Name,
 			Description: col.Description,
@@ -565,8 +570,8 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, t := range col.Tiers {
 			tags := kiwix.CumulativeTierLabels(t.Slug)
-			cv.Tiers = append(cv.Tiers, NomadTierView{
-				NomadTier:     t,
+			cv.Tiers = append(cv.Tiers, ArkTierView{
+				ArkTier:       t,
 				BundleTags:    tags,
 				BundleTagsCSV: strings.Join(tags, "|"),
 			})
@@ -575,7 +580,7 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var regViews []MapRegionView
-	for _, reg := range kiwix.GetNomadMapRegions() {
+	for _, reg := range kiwix.GetArkMapRegions() {
 		dlCount := 0
 		for _, res := range reg.Resources {
 			prefix := strings.ToLower(res.ID) + "_"
@@ -597,7 +602,7 @@ func (s *Server) handleGetContent(w http.ResponseWriter, r *http.Request) {
 		Title:             "Get Content",
 		ActiveNav:         "get-content",
 		WikipediaOptions:  wikiViews,
-		NomadCollections:  colViews,
+		ArkCollections:    colViews,
 		MapRegions:        regViews,
 		CreatorVideoPacks: kiwix.GetVideoCreatorPacks(),
 	}
@@ -706,20 +711,29 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		flash = "Settings saved."
 	}
 	settingsMap := s.fetchSettings()
+	tlsCertReady := false
+	if s.dataDir != "" {
+		if st, err := os.Stat(filepath.Join(s.dataDir, "tls", "ark.crt")); err == nil && !st.IsDir() {
+			tlsCertReady = true
+		}
+	}
 	data := PageData{
-		Title:              "Settings",
-		ActiveNav:          "settings",
-		StorageFreeGB:      freeGB,
-		StorageTotalGB:     totalGB,
-		StorageUsedGB:      usedGB,
-		StorageUsedPercent: pct,
-		Settings:           settingsMap,
-		LANAllowlist:       s.listAllowlistEntries(),
-		LANPasscodeSet:     settingsMap["lan_passcode_hash"] != "",
-		FlashMsg:           flash,
-		FlashErr:           strings.TrimSpace(r.URL.Query().Get("err")),
-		ArkVersion:         update.ArkVersion,
-		GitHubRepo:         s.resolveGitHubRepo(),
+		Title:                      "Settings",
+		ActiveNav:                  "settings",
+		StorageFreeGB:              freeGB,
+		StorageTotalGB:             totalGB,
+		StorageUsedGB:              usedGB,
+		StorageUsedPercent:         pct,
+		Settings:                   settingsMap,
+		LANAllowlist:               s.listAllowlistEntries(),
+		LANPasscodeSet:             settingsMap["lan_passcode_hash"] != "",
+		RestartRequired:            r.URL.Query().Get("restart_required") == "1",
+		TLSCertReady:               tlsCertReady,
+		UpdateSigningKeyConfigured: update.HasSigningKey(),
+		FlashMsg:                   flash,
+		FlashErr:                   strings.TrimSpace(r.URL.Query().Get("err")),
+		ArkVersion:                 update.ArkVersion,
+		GitHubRepo:                 s.resolveGitHubRepo(),
 	}
 	s.populatePhase3Settings(r.Context(), &data)
 	s.render(w, r, "settings.html", data)

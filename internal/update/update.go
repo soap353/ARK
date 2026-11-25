@@ -20,7 +20,9 @@ import (
 var ArkVersion = "0.3.0"
 
 // EmbeddedPublicKeyHex is the Ed25519 release signing public key (32-byte hex).
-const EmbeddedPublicKeyHex = "6e3d21a8e41b9c6f0d8a5e7c3b2f1098d4a6e2c8b0f4e6a2c8d0b2f4a6e8c0d2"
+// Override at build time with -ldflags "-X ark/internal/update.EmbeddedPublicKeyHex=<hex>"
+// or at runtime via the ARK_UPDATE_PUBKEY_HEX environment variable.
+var EmbeddedPublicKeyHex = ""
 
 // Manifest describes a signed Ark binary update bundle (e.g., on USB or downloaded release).
 type Manifest struct {
@@ -39,11 +41,24 @@ type PendingMarker struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// DefaultPublicKey decodes EmbeddedPublicKeyHex.
+// HasSigningKey reports whether a valid Ed25519 public key is configured via build ldflags or ARK_UPDATE_PUBKEY_HEX.
+func HasSigningKey() bool {
+	_, err := DefaultPublicKey()
+	return err == nil
+}
+
+// DefaultPublicKey decodes ARK_UPDATE_PUBKEY_HEX (if set) or EmbeddedPublicKeyHex.
 func DefaultPublicKey() (ed25519.PublicKey, error) {
-	raw, err := hex.DecodeString(EmbeddedPublicKeyHex)
+	hexKey := strings.TrimSpace(os.Getenv("ARK_UPDATE_PUBKEY_HEX"))
+	if hexKey == "" {
+		hexKey = strings.TrimSpace(EmbeddedPublicKeyHex)
+	}
+	if hexKey == "" {
+		return nil, fmt.Errorf("offline update signing key is not configured (set ARK_UPDATE_PUBKEY_HEX or build with EmbeddedPublicKeyHex)")
+	}
+	raw, err := hex.DecodeString(hexKey)
 	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid embedded ed25519 public key")
+		return nil, fmt.Errorf("invalid ed25519 update public key")
 	}
 	return ed25519.PublicKey(raw), nil
 }

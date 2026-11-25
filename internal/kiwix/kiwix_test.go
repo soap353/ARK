@@ -183,8 +183,8 @@ func TestPresets(t *testing.T) {
 	if opts := GetWikipediaOptions(); len(opts) != 5 {
 		t.Errorf("Expected 5 Wikipedia options, got %d", len(opts))
 	}
-	if cols := GetNomadCollections(); len(cols) != 6 {
-		t.Errorf("Expected 6 NOMAD collections, got %d", len(cols))
+	if cols := GetArkCollections(); len(cols) != 6 {
+		t.Errorf("Expected 6 Ark collections, got %d", len(cols))
 	} else {
 		for _, c := range cols {
 			if len(c.Tiers) != 3 {
@@ -192,8 +192,8 @@ func TestPresets(t *testing.T) {
 			}
 		}
 	}
-	if regs := GetNomadMapRegions(); len(regs) != 9 {
-		t.Errorf("Expected 9 NOMAD map regions, got %d", len(regs))
+	if regs := GetArkMapRegions(); len(regs) != 9 {
+		t.Errorf("Expected 9 Ark map regions, got %d", len(regs))
 	}
 
 	medStd := ResolvePresetResources("medicine-standard")
