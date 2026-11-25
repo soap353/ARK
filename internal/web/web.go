@@ -167,6 +167,8 @@ type PageData struct {
 	LANDropPosts        []LANDropPostView
 	ConnectedDevices    []LANDropDeviceView
 	LANShareURLs        []string
+	LANAllowlist        []LANAllowlistEntry
+	LANPasscodeSet      bool
 }
 
 // LANDropDeviceView summarizes a connected LAN/local device for /lan-drop.
@@ -235,6 +237,8 @@ type Server struct {
 	discoveredPeers sync.Map
 	peerByID        sync.Map
 	onShutdown      func()
+	lanRateLimiter  *ipRateLimiter
+	pinFailLimiter  *ipRateLimiter
 }
 
 // SetOnShutdown registers a callback used by /settings/restart and /settings/shutdown to trigger graceful exit.
@@ -279,16 +283,19 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 	}
 
 	s := &Server{
-		db:           db,
-		dataDir:      dataDir,
-		templates:    tmplMap,
-		proxy:        apps.NewProxyManager(),
-		sessionStart: time.Now().UTC().Truncate(time.Second),
-		instanceID:   generateInstanceID(),
+		db:             db,
+		dataDir:        dataDir,
+		templates:      tmplMap,
+		proxy:          apps.NewProxyManager(),
+		sessionStart:   time.Now().UTC().Truncate(time.Second),
+		instanceID:     generateInstanceID(),
+		lanRateLimiter: newIPRateLimiter(),
+		pinFailLimiter: newIPRateLimiter(),
 	}
 	s.seedDefaultApps()
 	s.ensureLANDropTable()
 	s.ensureMeshTables()
+	s.ensureSecurityTables()
 	return s, nil
 }
 
@@ -358,8 +365,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 		mux.Handle("/media/", http.StripPrefix("/media/", http.FileServer(http.Dir(filepath.Join(s.dataDir, "media")))))
 	}
 
-	// Health check endpoint
+	// Health check & LAN Auth endpoints
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/lan-auth", s.handleLANAuth)
 
 	// Pages
 	mux.HandleFunc("/", s.handleHome)
@@ -373,6 +381,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/system", s.localOnly(s.handleSystem))
 	mux.HandleFunc("/settings", s.localOnly(s.handleSettings))
 	mux.HandleFunc("/settings/general", s.localOnly(s.handleSettingsGeneral))
+	mux.HandleFunc("/settings/lan-allowlist/remove", s.localOnly(s.handleSettingsAllowlistRemove))
+	mux.HandleFunc("/settings/lan-allowlist/add", s.localOnly(s.handleSettingsAllowlistAdd))
 	mux.HandleFunc("/settings/ai", s.localOnly(s.handleSettingsAI))
 	mux.HandleFunc("/settings/downloads", s.localOnly(s.handleSettingsDownloads))
 	mux.HandleFunc("/settings/usb-export", s.localOnly(s.handleSettingsUSBExport))
@@ -695,6 +705,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("saved") == "1" && flash == "" {
 		flash = "Settings saved."
 	}
+	settingsMap := s.fetchSettings()
 	data := PageData{
 		Title:              "Settings",
 		ActiveNav:          "settings",
@@ -702,7 +713,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		StorageTotalGB:     totalGB,
 		StorageUsedGB:      usedGB,
 		StorageUsedPercent: pct,
-		Settings:           s.fetchSettings(),
+		Settings:           settingsMap,
+		LANAllowlist:       s.listAllowlistEntries(),
+		LANPasscodeSet:     settingsMap["lan_passcode_hash"] != "",
 		FlashMsg:           flash,
 		FlashErr:           strings.TrimSpace(r.URL.Query().Get("err")),
 		ArkVersion:         update.ArkVersion,

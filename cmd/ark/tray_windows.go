@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
@@ -117,13 +118,22 @@ type notifyIconDataW struct {
 }
 
 func isServiceHealthy(port string) bool {
-	client := &http.Client{Timeout: 800 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/healthz", port))
-	if err != nil {
-		return false
+	client := &http.Client{
+		Timeout: 800 * time.Millisecond,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	for _, scheme := range []string{"http", "https"} {
+		resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%s/healthz", scheme, port))
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // maybeDetachBackground relaunches Ark without a console window on Windows so the user

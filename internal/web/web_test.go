@@ -2973,3 +2973,141 @@ func TestMeshRadioBridgeAndCelestialTracker(t *testing.T) {
 		t.Errorf("expected /tools not to include removed cel-ephem-tbody or cel-target-card")
 	}
 }
+
+func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	_, _ = db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`)
+	_, _ = db.Exec(`CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT, error_msg TEXT, bytes_downloaded INTEGER, total_bytes INTEGER, eta_seconds INTEGER, metadata TEXT, created_at DATETIME, updated_at DATETIME, completed_at DATETIME)`)
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	srv.SetQueueManager(jobs.NewQueueManager(jobs.NewJobStore(db), jobs.QueueConfig{}))
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+	handler := srv.WrapWithSecurity(mux)
+
+	// 1. Security headers + local CSRF Origin check
+	req := httptest.NewRequest(http.MethodGet, "/library", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" || w.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("missing expected security headers: %v", w.Header())
+	}
+	csrfReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Evil"))
+	csrfReq.RemoteAddr = "127.0.0.1:12345"
+	csrfReq.Header.Set("Origin", "https://evil.example")
+	csrfReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	csrfW := httptest.NewRecorder()
+	handler.ServeHTTP(csrfW, csrfReq)
+	if csrfW.Code != http.StatusForbidden {
+		t.Errorf("expected cross-origin local POST to return 403, got %d", csrfW.Code)
+	}
+
+	// 2. Peer proxy blocks admin paths & /api/peers/pull blocks arbitrary SSRF URLs
+	srv.peerByID.Store("peer-1", "http://192.168.1.50:8080")
+	pReq := httptest.NewRequest(http.MethodGet, "/peer/peer-1/settings", nil)
+	pReq.RemoteAddr = "127.0.0.1:12345"
+	pW := httptest.NewRecorder()
+	handler.ServeHTTP(pW, pReq)
+	if pW.Code != http.StatusForbidden {
+		t.Errorf("expected /peer/peer-1/settings to return 403, got %d", pW.Code)
+	}
+	ssrfReq := httptest.NewRequest(http.MethodPost, "/api/peers/pull", strings.NewReader("peer_base_url=http://169.254.169.254&rel_path=media/docs/a.pdf"))
+	ssrfReq.RemoteAddr = "127.0.0.1:12345"
+	ssrfReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	ssrfW := httptest.NewRecorder()
+	handler.ServeHTTP(ssrfW, ssrfReq)
+	if ssrfW.Code != http.StatusForbidden {
+		t.Errorf("expected SSRF /api/peers/pull to return 403, got %d", ssrfW.Code)
+	}
+
+	// 3. LAN Passcode + persistent IP Allowlist + Rate Limiting + Removal
+	passForm := url.Values{
+		"device_name":          {"Ark"},
+		"port":                 {"8080"},
+		"lan_enabled":          {"on"},
+		"lan_passcode_enabled": {"on"},
+		"lan_passcode":         {"4242"},
+	}
+	req = httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(passForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("POST /settings/general returned %d", w.Code)
+	}
+
+	// Unauthenticated remote device redirected to /lan-auth
+	remReq := httptest.NewRequest(http.MethodGet, "/library", nil)
+	remReq.RemoteAddr = "192.168.1.77:54321"
+	remW := httptest.NewRecorder()
+	handler.ServeHTTP(remW, remReq)
+	if remW.Code != http.StatusSeeOther || !strings.HasPrefix(remW.Header().Get("Location"), "/lan-auth") {
+		t.Errorf("expected unauthenticated remote /library to redirect to /lan-auth, got %d -> %s", remW.Code, remW.Header().Get("Location"))
+	}
+
+	// Wrong PIN 5 times -> 6th attempt rate-limited (429)
+	for attempt := 0; attempt < 6; attempt++ {
+		badPin := httptest.NewRequest(http.MethodPost, "/lan-auth", strings.NewReader("passcode=0000&next=/library"))
+		badPin.RemoteAddr = "192.168.1.88:54321"
+		badPin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		badW := httptest.NewRecorder()
+		handler.ServeHTTP(badW, badPin)
+		if attempt < 5 && badW.Code != http.StatusUnauthorized {
+			t.Errorf("attempt %d expected 401, got %d", attempt, badW.Code)
+		}
+		if attempt == 5 && badW.Code != http.StatusTooManyRequests {
+			t.Errorf("attempt 6 expected 429 rate limit, got %d", badW.Code)
+		}
+	}
+
+	// Correct PIN on 192.168.1.77 adds IP to allowlist -> subsequent requests succeed
+	goodPin := httptest.NewRequest(http.MethodPost, "/lan-auth", strings.NewReader("passcode=4242&next=/library"))
+	goodPin.RemoteAddr = "192.168.1.77:54321"
+	goodPin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	goodW := httptest.NewRecorder()
+	handler.ServeHTTP(goodW, goodPin)
+	if goodW.Code != http.StatusSeeOther || goodW.Header().Get("Location") != "/library" {
+		t.Fatalf("expected valid PIN to redirect to /library, got %d -> %s", goodW.Code, goodW.Header().Get("Location"))
+	}
+	remW = httptest.NewRecorder()
+	handler.ServeHTTP(remW, remReq)
+	if remW.Code != http.StatusOK {
+		t.Errorf("expected allowlisted remote IP to access /library with 200, got %d", remW.Code)
+	}
+
+	// Remove IP from allowlist -> blocked again
+	rmReq := httptest.NewRequest(http.MethodPost, "/settings/lan-allowlist/remove", strings.NewReader("ip=192.168.1.77"))
+	rmReq.RemoteAddr = "127.0.0.1:12345"
+	rmReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rmW := httptest.NewRecorder()
+	handler.ServeHTTP(rmW, rmReq)
+	remW = httptest.NewRecorder()
+	handler.ServeHTTP(remW, remReq)
+	if remW.Code != http.StatusSeeOther {
+		t.Errorf("expected removed IP to be redirected to /lan-auth again, got %d", remW.Code)
+	}
+
+	// 4. lan_enabled = false blocks all remote requests
+	offForm := url.Values{"device_name": {"Ark"}, "port": {"8080"}}
+	req = httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(offForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	remW = httptest.NewRecorder()
+	handler.ServeHTTP(remW, remReq)
+	if remW.Code != http.StatusForbidden {
+		t.Errorf("expected lan_enabled=false to return 403 for remote IP, got %d", remW.Code)
+	}
+}

@@ -385,8 +385,21 @@ func runServer(args []string) {
 	}
 	_ = update.ConfirmHealthy(dataDir)
 
+	var httpsEnabledVal string
+	_ = db.QueryRow(`SELECT value FROM settings WHERE key = 'https_enabled'`).Scan(&httpsEnabledVal)
+	useHTTPS := strings.EqualFold(strings.TrimSpace(httpsEnabledVal), "true")
+	var tlsCertPath, tlsKeyPath string
+	if useHTTPS {
+		if cp, kp, terr := ensureSelfSignedTLSCert(dataDir); terr == nil {
+			tlsCertPath, tlsKeyPath = cp, kp
+		} else {
+			log.Printf("[Ark] Warning: TLS cert setup failed (%v); falling back to HTTP", terr)
+			useHTTPS = false
+		}
+	}
+
 	srv := &http.Server{
-		Handler:      mux,
+		Handler:      webServer.WrapWithSecurity(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // No write timeout so long streams and large LAN ZIM downloads never cut off
 		IdleTimeout:  60 * time.Second,
@@ -397,14 +410,28 @@ func runServer(args []string) {
 	defer peerCancel()
 	webServer.StartPeerDiscovery(peerCtx)
 	go func() {
-		log.Printf("[Ark] Command Center listening on http://0.0.0.0:%s", port)
-		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[Ark] HTTP server error: %v", err)
+		scheme := "http"
+		if useHTTPS {
+			scheme = "https"
+		}
+		log.Printf("[Ark] Command Center listening on %s://0.0.0.0:%s", scheme, port)
+		var serveErr error
+		if useHTTPS {
+			serveErr = srv.ServeTLS(ln, tlsCertPath, tlsKeyPath)
+		} else {
+			serveErr = srv.Serve(ln)
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			log.Fatalf("[Ark] HTTP server error: %v", serveErr)
 		}
 	}()
 
 	if openUI {
-		homeURL := fmt.Sprintf("http://localhost:%s/", port)
+		scheme := "http"
+		if useHTTPS {
+			scheme = "https"
+		}
+		homeURL := fmt.Sprintf("%s://localhost:%s/", scheme, port)
 		go func() {
 			time.Sleep(150 * time.Millisecond)
 			log.Printf("[Ark] Opening %s in your default browser...", homeURL)

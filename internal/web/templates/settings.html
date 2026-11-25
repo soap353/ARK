@@ -27,10 +27,22 @@
       <input type="number" id="port" name="port" class="form-control" value="{{ index .Settings "port" }}">
     </div>
     <div class="form-group">
-      <label class="form-label">LAN Access</label>
-      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 48px;">
+      <label class="form-label">LAN Access &amp; Security</label>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px;">
         <input type="checkbox" id="lan_enabled" name="lan_enabled" {{ if ne (index .Settings "lan_enabled") "false" }}checked{{ end }} style="width: 24px; height: 24px;">
         <label for="lan_enabled">Allow read-only browsing from local network (LAN)</label>
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px;">
+        <input type="checkbox" id="lan_passcode_enabled" name="lan_passcode_enabled" {{ if eq (index .Settings "lan_passcode_enabled") "true" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="lan_passcode_enabled">Require LAN Passcode for new remote devices (auto-allowlists verified IPs)</label>
+      </div>
+      <div style="margin-top: 0.35rem;">
+        <label for="lan_passcode" class="secondary-text" style="display: block; font-size: 13px; margin-bottom: 0.25rem;">LAN Passcode / PIN</label>
+        <input type="password" id="lan_passcode" name="lan_passcode" class="form-control" autocomplete="new-password" placeholder="{{ if .LANPasscodeSet }}Passcode is set (leave blank to keep){{ else }}Enter a passcode / PIN for LAN access...{{ end }}">
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px; margin-top: 0.45rem;">
+        <input type="checkbox" id="https_enabled" name="https_enabled" {{ if eq (index .Settings "https_enabled") "true" }}checked{{ end }} style="width: 24px; height: 24px;">
+        <label for="https_enabled">Encrypt LAN traffic with auto-generated Self-Signed HTTPS (takes effect on restart)</label>
       </div>
     </div>
     <div class="form-group">
@@ -64,6 +76,37 @@
     </div>
     <button type="submit" class="btn btn-primary">Save General Settings</button>
   </form>
+
+  <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--color-border); max-width: 600px;">
+    <h3 style="margin: 0 0 0.35rem; font-size: 16px;">Trusted LAN Devices (IP Allowlist)</h3>
+    <p class="secondary-text" style="font-size: 13px; margin: 0 0 0.75rem;">
+      Devices that enter the LAN passcode are automatically added here so they do not need to re-enter it. Remove an IP to revoke access.
+    </p>
+    {{ if .LANAllowlist }}
+    <div style="display: flex; flex-direction: column; gap: 0.45rem; margin-bottom: 0.85rem;">
+      {{ range .LANAllowlist }}
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.45rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px;">
+        <div>
+          <strong class="tabular">{{ .IP }}</strong>
+          {{ if .Label }}<span class="badge" style="margin-left: 0.35rem; font-size: 11px;">{{ .Label }}</span>{{ end }}
+          <span class="secondary-text tabular" style="font-size: 12px; margin-left: 0.35rem;">{{ .CreatedAt }}</span>
+        </div>
+        <form action="/settings/lan-allowlist/remove" method="POST" style="margin: 0;">
+          <input type="hidden" name="ip" value="{{ .IP }}">
+          <button type="submit" class="btn btn-danger" style="min-height: 28px; padding: 0.15rem 0.6rem; font-size: 12px;">Remove</button>
+        </form>
+      </div>
+      {{ end }}
+    </div>
+    {{ else }}
+    <p class="secondary-text" style="font-size: 13px; margin: 0 0 0.75rem;">No trusted LAN IPs saved yet.</p>
+    {{ end }}
+    <form action="/settings/lan-allowlist/add" method="POST" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+      <input type="text" name="ip" class="form-control" placeholder="IP address (e.g. 192.168.1.50)" required style="flex: 1; min-width: 170px;">
+      <input type="text" name="label" class="form-control" placeholder="Label (optional)" style="width: 150px;">
+      <button type="submit" class="btn">Add IP</button>
+    </form>
+  </div>
 </div>
 
 <div class="card" id="ai">

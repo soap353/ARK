@@ -519,6 +519,10 @@ func (s *Server) handleAPIPeersPull(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "peer_base_url and rel_path are required"})
 		return
 	}
+	if !s.isKnownPeerBaseURL(peerBase) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "forbidden: peer_base_url is not a discovered or configured Ark peer"})
+		return
+	}
 	subdir, cleanRel, ok := validatePeerRelPath(relRaw)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid rel_path"})
@@ -564,6 +568,50 @@ func (s *Server) handleAPIPeersPull(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) isKnownPeerBaseURL(baseURL string) bool {
+	norm := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if norm == "" {
+		return false
+	}
+	found := false
+	s.discoveredPeers.Range(func(_, v any) bool {
+		if rec, ok := v.(discoveredPeerRecord); ok && strings.TrimRight(rec.BaseURL, "/") == norm {
+			found = true
+			return false
+		}
+		return true
+	})
+	if found {
+		return true
+	}
+	s.peerByID.Range(func(_, v any) bool {
+		if b, ok := v.(string); ok && strings.TrimRight(b, "/") == norm {
+			found = true
+			return false
+		}
+		return true
+	})
+	if found {
+		return true
+	}
+	for _, m := range s.parseManualPeerHosts() {
+		if strings.TrimRight(m, "/") == norm {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllowedPeerProxyPath(targetPath string) bool {
+	cleaned := path.Clean("/" + targetPath)
+	for _, allowed := range []string{"/read/zim/", "/media/", "/api/library/icon", "/api/zim/", "/api/reader/", "/static/"} {
+		if strings.HasPrefix(cleaned, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) resolvePeerBaseByID(peerID string) (string, bool) {
 	if v, ok := s.peerByID.Load(peerID); ok {
 		if base, ok2 := v.(string); ok2 && base != "" {
@@ -586,6 +634,10 @@ func (s *Server) resolvePeerBaseByID(peerID string) (string, bool) {
 }
 
 func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	trimmed := strings.TrimPrefix(r.URL.Path, "/peer/")
 	peerID, rest, hasSlash := strings.Cut(trimmed, "/")
 	if peerID == "" {
@@ -594,6 +646,14 @@ func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if decoded, err := url.PathUnescape(peerID); err == nil && decoded != "" {
 		peerID = decoded
+	}
+	targetPath := "/"
+	if hasSlash {
+		targetPath = "/" + rest
+	}
+	if !isAllowedPeerProxyPath(targetPath) {
+		http.Error(w, "Forbidden: path not permitted through peer proxy.", http.StatusForbidden)
+		return
 	}
 	baseURL, ok := s.resolvePeerBaseByID(peerID)
 	if !ok {
@@ -604,11 +664,6 @@ func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Invalid peer URL", http.StatusBadGateway)
 		return
-	}
-
-	targetPath := "/"
-	if hasSlash {
-		targetPath = "/" + rest
 	}
 	prefix := "/peer/" + url.PathEscape(peerID)
 
