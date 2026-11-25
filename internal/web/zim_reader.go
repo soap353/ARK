@@ -1997,7 +1997,7 @@ func (s *Server) handleAPIReaderTheme(w http.ResponseWriter, r *http.Request) {
 		theme = r.FormValue("theme")
 	}
 	theme = validReaderTheme(theme)
-	if s.db != nil {
+	if s.db != nil && isLocalRequest(r) {
 		_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_theme', ?)`, theme)
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "theme": theme})

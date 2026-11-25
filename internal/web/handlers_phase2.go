@@ -142,16 +142,22 @@ func (s *Server) handleAPIAIStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn := ai.LoadConnFromDB(r.Context(), s.db)
-	if u := strings.TrimSpace(r.URL.Query().Get("url")); u != "" {
-		conn.BaseURL = u
-	}
-	if m := strings.TrimSpace(r.URL.Query().Get("model")); m != "" {
-		conn.ChatModel = m
-	}
-	if cl := strings.TrimSpace(r.URL.Query().Get("context_length")); cl != "" {
-		var n int
-		if _, err := fmt.Sscanf(cl, "%d", &n); err == nil && n >= 0 {
-			conn.ContextLength = n
+	if isLocalRequest(r) {
+		if u := strings.TrimSpace(r.URL.Query().Get("url")); u != "" {
+			if strings.TrimRight(u, "/") != strings.TrimRight(conn.BaseURL, "/") {
+				// Never forward a saved API key to an overridden URL.
+				conn.APIKey = ""
+			}
+			conn.BaseURL = u
+		}
+		if m := strings.TrimSpace(r.URL.Query().Get("model")); m != "" {
+			conn.ChatModel = m
+		}
+		if cl := strings.TrimSpace(r.URL.Query().Get("context_length")); cl != "" {
+			var n int
+			if _, err := fmt.Sscanf(cl, "%d", &n); err == nil && n >= 0 {
+				conn.ContextLength = n
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, conn.Status(r.Context()))
@@ -297,7 +303,8 @@ func (s *Server) handleAPIAITest(w http.ResponseWriter, r *http.Request) {
 		if urlStr == "" {
 			urlStr = saved.BaseURL
 		}
-		if apiKey == "" {
+		// Only reuse the stored API key when testing the same configured server URL.
+		if apiKey == "" && strings.TrimRight(urlStr, "/") == strings.TrimRight(saved.BaseURL, "/") {
 			apiKey = saved.APIKey
 		}
 	}

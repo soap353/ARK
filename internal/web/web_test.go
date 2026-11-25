@@ -417,6 +417,7 @@ func TestPhase2SettingsAndAIEndpoints(t *testing.T) {
 
 	// 2. Test AI connection endpoint
 	req = httptest.NewRequest(http.MethodPost, "/api/ai/test", strings.NewReader(url.Values{"ai_server_url": {aiSrv.URL}}.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -898,6 +899,7 @@ func TestHomeSessionJobsLimitAndGetContentNOMAD(t *testing.T) {
 	defer ghSrv.Close()
 	t.Setenv("ARK_GITHUB_API_URL", ghSrv.URL)
 	req = httptest.NewRequest(http.MethodGet, "/api/update/check?repo=soap353/ARK", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"has_update":true`) {
@@ -1109,6 +1111,7 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 		t.Fatalf("RegisterRoutes with db: %v", err)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/reader/theme", strings.NewReader(`{"theme":"sepia"}`))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	muxWithDB.ServeHTTP(w, req)
@@ -1347,6 +1350,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	// Pin session permanently
 	pinForm := url.Values{"id": {chatOut.SessionID}, "pinned": {"1"}}
 	req = httptest.NewRequest(http.MethodPost, "/api/ai/sessions/pin", strings.NewReader(pinForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1950,6 +1954,7 @@ func TestStorageSpacePrecheckAndBlocking(t *testing.T) {
 
 	// 1. Check /api/storage/check-space on starter_pack and map_extract
 	req := httptest.NewRequest(http.MethodGet, "/api/storage/check-space?type=preset&target=starter_pack", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"known_size":true`) {
@@ -1957,6 +1962,7 @@ func TestStorageSpacePrecheckAndBlocking(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/storage/check-space?type=map_extract&target=united-states", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"known_size":true`) {
@@ -3167,5 +3173,122 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	handler.ServeHTTP(remW, remReq)
 	if remW.Code != http.StatusForbidden {
 		t.Errorf("expected lan_enabled=false to return 403 for remote IP, got %d", remW.Code)
+	}
+
+	// 5. Pass 2 security hardening checks
+	// Re-enable LAN for endpoint-specific authorization tests
+	onForm := url.Values{"device_name": {"Ark"}, "port": {"8080"}, "lan_enabled": {"on"}}
+	req = httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(onForm.Encode()))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	// 5a. Sec-Fetch-Site: cross-site rejected on local POST
+	sfsReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Evil"))
+	sfsReq.RemoteAddr = "127.0.0.1:12345"
+	sfsReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	sfsReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	sfsW := httptest.NewRecorder()
+	handler.ServeHTTP(sfsW, sfsReq)
+	if sfsW.Code != http.StatusForbidden {
+		t.Errorf("expected Sec-Fetch-Site: cross-site local POST to return 403, got %d", sfsW.Code)
+	}
+
+	// 5b. sanitizeLocalRedirect blocks backslash and control-char open redirects
+	for _, bad := range []string{`/\evil.com`, `//evil.com`, "/foo\r\nLocation: https://evil.com", "https://evil.com"} {
+		if got := sanitizeLocalRedirect(bad); got != "/system" {
+			t.Errorf("sanitizeLocalRedirect(%q) = %q, want /system", bad, got)
+		}
+	}
+
+	// 5c. Reflected XSS escaped in /a/<appID>/ not-running page
+	xssReq := httptest.NewRequest(http.MethodGet, "/a/%3Cimg%20src=x%20onerror=alert(1)%3E/", nil)
+	xssReq.RemoteAddr = "127.0.0.1:12345"
+	xssW := httptest.NewRecorder()
+	handler.ServeHTTP(xssW, xssReq)
+	if strings.Contains(xssW.Body.String(), "<img src=x") {
+		t.Errorf("expected /a/<id>/ error page to HTML-escape appID, got raw HTML: %s", xssW.Body.String())
+	}
+
+	// 5d. /media/ blocks directory listing and sandboxes active HTML/SVG files
+	mediaDocsDir := filepath.Join(tmpDir, "media", "docs")
+	_ = os.MkdirAll(mediaDocsDir, 0o755)
+	_ = os.WriteFile(filepath.Join(mediaDocsDir, "untrusted.html"), []byte("<script>alert(1)</script>"), 0o644)
+	dirReq := httptest.NewRequest(http.MethodGet, "/media/docs/", nil)
+	dirReq.RemoteAddr = "127.0.0.1:12345"
+	dirW := httptest.NewRecorder()
+	handler.ServeHTTP(dirW, dirReq)
+	if dirW.Code != http.StatusNotFound {
+		t.Errorf("expected /media/docs/ directory listing to return 404, got %d", dirW.Code)
+	}
+	htmlReq := httptest.NewRequest(http.MethodGet, "/media/docs/untrusted.html", nil)
+	htmlReq.RemoteAddr = "127.0.0.1:12345"
+	htmlW := httptest.NewRecorder()
+	handler.ServeHTTP(htmlW, htmlReq)
+	if htmlW.Code != http.StatusOK || htmlW.Header().Get("Content-Security-Policy") != "sandbox" {
+		t.Errorf("expected /media/docs/untrusted.html to have CSP sandbox, got %d CSP=%q", htmlW.Code, htmlW.Header().Get("Content-Security-Policy"))
+	}
+
+	// 5e. Remote LAN blocked from admin/SSRF API endpoints
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/ai/test"},
+		{http.MethodPost, "/api/ai/detect"},
+		{http.MethodGet, "/api/update/check?repo=soap353/ARK"},
+		{http.MethodGet, "/api/library/updates"},
+		{http.MethodGet, "/api/storage/check-space"},
+		{http.MethodPost, "/api/ai/sessions/pin"},
+		{http.MethodGet, "/api/kiwix/catalog?feed_url=http://127.0.0.1:9999/opds"},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		r.RemoteAddr = "192.168.1.99:55555"
+		rw := httptest.NewRecorder()
+		handler.ServeHTTP(rw, r)
+		if rw.Code != http.StatusForbidden {
+			t.Errorf("expected remote %s %s to return 403, got %d", tc.method, tc.path, rw.Code)
+		}
+	}
+
+	// 5f. /api/ai/test must NOT forward saved ai_api_key to a different ai_server_url
+	var leakedAuth string
+	probeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leakedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer probeSrv.Close()
+	_, _ = db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_server_url', 'http://127.0.0.1:11434'), ('ai_api_key', 'sk-super-secret')`)
+	aiTestReq := httptest.NewRequest(http.MethodPost, "/api/ai/test", strings.NewReader(url.Values{"ai_server_url": {probeSrv.URL}}.Encode()))
+	aiTestReq.RemoteAddr = "127.0.0.1:12345"
+	aiTestReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.ServeHTTP(httptest.NewRecorder(), aiTestReq)
+	if leakedAuth != "" {
+		t.Errorf("expected /api/ai/test NOT to send saved ai_api_key to overridden URL, got Authorization=%q", leakedAuth)
+	}
+
+	// 5g. /api/maps/pins rejects out-of-range coordinates
+	badPinReq := httptest.NewRequest(http.MethodPost, "/api/maps/pins", strings.NewReader("title=Bad&lat=999&lng=0&format=json"))
+	badPinReq.RemoteAddr = "127.0.0.1:12345"
+	badPinReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badPinW := httptest.NewRecorder()
+	handler.ServeHTTP(badPinW, badPinReq)
+	if badPinW.Code != http.StatusBadRequest {
+		t.Errorf("expected out-of-range map pin lat=999 to return 400, got %d", badPinW.Code)
+	}
+
+	// 5h. Remote POST /api/reader/theme must not overwrite host SQLite setting
+	_, _ = db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('reader_theme', 'forest')`)
+	remThemeReq := httptest.NewRequest(http.MethodPost, "/api/reader/theme", strings.NewReader(`{"theme":"dark"}`))
+	remThemeReq.RemoteAddr = "192.168.1.99:55555"
+	remThemeReq.Header.Set("Content-Type", "application/json")
+	remThemeW := httptest.NewRecorder()
+	handler.ServeHTTP(remThemeW, remThemeReq)
+	if remThemeW.Code != http.StatusOK {
+		t.Errorf("expected remote /api/reader/theme to return 200, got %d", remThemeW.Code)
+	}
+	if got := srv.getSavedReaderTheme(); got != "forest" {
+		t.Errorf("expected remote /api/reader/theme not to mutate host DB setting, got %q", got)
 	}
 }

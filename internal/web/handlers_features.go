@@ -465,10 +465,7 @@ func (s *Server) handleAPILANDropPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	remoteHost := r.RemoteAddr
-	if h, _, splitErr := net.SplitHostPort(remoteHost); splitErr == nil {
-		remoteHost = h
-	}
+	remoteHost := clientHostFromReq(r)
 	id := newShortHexID()
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
 	if _, err := s.db.Exec(`

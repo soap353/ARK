@@ -3,6 +3,7 @@ package apps
 import (
 	"bytes"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -76,7 +77,7 @@ func (pm *ProxyManager) Register(appID string, targetURL *url.URL, stripPrefix b
 			"App Unreachable — Ark",
 			"App Module Unavailable",
 			fmt.Sprintf(`<p>The module <strong>%s</strong> is still starting up or temporarily unreachable.</p>
-  <p><a href="javascript:location.reload()">Click here to retry</a> or return to <a href="/">Ark Home</a>.</p>`, appID))
+  <p><a href="javascript:location.reload()">Click here to retry</a> or return to <a href="/">Ark Home</a>.</p>`, html.EscapeString(appID)))
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -131,7 +132,7 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// If request is strictly /a/<id> without trailing slash, redirect to /a/<id>/
 	if len(parts) == 1 && !strings.HasSuffix(path, "/") {
-		http.Redirect(w, r, "/a/"+appID+"/", http.StatusPermanentRedirect)
+		http.Redirect(w, r, "/a/"+url.PathEscape(appID)+"/", http.StatusPermanentRedirect)
 		return
 	}
 
@@ -144,7 +145,7 @@ func (pm *ProxyManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"App Not Running — Ark",
 			"App Not Active",
 			fmt.Sprintf(`<p>The module <strong>%s</strong> is not currently running.</p>
-  <p><a href="/apps">Manage Apps in Settings</a> or return to <a href="/">Ark Home</a>.</p>`, appID))
+  <p><a href="/apps">Manage Apps in Settings</a> or return to <a href="/">Ark Home</a>.</p>`, html.EscapeString(appID)))
 		return
 	}
 

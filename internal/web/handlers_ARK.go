@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -896,19 +897,28 @@ func (s *Server) handleAPIMapPins(w http.ResponseWriter, r *http.Request) {
 		title := strings.TrimSpace(r.FormValue("title"))
 		lat, err1 := strconv.ParseFloat(strings.TrimSpace(r.FormValue("lat")), 64)
 		lng, err2 := strconv.ParseFloat(strings.TrimSpace(r.FormValue("lng")), 64)
-		if title == "" || err1 != nil || err2 != nil {
+		if title == "" || err1 != nil || err2 != nil || math.IsNaN(lat) || math.IsInf(lat, 0) || math.IsNaN(lng) || math.IsInf(lng, 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
 			if wantsJSON {
-				writeJSONError(w, http.StatusBadRequest, "Valid title, latitude, and longitude are required.")
+				writeJSONError(w, http.StatusBadRequest, "Valid title, latitude (-90..90), and longitude (-180..180) are required.")
 				return
 			}
-			http.Redirect(w, r, "/maps?err="+url.QueryEscape("Valid title, latitude, and longitude are required."), http.StatusSeeOther)
+			http.Redirect(w, r, "/maps?err="+url.QueryEscape("Valid title, latitude (-90..90), and longitude (-180..180) are required."), http.StatusSeeOther)
 			return
+		}
+		if len(title) > 120 {
+			title = title[:120]
 		}
 		cat := strings.TrimSpace(r.FormValue("category"))
 		if cat == "" {
 			cat = "waypoint"
 		}
+		if len(cat) > 32 {
+			cat = cat[:32]
+		}
 		note := strings.TrimSpace(r.FormValue("note"))
+		if len(note) > 1000 {
+			note = note[:1000]
+		}
 		if s.db != nil {
 			_, _ = s.db.Exec(`INSERT INTO map_markers (id, title, lat, lng, category, note) VALUES (?, ?, ?, ?, ?, ?)`,
 				fmt.Sprintf("pin-%d", time.Now().UnixNano()), title, lat, lng, cat, note)

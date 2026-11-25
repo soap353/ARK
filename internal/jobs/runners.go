@@ -421,10 +421,13 @@ func (r *Aria2cRunner) runAria2c(ctx context.Context, job *Job, meta JobMetadata
 		"-d", outputDir,
 	}
 	if meta.FileName != "" {
-		args = append(args, "-o", meta.FileName)
+		args = append(args, "-o", filepath.Base(meta.FileName))
 	}
 	if meta.MaxRateKbps > 0 {
 		args = append(args, fmt.Sprintf("--max-download-limit=%dK", meta.MaxRateKbps))
+	}
+	if strings.HasPrefix(job.ID, "peer-") && strings.HasPrefix(job.Target, "https://") {
+		args = append(args, "--check-certificate=false")
 	}
 	args = append(args, job.Target)
 
@@ -469,14 +472,15 @@ func (r *Aria2cRunner) runAria2c(ctx context.Context, job *Job, meta JobMetadata
 }
 
 func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMetadata, outputDir string, progress ProgressFunc) error {
-	fileName := meta.FileName
-	if fileName == "" {
+	fileName := filepath.Base(meta.FileName)
+	if fileName == "" || fileName == "." || fileName == ".." {
 		parts := strings.Split(job.Target, "/")
 		fileName = parts[len(parts)-1]
 		if idx := strings.Index(fileName, "?"); idx != -1 {
 			fileName = fileName[:idx]
 		}
-		if fileName == "" {
+		fileName = filepath.Base(fileName)
+		if fileName == "" || fileName == "." || fileName == ".." {
 			fileName = "downloaded.zim"
 		}
 	}
@@ -509,7 +513,13 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingBytes))
 	}
 
-	resp, err := r.HTTPClient.Do(req)
+	httpClient := r.HTTPClient
+	if strings.HasPrefix(job.ID, "peer-") && strings.HasPrefix(job.Target, "https://") {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		httpClient = &http.Client{Transport: tr}
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http request failed: %w", err)
 	}

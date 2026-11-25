@@ -40,6 +40,13 @@ func (l *ipRateLimiter) allow(key string, limit int, window time.Duration) bool 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	if len(l.buckets) > 1024 {
+		for k, v := range l.buckets {
+			if now.After(v.resetAt) {
+				delete(l.buckets, k)
+			}
+		}
+	}
 	b, ok := l.buckets[key]
 	if !ok || now.After(b.resetAt) {
 		l.buckets[key] = rateBucket{count: 1, resetAt: now.Add(window)}
@@ -214,9 +221,13 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 
 		isLocal := isLocalRequest(r)
 
-		// 2. Local CSRF protection: reject non-loopback or opaque ("null") Origin,
+		// 2. Local CSRF protection: reject cross-site Fetch metadata, non-loopback or opaque ("null") Origin,
 		// and when Origin is absent, reject non-loopback Referer on state-changing local requests.
-		if isLocal && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+		if isLocal && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch) {
+			if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+				http.Error(w, "Forbidden: cross-site state change rejected.", http.StatusForbidden)
+				return
+			}
 			if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
 				if origin == "null" || !isLoopbackOriginOrHost(origin) {
 					http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
@@ -262,6 +273,10 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 					return
 				}
 				if p == "/api/ai/chat" && !s.lanRateLimiter.allow("ai:"+ip, 20, time.Minute) {
+					writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "Rate limit exceeded. Try again in a minute."})
+					return
+				}
+				if p == "/api/maps/pins" && !s.lanRateLimiter.allow("pin:"+ip, 20, time.Minute) {
 					writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "Rate limit exceeded. Try again in a minute."})
 					return
 				}

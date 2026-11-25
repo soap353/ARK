@@ -399,10 +399,10 @@ func runServer(args []string) {
 	}
 
 	srv := &http.Server{
-		Handler:      webServer.WrapWithSecurity(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 0, // No write timeout so long streams and large LAN ZIM downloads never cut off
-		IdleTimeout:  60 * time.Second,
+		Handler:           webServer.WrapWithSecurity(mux),
+		ReadHeaderTimeout: 15 * time.Second,
+		WriteTimeout:      0, // No write timeout so long streams and large LAN ZIM downloads never cut off
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Start server in background

@@ -362,7 +362,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 		staticHandler.ServeHTTP(w, r)
 	})
 	if s.dataDir != "" {
-		mux.Handle("/media/", http.StripPrefix("/media/", http.FileServer(http.Dir(filepath.Join(s.dataDir, "media")))))
+		mux.HandleFunc("/media/", s.handleMediaFiles)
 	}
 
 	// Health check & LAN Auth endpoints
@@ -411,10 +411,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/jobs/status", s.handleAPIJobStatus)
 	mux.HandleFunc("/api/kiwix/catalog", s.handleAPIKiwixCatalog)
 	mux.HandleFunc("/api/library/delete", s.localOnly(s.handleAPILibraryDelete))
-	mux.HandleFunc("/api/library/updates", s.handleAPILibraryUpdates)
+	mux.HandleFunc("/api/library/updates", s.localOnly(s.handleAPILibraryUpdates))
 	mux.HandleFunc("/api/library/icon", s.handleAPILibraryIcon)
-	mux.HandleFunc("/api/storage/check-space", s.handleAPIStorageCheckSpace)
-	mux.HandleFunc("/api/update/check", s.handleAPIUpdateCheck)
+	mux.HandleFunc("/api/storage/check-space", s.localOnly(s.handleAPIStorageCheckSpace))
+	mux.HandleFunc("/api/update/check", s.localOnly(s.handleAPIUpdateCheck))
 	mux.HandleFunc("/api/apps/install", s.localOnly(s.handleAPIAppInstall))
 	mux.HandleFunc("/api/apps/start", s.localOnly(s.handleAPIAppStart))
 	mux.HandleFunc("/api/apps/stop", s.localOnly(s.handleAPIAppStop))
@@ -433,13 +433,13 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/lan-drop/file/", s.handleAPILANDropFile)
 	mux.HandleFunc("/api/containers/restart", s.localOnly(s.handleAPIContainerRestart))
 	mux.HandleFunc("/api/containers/logs", s.localOnly(s.handleAPIContainerLogs))
-	mux.HandleFunc("/api/ai/detect", s.handleAPIAIDetect)
-	mux.HandleFunc("/api/ai/test", s.handleAPIAITest)
+	mux.HandleFunc("/api/ai/detect", s.localOnly(s.handleAPIAIDetect))
+	mux.HandleFunc("/api/ai/test", s.localOnly(s.handleAPIAITest))
 	mux.HandleFunc("/api/ai/status", s.handleAPIAIStatus)
 	mux.HandleFunc("/api/ai/chat", s.handleAPIAIChat)
 	mux.HandleFunc("/api/ai/sessions", s.handleAPIAISessions)
 	mux.HandleFunc("/api/ai/sessions/get", s.handleAPIAISessionGet)
-	mux.HandleFunc("/api/ai/sessions/pin", s.handleAPIAISessionPin)
+	mux.HandleFunc("/api/ai/sessions/pin", s.localOnly(s.handleAPIAISessionPin))
 	mux.HandleFunc("/api/ai/sessions/delete", s.localOnly(s.handleAPIAISessionDelete))
 	mux.HandleFunc("/api/ai/index", s.localOnly(s.handleAPIAIIndex))
 	mux.HandleFunc("/api/ai/index-article", s.localOnly(s.handleAPIAIIndexArticle))
@@ -850,9 +850,48 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
+func (s *Server) handleMediaFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rel := strings.TrimPrefix(r.URL.Path, "/media/")
+	cleanRel := filepath.Clean(filepath.FromSlash(rel))
+	if rel == "" || cleanRel == "." || strings.HasPrefix(cleanRel, "..") || filepath.IsAbs(cleanRel) {
+		http.NotFound(w, r)
+		return
+	}
+	baseDir := filepath.Join(s.dataDir, "media")
+	fullPath := filepath.Join(baseDir, cleanRel)
+	if !strings.HasPrefix(fullPath, baseDir+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	switch strings.ToLower(filepath.Ext(fullPath)) {
+	case ".html", ".htm", ".xhtml", ".svg", ".xml":
+		// Isolate active web document types in an opaque sandboxed origin so downloaded files cannot run JS as Ark.
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
+	http.ServeFile(w, r, fullPath)
+}
+
 func sanitizeLocalRedirect(raw string) string {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
+		return "/system"
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] < 0x20 || raw[i] == 0x7f {
+			return "/system"
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" {
 		return "/system"
 	}
 	return raw
@@ -978,10 +1017,16 @@ func (s *Server) handleAPIKiwixCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	baseURL := kiwix.DefaultCatalogURL
-	if customFeed := strings.TrimSpace(r.URL.Query().Get("feed_url")); customFeed != "" && (strings.HasPrefix(customFeed, "http://") || strings.HasPrefix(customFeed, "https://")) {
-		baseURL = customFeed
-		if s.db != nil {
-			_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_opds_url', ?)`, customFeed)
+	if customFeed := strings.TrimSpace(r.URL.Query().Get("feed_url")); customFeed != "" {
+		if !isLocalRequest(r) {
+			writeJSONError(w, http.StatusForbidden, "custom feed_url is only allowed from the local host")
+			return
+		}
+		if strings.HasPrefix(customFeed, "http://") || strings.HasPrefix(customFeed, "https://") {
+			baseURL = customFeed
+			if s.db != nil {
+				_, _ = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_opds_url', ?)`, customFeed)
+			}
 		}
 	} else if override := strings.TrimSpace(os.Getenv("ARK_KIWIX_OPDS_URL")); override != "" {
 		baseURL = override
