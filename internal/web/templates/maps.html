@@ -683,7 +683,7 @@
         (pin.note ? '<div style="font-size:12px;margin-bottom:6px;">' + escapeHTML(pin.note) + '</div>' : '') +
         (window.ARK_IS_LOCAL ? '<button type="button" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')" style="background:#B91C1C;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;">Remove</button>' : '');
 
-      var popup = new maplibregl.Popup({ offset: 18 }).setHTML(popupHTML);
+      var popup = new maplibregl.Popup({ offset: 18, focusAfterOpen: false }).setHTML(popupHTML);
       var marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([pin.lng, pin.lat])
         .setPopup(popup)
