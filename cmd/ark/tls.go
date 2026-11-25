@@ -49,7 +49,7 @@ func ensureSelfSignedTLSCert(dataDir string) (certPath, keyPath string, err erro
 		DNSNames:              []string{"localhost"},
 		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 	}
-	if hn, herr := os.Hostname(); herr == nil && hn != "" {
+	if hn, herr := os.Hostname(); herr == nil && isASCIIDNSName(hn) {
 		tmpl.DNSNames = append(tmpl.DNSNames, hn)
 	}
 	if addrs, aerr := net.InterfaceAddrs(); aerr == nil {
@@ -85,4 +85,17 @@ func ensureSelfSignedTLSCert(dataDir string) (certPath, keyPath string, err erro
 	_ = keyOut.Close()
 
 	return certPath, keyPath, nil
+}
+
+func isASCIIDNSName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 128 || c <= 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }

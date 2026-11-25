@@ -637,7 +637,7 @@ func exportSanitizedDB(srcDB, dstDB string, includeSensitive bool) error {
 	}
 	defer outDB.Close()
 	// Strip credentials unless explicit opt-in was requested.
-	_, _ = outDB.Exec(`DELETE FROM settings WHERE key IN ('admin_password_hash', 'ai_api_key')`)
+	_, _ = outDB.Exec(`DELETE FROM settings WHERE key IN ('admin_password_hash', 'ai_api_key', 'lan_passcode_hash', 'lan_passcode_salt')`)
 	return nil
 }
 

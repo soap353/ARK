@@ -44,9 +44,13 @@ func (s *Server) listLANShareBaseURLs() []string {
 	if port == "" {
 		port = "8080"
 	}
+	scheme := "http"
+	if s.isSettingEnabled("https_enabled", false) {
+		scheme = "https"
+	}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return []string{"http://localhost:" + port}
+		return []string{scheme + "://localhost:" + port}
 	}
 	seen := make(map[string]bool)
 	var out []string
@@ -63,7 +67,7 @@ func (s *Server) listLANShareBaseURLs() []string {
 		if v4[0] == 169 && v4[1] == 254 {
 			continue
 		}
-		u := fmt.Sprintf("http://%s:%s", v4.String(), port)
+		u := fmt.Sprintf("%s://%s:%s", scheme, v4.String(), port)
 		if !seen[u] {
 			seen[u] = true
 			out = append(out, u)
@@ -71,7 +75,7 @@ func (s *Server) listLANShareBaseURLs() []string {
 	}
 	sort.Strings(out)
 	if len(out) == 0 {
-		out = append(out, "http://localhost:"+port)
+		out = append(out, scheme+"://localhost:"+port)
 	}
 	return out
 }
@@ -175,7 +179,7 @@ func clientHostFromReq(r *http.Request) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	return host
+	return normalizeClientIP(host)
 }
 
 func detectDeviceKind(ua string) string {

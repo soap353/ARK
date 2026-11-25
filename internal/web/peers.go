@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,13 @@ type peerBeacon struct {
 	Name           string `json:"name"`
 	Port           string `json:"port"`
 	AllowDownloads bool   `json:"allow_downloads"`
+	HTTPS          bool   `json:"https,omitempty"`
+}
+
+func lanPeerTransport() *http.Transport {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	return tr
 }
 
 type discoveredPeerRecord struct {
@@ -191,7 +199,11 @@ func (s *Server) runPeerListener(ctx context.Context) {
 		if port == "" {
 			port = "8080"
 		}
-		baseURL := fmt.Sprintf("http://%s:%s", udpAddr.IP.String(), port)
+		scheme := "http"
+		if b.HTTPS {
+			scheme = "https"
+		}
+		baseURL := fmt.Sprintf("%s://%s:%s", scheme, udpAddr.IP.String(), port)
 		name := strings.TrimSpace(b.Name)
 		if name == "" {
 			name = udpAddr.IP.String()
@@ -227,6 +239,7 @@ func (s *Server) runPeerBroadcaster(ctx context.Context) {
 			Name:           s.peerDisplayName(),
 			Port:           s.listenPort(),
 			AllowDownloads: s.isPeerDownloadsAllowed(),
+			HTTPS:          s.isSettingEnabled("https_enabled", false),
 		})
 		if err != nil {
 			return
@@ -428,7 +441,7 @@ func (s *Server) handleAPIPeersList(w http.ResponseWriter, r *http.Request) {
 		mu    sync.Mutex
 		peers []PeerLibraryView
 	)
-	client := &http.Client{Timeout: 2500 * time.Millisecond}
+	client := &http.Client{Timeout: 2500 * time.Millisecond, Transport: lanPeerTransport()}
 
 	for baseURL := range candidates {
 		wg.Add(1)
@@ -668,6 +681,7 @@ func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
 	prefix := "/peer/" + url.PathEscape(peerID)
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.Transport = lanPeerTransport()
 	origDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		origDirector(req)

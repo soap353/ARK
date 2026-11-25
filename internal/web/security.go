@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -126,7 +127,22 @@ func (s *Server) isLANPasscodeRequired() bool {
 	return cfg["lan_passcode_hash"] != ""
 }
 
+func normalizeClientIP(raw string) string {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			return ip4.String()
+		}
+		return ip.String()
+	}
+	return host
+}
+
 func (s *Server) isIPAllowlisted(ip string) bool {
+	ip = normalizeClientIP(ip)
 	if s.db == nil || ip == "" {
 		return false
 	}
@@ -137,6 +153,7 @@ func (s *Server) isIPAllowlisted(ip string) bool {
 }
 
 func (s *Server) addIPToAllowlist(ip, label string) {
+	ip = normalizeClientIP(ip)
 	if s.db == nil || ip == "" {
 		return
 	}
@@ -149,6 +166,7 @@ func (s *Server) addIPToAllowlist(ip, label string) {
 }
 
 func (s *Server) removeIPFromAllowlist(ip string) {
+	ip = normalizeClientIP(ip)
 	if s.db == nil || ip == "" {
 		return
 	}
@@ -196,10 +214,16 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 
 		isLocal := isLocalRequest(r)
 
-		// 2. Local CSRF protection: if Origin is sent on a state-changing local request, require loopback Origin
+		// 2. Local CSRF protection: reject non-loopback or opaque ("null") Origin,
+		// and when Origin is absent, reject non-loopback Referer on state-changing local requests.
 		if isLocal && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
-			if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" && origin != "null" {
-				if !isLoopbackOriginOrHost(origin) {
+			if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+				if origin == "null" || !isLoopbackOriginOrHost(origin) {
+					http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
+					return
+				}
+			} else if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+				if !isLoopbackOriginOrHost(ref) {
 					http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
 					return
 				}
@@ -324,13 +348,17 @@ func (s *Server) handleSettingsAllowlistAdd(w http.ResponseWriter, r *http.Reque
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	ip := strings.TrimSpace(r.FormValue("ip"))
-	label := strings.TrimSpace(r.FormValue("label"))
-	if ip != "" {
-		if label == "" {
-			label = "Manual"
-		}
-		s.addIPToAllowlist(ip, label)
+	rawIP := strings.TrimSpace(r.FormValue("ip"))
+	parsed := net.ParseIP(rawIP)
+	if parsed == nil {
+		http.Redirect(w, r, "/settings?err="+url.QueryEscape("Invalid IP address: "+rawIP), http.StatusSeeOther)
+		return
 	}
+	ip := normalizeClientIP(rawIP)
+	label := strings.TrimSpace(r.FormValue("label"))
+	if label == "" {
+		label = "Manual"
+	}
+	s.addIPToAllowlist(ip, label)
 	http.Redirect(w, r, "/settings?msg="+url.QueryEscape("Added "+ip+" to trusted LAN allowlist."), http.StatusSeeOther)
 }

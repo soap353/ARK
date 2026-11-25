@@ -95,7 +95,7 @@ func TestIncrementalExportToUSBAndVerifyManifest(t *testing.T) {
 		t.Fatalf("open src db: %v", err)
 	}
 	_, _ = srcDB.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		INSERT INTO settings VALUES ('lan_mode', 'read'), ('admin_password_hash', 'secret-hash'), ('ai_api_key', 'sk-secret');`)
+		INSERT INTO settings VALUES ('lan_mode', 'read'), ('admin_password_hash', 'secret-hash'), ('ai_api_key', 'sk-secret'), ('lan_passcode_hash', 'pin-hash'), ('lan_passcode_salt', 'pin-salt');`)
 	_ = srcDB.Close()
 
 	saver := func(ctx context.Context, imageNames []string, out io.Writer) error {
@@ -124,13 +124,13 @@ func TestIncrementalExportToUSBAndVerifyManifest(t *testing.T) {
 		t.Fatalf("expected 5 verified files, got %d (err=%v)", verified, err)
 	}
 
-	// Verify exported ark.db stripped admin_password_hash and ai_api_key.
+	// Verify exported ark.db stripped admin_password_hash, ai_api_key, lan_passcode_hash, and lan_passcode_salt.
 	expDB, err := sql.Open("sqlite", filepath.Join(usbDir, "config", "ark.db"))
 	if err != nil {
 		t.Fatalf("open exported ark.db: %v", err)
 	}
 	var secretCount int
-	_ = expDB.QueryRow(`SELECT COUNT(*) FROM settings WHERE key IN ('admin_password_hash', 'ai_api_key')`).Scan(&secretCount)
+	_ = expDB.QueryRow(`SELECT COUNT(*) FROM settings WHERE key IN ('admin_password_hash', 'ai_api_key', 'lan_passcode_hash', 'lan_passcode_salt')`).Scan(&secretCount)
 	_ = expDB.Close()
 	if secretCount != 0 {
 		t.Fatalf("expected 0 sensitive keys in exported DB, got %d", secretCount)

@@ -3013,6 +3013,55 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 		t.Errorf("expected cross-origin local POST to return 403, got %d", csrfW.Code)
 	}
 
+	// Origin: null (sandboxed iframe / data: URI) and non-loopback Referer must also be rejected
+	nullOriginReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Evil"))
+	nullOriginReq.RemoteAddr = "127.0.0.1:12345"
+	nullOriginReq.Header.Set("Origin", "null")
+	nullOriginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	nullOriginW := httptest.NewRecorder()
+	handler.ServeHTTP(nullOriginW, nullOriginReq)
+	if nullOriginW.Code != http.StatusForbidden {
+		t.Errorf("expected Origin: null local POST to return 403, got %d", nullOriginW.Code)
+	}
+	badRefReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Evil"))
+	badRefReq.RemoteAddr = "127.0.0.1:12345"
+	badRefReq.Header.Set("Referer", "https://evil.example/attack")
+	badRefReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badRefW := httptest.NewRecorder()
+	handler.ServeHTTP(badRefW, badRefReq)
+	if badRefW.Code != http.StatusForbidden {
+		t.Errorf("expected cross-origin Referer local POST to return 403, got %d", badRefW.Code)
+	}
+
+	// Enabling LAN passcode without entering one (when no hash exists) must fail loudly with err=
+	emptyPassForm := url.Values{
+		"device_name":          {"Ark"},
+		"port":                 {"8080"},
+		"lan_enabled":          {"on"},
+		"lan_passcode_enabled": {"on"},
+	}
+	emptyPassReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(emptyPassForm.Encode()))
+	emptyPassReq.RemoteAddr = "127.0.0.1:12345"
+	emptyPassReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	emptyPassW := httptest.NewRecorder()
+	handler.ServeHTTP(emptyPassW, emptyPassReq)
+	if emptyPassW.Code != http.StatusSeeOther || !strings.Contains(emptyPassW.Header().Get("Location"), "err=") {
+		t.Errorf("expected enabling LAN passcode without PIN to redirect with err=, got %d -> %s", emptyPassW.Code, emptyPassW.Header().Get("Location"))
+	}
+	if srv.isSettingEnabled("lan_passcode_enabled", false) {
+		t.Errorf("expected lan_passcode_enabled to remain false when no passcode was provided")
+	}
+
+	// Invalid IP rejected by manual allowlist add
+	badIPReq := httptest.NewRequest(http.MethodPost, "/settings/lan-allowlist/add", strings.NewReader("ip=not-an-ip"))
+	badIPReq.RemoteAddr = "127.0.0.1:12345"
+	badIPReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badIPW := httptest.NewRecorder()
+	handler.ServeHTTP(badIPW, badIPReq)
+	if badIPW.Code != http.StatusSeeOther || !strings.Contains(badIPW.Header().Get("Location"), "err=") {
+		t.Errorf("expected invalid IP allowlist add to redirect with err=, got %d -> %s", badIPW.Code, badIPW.Header().Get("Location"))
+	}
+
 	// 2. Peer proxy blocks admin paths & /api/peers/pull blocks arbitrary SSRF URLs
 	srv.peerByID.Store("peer-1", "http://192.168.1.50:8080")
 	pReq := httptest.NewRequest(http.MethodGet, "/peer/peer-1/settings", nil)
@@ -3085,6 +3134,15 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	handler.ServeHTTP(remW, remReq)
 	if remW.Code != http.StatusOK {
 		t.Errorf("expected allowlisted remote IP to access /library with 200, got %d", remW.Code)
+	}
+
+	// IPv4-mapped IPv6 RemoteAddr for the same IP must match the normalized allowlist entry
+	v6MappedReq := httptest.NewRequest(http.MethodGet, "/library", nil)
+	v6MappedReq.RemoteAddr = "[::ffff:192.168.1.77]:54321"
+	v6MappedW := httptest.NewRecorder()
+	handler.ServeHTTP(v6MappedW, v6MappedReq)
+	if v6MappedW.Code != http.StatusOK {
+		t.Errorf("expected IPv4-mapped IPv6 [::ffff:192.168.1.77] to match allowlist entry 192.168.1.77, got %d", v6MappedW.Code)
 	}
 
 	// Remove IP from allowlist -> blocked again

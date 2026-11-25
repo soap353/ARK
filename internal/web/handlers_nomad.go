@@ -289,8 +289,12 @@ func (s *Server) handleSettingsRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.stopAllContainersForLifecycle(r.Context())
+	targetScheme := "http:"
+	if s.isSettingEnabled("https_enabled", false) {
+		targetScheme = "https:"
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte("<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem;background:#F5F2EB;color:#1C1F1D'><h2>Restarting Ark...</h2><p id='st'>Stopping services and relaunching. This page will reload automatically.</p><script>(function(){var tries=0;function poll(){tries++;fetch('/healthz',{cache:'no-store'}).then(function(r){if(r.ok&&tries>4){location.href='/settings';}else{setTimeout(poll,1000);}}).catch(function(){setTimeout(poll,1000);});}setTimeout(poll,2500);})();</script></body></html>"))
+	_, _ = fmt.Fprintf(w, "<!DOCTYPE html><html><body style='font-family:system-ui;padding:2rem;background:#F5F2EB;color:#1C1F1D'><h2>Restarting Ark...</h2><p id='st'>Stopping services and relaunching. This page will reload automatically.</p><p id='alt' style='display:none'></p><script>(function(){var targetScheme=%q;if(location.protocol!==targetScheme){var targetUrl=targetScheme+'//'+location.host+'/settings';var alt=document.getElementById('alt');alt.style.display='block';alt.innerHTML='Switching protocol to <a href=\"'+targetUrl+'\">'+targetUrl+'</a>...';setTimeout(function(){location.href=targetUrl;},3500);return;}var tries=0;function poll(){tries++;fetch('/healthz',{cache:'no-store'}).then(function(r){if(r.ok&&tries>4){location.href='/settings';}else{setTimeout(poll,1000);}}).catch(function(){setTimeout(poll,1000);});}setTimeout(poll,2500);})();</script></body></html>", targetScheme)
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
