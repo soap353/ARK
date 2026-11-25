@@ -362,10 +362,11 @@
       <p class="secondary-text" style="margin:0.2rem 0 0;font-size:13.5px;">Live all-sky dome, ingrained 360&deg; compass, Moon phase, Sun, naked-eye planets, and navigation stars for any latitude &amp; longitude.</p>
     </div>
     <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;">
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem 0.7rem;font-size:13px;" onclick="celUseGPS()">Use My Location</button>
+      <button type="button" id="cel-gps-btn" class="btn" style="min-height:34px;padding:0.2rem 0.7rem;font-size:13px;" onclick="celUseGPS()">Use My Location</button>
       <button type="button" id="cel-sensor-btn" class="btn" style="min-height:34px;padding:0.2rem 0.7rem;font-size:13px;" onclick="celToggleCompassSensor()">Device Compass</button>
     </div>
   </div>
+  <div id="cel-geo-status" class="secondary-text" style="font-size:12.5px;margin:-0.4rem 0 0.75rem;display:none;"></div>
 
   <!-- Observer Inputs -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:0.75rem;margin-bottom:0.85rem;">
@@ -3339,53 +3340,117 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     window.celUpdate();
   };
 
+  function setGeoStatus(msg, isErr) {
+    var el = document.getElementById('cel-geo-status');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = 'block';
+    el.style.color = isErr ? 'var(--color-error, #B91C1C)' : 'var(--color-text-secondary)';
+    el.textContent = msg;
+  }
+
   window.celUseGPS = function() {
+    var btn = document.getElementById('cel-gps-btn');
+    function fallbackToMapPin(reason) {
+      fetch('/api/maps/pins')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          var pins = (d && Array.isArray(d.pins)) ? d.pins : [];
+          if (pins.length > 0 && typeof pins[0].lat === 'number' && typeof pins[0].lng === 'number') {
+            document.getElementById('cel-lat').value = pins[0].lat.toFixed(4);
+            document.getElementById('cel-lon').value = pins[0].lng.toFixed(4);
+            window.celUpdate();
+            if (window.arkSaveToolsState) window.arkSaveToolsState();
+            setGeoStatus('Browser GPS unavailable (' + reason + '); loaded saved map pin "' + (pins[0].title || 'Waypoint') + '".', false);
+          } else {
+            setGeoStatus('Location unavailable (' + reason + '). Enter Latitude/Longitude manually or save a pin on /maps.', true);
+          }
+        })
+        .catch(function() {
+          setGeoStatus('Location unavailable (' + reason + '). Enter Latitude/Longitude manually.', true);
+        });
+    }
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported in this browser.');
+      fallbackToMapPin('not supported in this browser/context');
       return;
     }
+    if (btn) btn.disabled = true;
+    setGeoStatus('Requesting device location...', false);
     navigator.geolocation.getCurrentPosition(function(pos) {
+      if (btn) btn.disabled = false;
       document.getElementById('cel-lat').value = pos.coords.latitude.toFixed(4);
       document.getElementById('cel-lon').value = pos.coords.longitude.toFixed(4);
       window.celUpdate();
       if (window.arkSaveToolsState) window.arkSaveToolsState();
+      setGeoStatus('Location updated (' + pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4) + ').', false);
     }, function(err) {
-      alert('Could not read GPS location: ' + err.message);
-    });
+      if (btn) btn.disabled = false;
+      fallbackToMapPin(err && err.message ? err.message : 'permission denied or offline');
+    }, { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 });
   };
 
   var sensorOn = false;
+  var sensorGotReading = false;
+  var sensorWatchdog = null;
   function onOrientation(ev) {
     var h = null;
     if (typeof ev.webkitCompassHeading === 'number') h = ev.webkitCompassHeading;
+    else if (ev.absolute && typeof ev.alpha === 'number') h = (360 - ev.alpha) % 360;
     else if (typeof ev.alpha === 'number') h = (360 - ev.alpha) % 360;
     if (h !== null && !isNaN(h)) {
-      document.getElementById('cel-heading').value = String(Math.round(normDeg(h)));
+      sensorGotReading = true;
+      if (sensorWatchdog) { clearTimeout(sensorWatchdog); sensorWatchdog = null; }
+      document.getElementById('cel-heading').value = String(snapToNorth(h));
       window.celUpdate();
     }
   }
-  window.celToggleCompassSensor = function() {
+  function stopCompassSensor() {
+    window.removeEventListener('deviceorientationabsolute', onOrientation);
+    window.removeEventListener('deviceorientation', onOrientation);
+    if (sensorWatchdog) { clearTimeout(sensorWatchdog); sensorWatchdog = null; }
+    sensorOn = false;
     var btn = document.getElementById('cel-sensor-btn');
+    if (btn) btn.classList.remove('btn-primary');
+  }
+  function startCompassListeners() {
+    var btn = document.getElementById('cel-sensor-btn');
+    sensorGotReading = false;
+    window.addEventListener('deviceorientationabsolute', onOrientation);
+    window.addEventListener('deviceorientation', onOrientation);
+    sensorOn = true;
+    if (btn) btn.classList.add('btn-primary');
+    setGeoStatus('Listening for device compass sensor...', false);
+    sensorWatchdog = setTimeout(function() {
+      if (!sensorGotReading && sensorOn) {
+        stopCompassSensor();
+        setGeoStatus('No compass sensor detected on this device — drag the sky dome or use the Compass Facing slider.', true);
+      }
+    }, 1200);
+  }
+  window.celToggleCompassSensor = function() {
     if (sensorOn) {
-      window.removeEventListener('deviceorientation', onOrientation);
-      sensorOn = false;
-      if (btn) btn.classList.remove('btn-primary');
+      stopCompassSensor();
+      setGeoStatus('', false);
+      return;
+    }
+    if (window.isSecureContext === false) {
+      setGeoStatus('Device Compass requires localhost or HTTPS on mobile browsers. Drag the sky dome or use the Compass Facing slider.', true);
       return;
     }
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       DeviceOrientationEvent.requestPermission().then(function(res) {
         if (res === 'granted') {
-          window.addEventListener('deviceorientation', onOrientation);
-          sensorOn = true;
-          if (btn) btn.classList.add('btn-primary');
+          startCompassListeners();
+        } else {
+          setGeoStatus('Compass permission denied.', true);
         }
-      }).catch(function() {});
-    } else if ('ondeviceorientation' in window) {
-      window.addEventListener('deviceorientation', onOrientation);
-      sensorOn = true;
-      if (btn) btn.classList.add('btn-primary');
+      }).catch(function(err) {
+        setGeoStatus('Compass permission error: ' + (err && err.message ? err.message : 'unavailable'), true);
+      });
+    } else if ('ondeviceorientationabsolute' in window || 'ondeviceorientation' in window) {
+      startCompassListeners();
     } else {
-      alert('No device compass sensor available. Use the Compass Facing slider to rotate the sky dome.');
+      setGeoStatus('No device compass sensor available. Drag the sky dome or use the Compass Facing slider.', true);
     }
   };
 
