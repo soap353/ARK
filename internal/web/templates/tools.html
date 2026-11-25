@@ -379,7 +379,7 @@
     </div>
     <div class="form-group" style="margin:0;">
       <label class="form-label" for="cel-heading">Compass Facing: <span id="cel-heading-lbl" class="tabular">0&deg; N</span></label>
-      <input id="cel-heading" type="range" min="0" max="359" step="1" value="0" style="width:100%;margin-top:0.55rem;" oninput="celUpdate()">
+      <input id="cel-heading" type="range" min="0" max="359" step="1" value="0" style="width:100%;margin-top:0.55rem;" oninput="if(window.celSetHeading)celSetHeading(this.value);else celUpdate();">
     </div>
     <div class="form-group" style="margin:0;">
       <label class="form-label" for="cel-datetime">Time (<label style="font-weight:500;cursor:pointer;"><input type="checkbox" id="cel-live" checked onchange="celToggleLive()"> Live</label>)</label>
@@ -403,11 +403,11 @@
       <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-ecliptic" checked onchange="celUpdate()"> Ecliptic</label>
       <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-dso" checked onchange="celUpdate()"> Deep Sky</label>
     </div>
-    <div id="cel-hover-info" class="secondary-text tabular" style="font-size:13px;min-height:1.4em;text-align:center;">Click or hover any star, planet, DSO, Sun, or Moon &bull; Drag sky dome to rotate compass</div>
+    <div id="cel-hover-info" class="secondary-text tabular" style="font-size:13px;min-height:1.4em;text-align:center;">Hover any star, planet, DSO, Sun, or Moon &bull; Drag sky dome to rotate compass</div>
   </div>
 
-  <!-- Cards Under the Sky Dome: Lunar Phase, Solar/Compass, Target Inspector -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(250px, 1fr));gap:0.85rem;margin-top:1rem;align-items:stretch;">
+  <!-- Cards Under the Sky Dome: Lunar Phase & Solar/Compass -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:0.85rem;margin-top:1rem;align-items:stretch;">
     <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
       <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
         <canvas id="cel-moon-canvas" width="110" height="110" style="width:96px;height:96px;border-radius:50%;background:#0B131E;flex-shrink:0;"></canvas>
@@ -422,14 +422,6 @@
     <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
       <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem;">Solar &amp; Compass Summary</div>
       <div id="cel-sun-stats" class="tabular" style="font-size:13.5px;line-height:1.6;"></div>
-    </div>
-
-    <div id="cel-target-card" style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
-        <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Target Inspector</div>
-        <button type="button" id="cel-target-clear" class="btn" style="min-height:24px;padding:0.1rem 0.5rem;font-size:11.5px;display:none;" onclick="celClearTarget()">Clear</button>
-      </div>
-      <div id="cel-target-body" class="secondary-text tabular" style="font-size:13.5px;line-height:1.55;">Click or tap any celestial body on the sky dome to inspect its Altitude, Azimuth, RA/Dec, and details.</div>
     </div>
   </div>
 </div>
@@ -2744,11 +2736,20 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   }
 
   var plottedObjects = [];
-  var lockedTargetName = null;
   var hoverFadeName = null;
   var hoverFadeAlpha = 0;
   var hoverTargetAlpha = 0;
   var hoverAnimId = null;
+
+  function snapToNorth(deg) {
+    var d = normDeg(parseFloat(deg) || 0);
+    return (d <= 5 || d >= 355) ? 0 : Math.round(d);
+  }
+  window.celSetHeading = function(val) {
+    var el = document.getElementById('cel-heading');
+    if (el) el.value = String(snapToNorth(val));
+    window.celUpdate();
+  };
 
   function stepHoverFade() {
     hoverAnimId = null;
@@ -2798,30 +2799,6 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
     var ra = ngpRa + Math.atan2(y, x);
     return { ra: ra, dec: dec };
   }
-  function renderTargetInspector(obj) {
-    var body = document.getElementById('cel-target-body');
-    var clr = document.getElementById('cel-target-clear');
-    if (!body) return;
-    if (!obj) {
-      if (clr) clr.style.display = 'none';
-      body.className = 'secondary-text tabular';
-      body.innerHTML = 'Click or tap any celestial body on the sky dome to inspect its Altitude, Azimuth, RA/Dec, and details.';
-      return;
-    }
-    if (clr) clr.style.display = '';
-    body.className = 'tabular';
-    body.innerHTML =
-      '<div style="font-size:17px;font-weight:700;margin-bottom:0.25rem;">' + obj.name + '</div>' +
-      '<div class="secondary-text" style="font-size:12.5px;margin-bottom:0.45rem;">' + obj.kind + '</div>' +
-      'Altitude: <strong>' + obj.alt.toFixed(1) + '\u00B0</strong> &bull; Azimuth: <strong>' + obj.az.toFixed(1) + '\u00B0 ' + compassDir(obj.az) + '</strong><br>' +
-      (obj.raStr ? ('RA / Dec: <strong>' + obj.raStr + '</strong> / <strong>' + obj.decStr + '</strong><br>') : '') +
-      (obj.note ? ('<span class="secondary-text">' + obj.note + '</span>') : '');
-  }
-  window.celClearTarget = function() {
-    lockedTargetName = null;
-    renderTargetInspector(null);
-    window.celUpdate();
-  };
 
   window.celUpdate = function() {
     var lat = parseFloat(document.getElementById('cel-lat').value);
@@ -3292,21 +3269,6 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       });
     }
 
-    // Highlight locked target on dome
-    if (lockedTargetName) {
-      var locked = plottedObjects.find(function(o) { return o.name === lockedTargetName; });
-      if (locked) {
-        ctx.beginPath();
-        ctx.arc(locked.x, locked.y, 13, 0, Math.PI * 2);
-        ctx.strokeStyle = '#C25E28';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        renderTargetInspector(locked);
-      } else {
-        renderTargetInspector(null);
-      }
-    }
-
     ctx.restore(); // end horizon clip
 
     // Horizon ring & Ingrained 360-degree Compass Bezel (rotates with heading)
@@ -3459,7 +3421,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
         var curAngle = Math.atan2(pt.y - pt.h / 2, pt.x - pt.w / 2) * DEG;
         var delta = curAngle - dragStartAngle;
         if (Math.abs(delta) > 1.5) dragMoved = true;
-        var nextH = Math.round(normDeg(dragStartHeading + delta));
+        var nextH = snapToNorth(dragStartHeading + delta);
         document.getElementById('cel-heading').value = String(nextH);
         window.celUpdate();
         return;
@@ -3471,23 +3433,15 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
         if (best) {
           info.innerHTML = '<strong>' + best.name + '</strong> (' + best.kind + ') &mdash; Alt <strong>' + best.alt.toFixed(1) + '&deg;</strong>, Az <strong>' + best.az.toFixed(1) + '&deg; ' + compassDir(best.az) + '</strong>';
         } else {
-          info.textContent = 'Click or hover any star, planet, DSO, Sun, or Moon \u2022 Drag sky dome to rotate compass';
+          info.textContent = 'Hover any star, planet, DSO, Sun, or Moon \u2022 Drag sky dome to rotate compass';
         }
       }
     });
-    cv.addEventListener('pointerup', function(ev) {
+    cv.addEventListener('pointerup', function() {
       if (!dragging) return;
       dragging = false;
       cv.style.cursor = 'grab';
-      if (!dragMoved) {
-        var pt = canvasXY(ev);
-        var best = findNearestObject(pt.x, pt.y);
-        if (best) {
-          lockedTargetName = best.name;
-          renderTargetInspector(best);
-          window.celUpdate();
-        }
-      } else if (window.arkSaveToolsState) {
+      if (dragMoved && window.arkSaveToolsState) {
         window.arkSaveToolsState();
       }
     });

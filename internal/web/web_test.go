@@ -2964,12 +2964,12 @@ func TestMeshRadioBridgeAndCelestialTracker(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	toolsHTML := w.Body.String()
-	for _, want := range []string{"Celestial &amp; Stars", `id="tab-celestial"`, `id="cel-canvas"`, `id="cel-moon-canvas"`, `id="cel-heading"`, `id="cel-lat"`, `id="cel-lon"`, `id="cel-target-card"`, `id="cel-opt-mw"`, `id="cel-opt-dso"`, `id="cel-opt-ecliptic"`} {
+	for _, want := range []string{"Celestial &amp; Stars", `id="tab-celestial"`, `id="cel-canvas"`, `id="cel-moon-canvas"`, `id="cel-heading"`, `id="cel-lat"`, `id="cel-lon"`, `id="cel-opt-mw"`, `id="cel-opt-dso"`, `id="cel-opt-ecliptic"`} {
 		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
 			t.Errorf("expected /tools to contain %q", want)
 		}
 	}
-	if strings.Contains(toolsHTML, `id="cel-ephem-tbody"`) {
-		t.Errorf("expected /tools not to include removed cel-ephem-tbody table")
+	if strings.Contains(toolsHTML, `id="cel-ephem-tbody"`) || strings.Contains(toolsHTML, `id="cel-target-card"`) {
+		t.Errorf("expected /tools not to include removed cel-ephem-tbody or cel-target-card")
 	}
 }
