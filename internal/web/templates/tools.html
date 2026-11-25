@@ -390,55 +390,48 @@
   <!-- Live Time / Sidereal / Twilight Strip -->
   <div id="cel-meta-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0.65rem;padding:0.75rem 0.9rem;border-radius:8px;background:rgba(42,67,56,0.06);border:1px solid var(--color-border);margin-bottom:1rem;"></div>
 
-  <!-- Hero Sky Dome + Moon/Solar/Target Cards -->
-  <div style="display:grid;grid-template-columns:minmax(320px, 1.5fr) minmax(260px, 0.85fr);gap:1.1rem;align-items:start;">
-    <div style="display:flex;flex-direction:column;align-items:center;gap:0.6rem;">
-      <div style="position:relative;width:100%;max-width:720px;aspect-ratio:1/1;">
-        <canvas id="cel-canvas" width="760" height="760" style="width:100%;height:100%;display:block;border-radius:14px;background:#070C14;box-shadow:0 6px 24px rgba(0,0,0,0.28);cursor:grab;touch-action:none;"></canvas>
-      </div>
-      <div style="display:flex;gap:0.85rem;flex-wrap:wrap;justify-content:center;font-size:13px;">
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-const" checked onchange="celUpdate()"> Constellations</label>
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-labels" checked onchange="celUpdate()"> Labels</label>
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-planets" checked onchange="celUpdate()"> Planets</label>
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-mw" checked onchange="celUpdate()"> Milky Way</label>
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-ecliptic" checked onchange="celUpdate()"> Ecliptic</label>
-        <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-dso" checked onchange="celUpdate()"> Deep Sky</label>
-      </div>
-      <div id="cel-hover-info" class="secondary-text tabular" style="font-size:13px;min-height:1.4em;text-align:center;">Click or hover any star, planet, DSO, Sun, or Moon &bull; Drag sky dome to rotate compass</div>
+  <!-- Hero Sky Dome -->
+  <div style="display:flex;flex-direction:column;align-items:center;gap:0.65rem;">
+    <div style="position:relative;width:100%;max-width:740px;aspect-ratio:1/1;">
+      <canvas id="cel-canvas" width="760" height="760" style="width:100%;height:100%;display:block;border-radius:14px;background:#070C14;box-shadow:0 6px 24px rgba(0,0,0,0.28);cursor:grab;touch-action:none;"></canvas>
     </div>
-
-    <!-- Right Column: Moon Phase, Solar/Compass, Target Inspector -->
-    <div style="display:flex;flex-direction:column;gap:0.85rem;">
-      <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
-          <canvas id="cel-moon-canvas" width="110" height="110" style="width:96px;height:96px;border-radius:50%;background:#0B131E;flex-shrink:0;"></canvas>
-          <div style="min-width:140px;flex:1;">
-            <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Lunar Phase</div>
-            <div id="cel-moon-phase-name" style="font-size:19px;font-weight:700;margin:0.15rem 0;">—</div>
-            <div id="cel-moon-stats" class="secondary-text tabular" style="font-size:13px;line-height:1.5;"></div>
-          </div>
-        </div>
-      </div>
-
-      <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
-        <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem;">Solar &amp; Compass Summary</div>
-        <div id="cel-sun-stats" class="tabular" style="font-size:13.5px;line-height:1.6;"></div>
-      </div>
-
-      <div id="cel-target-card" style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
-          <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Target Inspector</div>
-          <button type="button" id="cel-target-clear" class="btn" style="min-height:24px;padding:0.1rem 0.5rem;font-size:11.5px;display:none;" onclick="celClearTarget()">Clear</button>
-        </div>
-        <div id="cel-target-body" class="secondary-text tabular" style="font-size:13.5px;line-height:1.55;">Click or tap any celestial body on the sky dome to inspect its Altitude, Azimuth, RA/Dec, and details.</div>
-      </div>
+    <div style="display:flex;gap:0.85rem;flex-wrap:wrap;justify-content:center;font-size:13px;">
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-const" checked onchange="celUpdate()"> Constellations</label>
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-labels" checked onchange="celUpdate()"> Labels</label>
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-planets" checked onchange="celUpdate()"> Planets</label>
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-mw" checked onchange="celUpdate()"> Milky Way</label>
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-ecliptic" checked onchange="celUpdate()"> Ecliptic</label>
+      <label style="display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;"><input type="checkbox" id="cel-opt-dso" checked onchange="celUpdate()"> Deep Sky</label>
     </div>
+    <div id="cel-hover-info" class="secondary-text tabular" style="font-size:13px;min-height:1.4em;text-align:center;">Click or hover any star, planet, DSO, Sun, or Moon &bull; Drag sky dome to rotate compass</div>
   </div>
 
-  <ul class="secondary-text" style="margin:0.9rem 0 0;padding-left:1.2rem;font-size:13px;line-height:1.55;">
-    <li><strong>Inputs:</strong> Latitude &amp; Longitude, Compass Facing (slider, Device Compass, or drag directly on the sky dome), Live/Manual Time, and sky layer toggles (Constellations, Milky Way, Ecliptic, Planets, Deep Sky).</li>
-    <li><strong>Outputs:</strong> HiDPI all-sky dome with ingrained 360&deg; compass bezel, spectral-colored stars, Milky Way band, Deep-Sky Objects, illuminated Moon phase, twilight state, and click-to-lock Target Inspector.</li>
-  </ul>
+  <!-- Cards Under the Sky Dome: Lunar Phase, Solar/Compass, Target Inspector -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(250px, 1fr));gap:0.85rem;margin-top:1rem;align-items:stretch;">
+    <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <canvas id="cel-moon-canvas" width="110" height="110" style="width:96px;height:96px;border-radius:50%;background:#0B131E;flex-shrink:0;"></canvas>
+        <div style="min-width:140px;flex:1;">
+          <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Lunar Phase</div>
+          <div id="cel-moon-phase-name" style="font-size:19px;font-weight:700;margin:0.15rem 0;">—</div>
+          <div id="cel-moon-stats" class="secondary-text tabular" style="font-size:13px;line-height:1.5;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
+      <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem;">Solar &amp; Compass Summary</div>
+      <div id="cel-sun-stats" class="tabular" style="font-size:13.5px;line-height:1.6;"></div>
+    </div>
+
+    <div id="cel-target-card" style="padding:1rem;border-radius:10px;border:1px solid var(--color-border);background:var(--color-surface);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+        <div class="secondary-text" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em;">Target Inspector</div>
+        <button type="button" id="cel-target-clear" class="btn" style="min-height:24px;padding:0.1rem 0.5rem;font-size:11.5px;display:none;" onclick="celClearTarget()">Clear</button>
+      </div>
+      <div id="cel-target-body" class="secondary-text tabular" style="font-size:13.5px;line-height:1.55;">Click or tap any celestial body on the sky dome to inspect its Altitude, Azimuth, RA/Dec, and details.</div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -2752,6 +2745,33 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
 
   var plottedObjects = [];
   var lockedTargetName = null;
+  var hoverFadeName = null;
+  var hoverFadeAlpha = 0;
+  var hoverTargetAlpha = 0;
+  var hoverAnimId = null;
+
+  function stepHoverFade() {
+    hoverAnimId = null;
+    var diff = hoverTargetAlpha - hoverFadeAlpha;
+    if (Math.abs(diff) < 0.03) {
+      hoverFadeAlpha = hoverTargetAlpha;
+      if (hoverFadeAlpha === 0) hoverFadeName = null;
+      window.celUpdate();
+      return;
+    }
+    hoverFadeAlpha += diff * 0.22;
+    window.celUpdate();
+    hoverAnimId = requestAnimationFrame(stepHoverFade);
+  }
+  function setHoveredStar(name) {
+    if (name) {
+      hoverFadeName = name;
+      hoverTargetAlpha = 1;
+    } else {
+      hoverTargetAlpha = 0;
+    }
+    if (!hoverAnimId) hoverAnimId = requestAnimationFrame(stepHoverFade);
+  }
 
   function fmtRA(raRad) {
     var hrs = normDeg(raRad * DEG) / 15;
@@ -3085,11 +3105,29 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
           if (dso[5] === 'gal') {
             ctx.translate(pt.x, pt.y);
             ctx.rotate(0.55);
+            // Soft outer halo
+            var galHalo = ctx.createRadialGradient(0, 0, 1, 0, 0, 11);
+            galHalo.addColorStop(0, 'rgba(253, 230, 138, 0.55)');
+            galHalo.addColorStop(0.45, 'rgba(196, 181, 253, 0.25)');
+            galHalo.addColorStop(1, 'rgba(196, 181, 253, 0)');
+            ctx.fillStyle = galHalo;
             ctx.beginPath();
-            ctx.ellipse(0, 0, 6, 3, 0, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(244, 114, 182, 0.85)';
-            ctx.lineWidth = 1.2;
+            ctx.ellipse(0, 0, 11, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Two spiral arms
+            ctx.strokeStyle = 'rgba(221, 214, 254, 0.85)';
+            ctx.lineWidth = 1.15;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(4.5, -4, 9, -0.5);
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(-4.5, 4, -9, 0.5);
             ctx.stroke();
+            // Bright galactic core
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+            ctx.fillStyle = '#FEF3C7';
+            ctx.fill();
           } else if (dso[5] === 'neb') {
             ctx.beginPath();
             ctx.rect(pt.x - 4, pt.y - 4, 8, 8);
@@ -3141,14 +3179,22 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       ctx.arc(st.x, st.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = col;
       ctx.fill();
-      if (showLabels && (st.mag <= 2.15 || st.name === 'Polaris')) {
-        ctx.font = (st.mag <= 1.0 ? '600 ' : '') + '10.5px system-ui, sans-serif';
-        ctx.fillStyle = st.name === 'Polaris' ? '#FDE047' : 'rgba(226,232,240,0.88)';
+      if (hoverFadeName === st.name && hoverFadeAlpha > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = hoverFadeAlpha;
+        ctx.font = '600 11.5px system-ui, sans-serif';
+        var lblW = ctx.measureText(st.name).width;
+        ctx.fillStyle = 'rgba(7, 12, 20, 0.78)';
+        ctx.fillRect(st.x + radius + 3, st.y - 13, lblW + 8, 16);
+        ctx.fillStyle = st.name === 'Polaris' ? '#FDE047' : '#F8FAFC';
         ctx.textAlign = 'left';
-        ctx.fillText(st.name, st.x + radius + 3.5, st.y - 2);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(st.name, st.x + radius + 7, st.y - 5);
+        ctx.restore();
       }
       plottedObjects.push({
         name: st.name,
+        isStar: true,
         kind: st.con + ' &bull; Spectral ' + st.spec + ' (Mag ' + st.mag.toFixed(2) + ')',
         alt: st.alt, az: st.az, raStr: fmtRA(st.ra), decStr: fmtDec(st.dec),
         x: st.x, y: st.y, r: 9
@@ -3419,6 +3465,7 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
         return;
       }
       var best = findNearestObject(pt.x, pt.y);
+      setHoveredStar((best && best.isStar) ? best.name : null);
       var info = document.getElementById('cel-hover-info');
       if (info) {
         if (best) {
@@ -3443,6 +3490,9 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
       } else if (window.arkSaveToolsState) {
         window.arkSaveToolsState();
       }
+    });
+    cv.addEventListener('pointerleave', function() {
+      setHoveredStar(null);
     });
   }
 
