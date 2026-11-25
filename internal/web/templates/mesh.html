@@ -221,14 +221,15 @@
       var wire = tag & 7;
       var val = null;
       if (wire === 0) {
-        var n = 0, mul = 1;
+        // Decode varint preserving exact low 32 bits (so signed int32 negative values like rx_rssi decode accurately)
+        var lo = 0, shift0 = 0;
         while (i < buf.length) {
           var vb = buf[i++];
-          n += (vb & 0x7f) * mul;
+          if (shift0 < 32) lo |= ((vb & 0x7f) << shift0);
           if ((vb & 0x80) === 0) break;
-          mul *= 128;
+          shift0 += 7;
         }
-        val = n;
+        val = lo >>> 0;
       } else if (wire === 1) {
         if (i + 8 > buf.length) break;
         val = buf.slice(i, i + 8);
@@ -312,6 +313,14 @@
         persistNode({ node_id: nid, short_name: shortName, long_name: longName, hardware: hw, protocol: 'meshtastic', lat: lat, lng: lng, battery: batt, snr: snr, rssi: 0 });
         logRaw('RX', 'Meshtastic node_info ' + nid + ' (' + (longName || shortName || 'unknown') + ')');
       }
+    }
+    // field 6 = log_record, field 7 = config_complete_id
+    if (fr[6] && fr[6][0] instanceof Uint8Array) {
+      var lr = pbDecode(fr[6][0]);
+      if (lr[1] && lr[1][0] instanceof Uint8Array) logRaw('LOG', textDec.decode(lr[1][0]).trim());
+    }
+    if (fr[7]) {
+      logRaw('SYS', 'Meshtastic config_complete_id=' + fr[7][0]);
     }
     // field 2 = MeshPacket
     if (fr[2] && fr[2][0] instanceof Uint8Array) {
@@ -427,6 +436,13 @@
     }
 
     if (proto === 'meshcore') {
+      // Official MeshCore Companion Radio Protocol: BLE NUS sends raw payload per notification;
+      // USB Serial uses 0x3E + 2-byte LE length framing.
+      if (transport === 'ble') {
+        rxBuf = new Uint8Array(0);
+        handleMeshCorePayload(chunk);
+        return;
+      }
       while (rxBuf.length >= 3) {
         if (rxBuf[0] === 0x3E) {
           var mlen = rxBuf[1] | (rxBuf[2] << 8);
@@ -465,21 +481,85 @@
     }
   }
 
+  function sendMeshCorePacket(payload) {
+    return writeRaw(transport === 'usb' ? wrapMeshCoreFrame(payload) : payload);
+  }
+
+  function requestNextMeshCoreMsg() {
+    sendMeshCorePacket(new Uint8Array([0x0A])).catch(function() {}); // CMD_SYNC_NEXT_MESSAGE
+  }
+
   function handleMeshCorePayload(payload) {
     if (!payload || payload.length === 0) return;
     var code = payload[0];
     logRaw('RX', 'MeshCore code=0x' + code.toString(16) + ' hex=' + hexStr(payload));
-    // Companion channel / direct text frames carry UTF-8 text after header bytes
-    if ((code === 0x07 || code === 0x08 || code === 0x10 || code === 0x11) && payload.length > 8) {
-      var txt = textDec.decode(payload.slice(8)).replace(/\0/g, '').trim();
-      if (txt) {
-        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: '0', from_id: 'meshcore', from_name: 'MeshCore Peer', to_id: '^all', body: txt, snr: 0, rssi: 0 });
+    // PUSH_CODE_MSG_WAITING (0x83): radio has cached incoming message(s) -> pull with CMD_SYNC_NEXT_MESSAGE (0x0A)
+    if (code === 0x83) {
+      requestNextMeshCoreMsg();
+      return;
+    }
+    if (code === 0x0A) {
+      logRaw('SYS', 'MeshCore message queue synced (no more messages)');
+      return;
+    }
+    if (code === 0x06) {
+      logRaw('SYS', 'MeshCore TX confirmed (RESP_CODE_SENT)');
+      return;
+    }
+    if (code === 0x01) {
+      var errCode = payload.length > 1 ? payload[1] : 0;
+      setStatus('MeshCore radio returned error code 0x' + errCode.toString(16), !!transport);
+      return;
+    }
+    // RESP_CODE_CHANNEL_MSG_RECV_V3 (0x11): [0]=code, [1]=int8 snr*4, [2..3]=res, [4]=ch, [5]=path_len, [6]=txt_type, [7..10]=ts, [11+]=text
+    if (code === 0x11 && payload.length > 11) {
+      var snrV3 = ((payload[1] << 24) >> 24) / 4.0;
+      var chV3 = String(payload[4]);
+      var txtV3 = textDec.decode(payload.slice(11)).replace(/\0/g, '').trim();
+      if (txtV3) {
+        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: chV3, from_id: 'meshcore-ch' + chV3, from_name: 'MeshCore Ch ' + chV3, to_id: '^all', body: txtV3, snr: snrV3, rssi: 0 });
       }
-    } else if (code === 0x05 && payload.length > 2) {
+      requestNextMeshCoreMsg();
+      return;
+    }
+    // RESP_CODE_CHANNEL_MSG_RECV v1/v2 (0x08): [0]=code, [1]=ch, [2]=path_len, [3]=txt_type, [4..7]=ts, [8+]=text
+    if (code === 0x08 && payload.length > 8) {
+      var chV2 = String(payload[1]);
+      var txtV2 = textDec.decode(payload.slice(8)).replace(/\0/g, '').trim();
+      if (txtV2) {
+        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: chV2, from_id: 'meshcore-ch' + chV2, from_name: 'MeshCore Ch ' + chV2, to_id: '^all', body: txtV2, snr: 0, rssi: 0 });
+      }
+      requestNextMeshCoreMsg();
+      return;
+    }
+    // RESP_CODE_CONTACT_MSG_RECV_V3 (0x10): [0]=code, [1]=int8 snr*4, [2..3]=res, [4..9]=pubkey6, [10]=path_len, [11]=txt_type, [12..15]=ts, [16+]=text
+    if (code === 0x10 && payload.length > 16) {
+      var snrDM = ((payload[1] << 24) >> 24) / 4.0;
+      var pkHex = hexStr(payload.slice(4, 10)).replace(/\s+/g, '');
+      var txtDM = textDec.decode(payload.slice(16)).replace(/\0/g, '').trim();
+      if (txtDM) {
+        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: 'DM', from_id: pkHex, from_name: 'MeshCore ' + pkHex.slice(0, 8), to_id: 'local', body: txtDM, snr: snrDM, rssi: 0 });
+      }
+      requestNextMeshCoreMsg();
+      return;
+    }
+    // RESP_CODE_CONTACT_MSG_RECV v1/v2 (0x07): [0]=code, [1..6]=pubkey6, [7]=path_len, [8]=txt_type, [9..12]=ts, [13+]=text
+    if (code === 0x07 && payload.length > 13) {
+      var pkHex2 = hexStr(payload.slice(1, 7)).replace(/\s+/g, '');
+      var txtDM2 = textDec.decode(payload.slice(13)).replace(/\0/g, '').trim();
+      if (txtDM2) {
+        persistMessage({ protocol: 'meshcore', direction: 'rx', channel: 'DM', from_id: pkHex2, from_name: 'MeshCore ' + pkHex2.slice(0, 8), to_id: 'local', body: txtDM2, snr: 0, rssi: 0 });
+      }
+      requestNextMeshCoreMsg();
+      return;
+    }
+    // RESP_CODE_SELF_INFO (0x05)
+    if (code === 0x05 && payload.length > 2) {
       var info = textDec.decode(payload.slice(1)).replace(/[^\x20-\x7E]/g, ' ').trim();
       if (info) {
         persistNode({ node_id: 'meshcore-self', short_name: 'MC', long_name: info.slice(0, 32), hardware: 'MeshCore', protocol: 'meshcore', lat: 0, lng: 0, battery: -1, snr: 0, rssi: 0 });
       }
+      requestNextMeshCoreMsg();
     }
   }
 
@@ -490,9 +570,13 @@
       return;
     }
     if (transport === 'ble' && bleWriteChar) {
-      // Chunk to <=200 bytes for BLE MTU safety
-      for (var off = 0; off < bytes.length; off += 200) {
-        await bleWriteChar.writeValue(bytes.slice(off, off + 200));
+      if (bleMode === 'meshtastic') {
+        // Meshtastic BLE expects one complete protobuf per ToRadio characteristic write
+        await bleWriteChar.writeValue(bytes);
+      } else {
+        for (var off = 0; off < bytes.length; off += 200) {
+          await bleWriteChar.writeValue(bytes.slice(off, off + 200));
+        }
       }
       logRaw('TX', hexStr(bytes));
       return;
@@ -514,13 +598,19 @@
     var proto = document.getElementById('mesh-proto').value;
     try {
       if (proto === 'meshtastic') {
+        if (transport === 'usb' && serialWriter) {
+          // Official Meshtastic Serial API wakeup preamble (32x 0xC3)
+          var wake = new Uint8Array(32);
+          wake.fill(0xC3);
+          await serialWriter.write(wake);
+        }
         var pb = encodeMeshtasticWantConfig();
         await writeRaw(transport === 'usb' ? wrapMeshtasticSerial(pb) : pb);
         if (transport === 'ble' && bleMode === 'meshtastic') await drainMeshtasticBLE();
       } else if (proto === 'meshcore') {
-        // MeshCore AppStart (0x01) + version 0x03 + "Ark"
-        var mc = new Uint8Array([0x01, 0x03, 0x41, 0x72, 0x6B]);
-        await writeRaw(wrapMeshCoreFrame(mc));
+        // Official MeshCore CMD_APP_START (0x01): [0]=0x01, [1]=app_ver(0x03), [2..7]=6 reserved bytes, [8+]=app_name("Ark")
+        var mc = new Uint8Array([0x01, 0x03, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x41, 0x72, 0x6B]);
+        await sendMeshCorePacket(mc);
       } else {
         await writeRaw(textEnc.encode('AT\r\n'));
       }
@@ -621,6 +711,12 @@
   };
 
   window.meshDisconnect = async function() {
+    if (transport && document.getElementById('mesh-proto').value === 'meshtastic') {
+      try {
+        var discPb = pbUint(4, 1); // ToRadio.disconnect = true (field 4)
+        await writeRaw(transport === 'usb' ? wrapMeshtasticSerial(discPb) : discPb);
+      } catch (_) {}
+    }
     serialKeepReading = false;
     try { if (serialReader) await serialReader.cancel(); } catch (_) {}
     try { if (serialWriter) serialWriter.releaseLock(); } catch (_) {}
@@ -662,7 +758,7 @@
         hdr[2] = chIdx & 0xff;
         new DataView(hdr.buffer).setUint32(3, ts >>> 0, true);
         hdr.set(txtBytes, 7);
-        await writeRaw(wrapMeshCoreFrame(hdr));
+        await sendMeshCorePacket(hdr);
       } else {
         await writeRaw(textEnc.encode(text + '\r\n'));
       }
