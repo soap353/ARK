@@ -3322,4 +3322,36 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	if certW.Code != http.StatusOK || !strings.Contains(certW.Body.String(), "BEGIN CERTIFICATE") {
 		t.Errorf("expected /tls/ark.crt to serve public cert over LAN, got %d", certW.Code)
 	}
+
+	// 5j. Settings Color Palette saves ui_theme and renders <html ... data-theme="..."> across pages
+	for _, tc := range []struct {
+		submitted string
+		want      string
+	}{
+		{"nightwatch", "nightwatch"},
+		{"topo", "topo"},
+		{"invalid-theme", "almanac"},
+	} {
+		themeForm := url.Values{
+			"device_name": {"Ark"},
+			"port":        {"8080"},
+			"lan_enabled": {"on"},
+			"ui_theme":    {tc.submitted},
+		}
+		tReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader(themeForm.Encode()))
+		tReq.RemoteAddr = "127.0.0.1:12345"
+		tReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		tW := httptest.NewRecorder()
+		handler.ServeHTTP(tW, tReq)
+		if tW.Code != http.StatusSeeOther {
+			t.Fatalf("POST /settings/general ui_theme=%q returned %d", tc.submitted, tW.Code)
+		}
+		libReq := httptest.NewRequest(http.MethodGet, "/library", nil)
+		libReq.RemoteAddr = "127.0.0.1:12345"
+		libW := httptest.NewRecorder()
+		handler.ServeHTTP(libW, libReq)
+		if libW.Code != http.StatusOK || !strings.Contains(libW.Body.String(), `data-theme="`+tc.want+`"`) {
+			t.Errorf("expected /library to render data-theme=%q for submitted %q, got %d", tc.want, tc.submitted, libW.Code)
+		}
+	}
 }

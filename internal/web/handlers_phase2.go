@@ -25,6 +25,7 @@ func (s *Server) fetchSettings() map[string]string {
 	out := map[string]string{
 		"device_name":         "Ark",
 		"port":                "8080",
+		"ui_theme":            "almanac",
 		"lan_enabled":         "true",
 		"lan_drop_enabled":    "true",
 		"opds_enabled":        "true",
@@ -96,7 +97,7 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 		passcodeEnabled = "false"
 		missingPasscode = true
 	}
-	_ = s.saveSettings(map[string]string{
+	pairs := map[string]string{
 		"device_name":          strings.TrimSpace(r.FormValue("device_name")),
 		"port":                 newPort,
 		"lan_enabled":          parseCheckbox("lan_enabled"),
@@ -107,7 +108,11 @@ func (s *Server) handleSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 		"peer_discoverable":    parseCheckbox("peer_discoverable"),
 		"peer_allow_downloads": parseCheckbox("peer_allow_downloads"),
 		"peer_manual_hosts":    strings.TrimSpace(r.FormValue("peer_manual_hosts")),
-	})
+	}
+	if theme := strings.TrimSpace(r.FormValue("ui_theme")); theme != "" {
+		pairs["ui_theme"] = validUITheme(theme)
+	}
+	_ = s.saveSettings(pairs)
 	if pin != "" {
 		_ = s.setLANPasscode(pin)
 	}

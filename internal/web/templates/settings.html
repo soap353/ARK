@@ -37,6 +37,15 @@
       <input type="number" id="port" name="port" class="form-control" value="{{ index .Settings "port" }}">
     </div>
     <div class="form-group">
+      <label for="ui_theme" class="form-label">Color Palette</label>
+      {{ $uiTheme := index .Settings "ui_theme" }}
+      <select id="ui_theme" name="ui_theme" class="form-control">
+        <option value="almanac" {{ if or (eq $uiTheme "") (eq $uiTheme "almanac") }}selected{{ end }}>Field Almanac (Default &mdash; Warm Parchment &amp; Forest)</option>
+        <option value="topo" {{ if eq $uiTheme "topo" }}selected{{ end }}>Expedition Topo Atlas (Crisp Stone &amp; Signal Orange)</option>
+        <option value="nightwatch" {{ if eq $uiTheme "nightwatch" }}selected{{ end }}>Nightwatch Console (Dark Charcoal &amp; Amber)</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">LAN Access &amp; Security</label>
       <div style="display: flex; gap: 0.5rem; align-items: center; min-height: 40px;">
         <input type="checkbox" id="lan_enabled" name="lan_enabled" {{ if ne (index .Settings "lan_enabled") "false" }}checked{{ end }} style="width: 24px; height: 24px;">

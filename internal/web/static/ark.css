@@ -37,6 +37,114 @@
   --transition-speed: 0.14s;
 }
 
+/* Optional Color Palettes selectable in Settings */
+html[data-theme="topo"] {
+  --color-bg: #EEF2F1;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #E2E8E6;
+  --color-border: #C5D0CD;
+  --color-text-primary: #0F1B1D;
+  --color-text-secondary: #4A5B5E;
+
+  --color-sidebar-bg: #F9FBFA;
+  --color-sidebar-surface: #E6ECEA;
+  --color-sidebar-border: #C5D0CD;
+  --color-sidebar-text: #0F1B1D;
+  --color-sidebar-muted: #5A6D70;
+
+  --color-accent: #E04F25;
+  --color-accent-hover: #C2411C;
+  --color-accent-text: #FFFFFF;
+  --color-success: #047857;
+  --color-warning: #B45309;
+  --color-error: #DC2626;
+  --color-danger: #DC2626;
+}
+
+html[data-theme="topo"] body {
+  background-image: linear-gradient(to right, rgba(15, 27, 29, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 27, 29, 0.03) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+html[data-theme="topo"] .sidebar-link {
+  color: #334346;
+}
+
+html[data-theme="topo"] .sidebar-link:hover,
+html[data-theme="topo"] .sidebar-link.active {
+  color: #0F1B1D;
+}
+
+html[data-theme="topo"] .sidebar-link.active svg {
+  color: var(--color-accent);
+}
+
+html[data-theme="nightwatch"] {
+  --color-bg: #0B100F;
+  --color-surface: #121A18;
+  --color-surface-hover: #1A2421;
+  --color-border: #263530;
+  --color-text-primary: #E6EFEA;
+  --color-text-secondary: #8CA39A;
+
+  --color-sidebar-bg: #080C0B;
+  --color-sidebar-surface: #151F1C;
+  --color-sidebar-border: #1F2D28;
+  --color-sidebar-text: #E6EFEA;
+  --color-sidebar-muted: #7C948B;
+
+  --color-accent: #F59E0B;
+  --color-accent-hover: #D97706;
+  --color-accent-text: #0B100F;
+  --color-success: #34D399;
+  --color-warning: #FBBF24;
+  --color-error: #F87171;
+  --color-danger: #F87171;
+}
+
+html[data-theme="nightwatch"] body {
+  background-image: radial-gradient(rgba(52, 211, 153, 0.05) 1px, transparent 0);
+}
+
+html[data-theme="nightwatch"] .badge-success {
+  background-color: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.4);
+  color: #34D399;
+}
+
+html[data-theme="nightwatch"] .badge-error {
+  background-color: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #FCA5A5;
+}
+
+html[data-theme="nightwatch"] .badge-accent {
+  background-color: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #FBBF24;
+}
+
+html[data-theme="nightwatch"] .badge-warning {
+  background-color: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #FDE68A;
+}
+
+html[data-theme="nightwatch"] .user-msg-compact {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+html[data-theme="nightwatch"] a.ai-ref-badge:hover {
+  background: rgba(245, 158, 11, 0.16);
+}
+
+html[data-theme="nightwatch"] select option {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;

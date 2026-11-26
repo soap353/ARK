@@ -172,6 +172,7 @@ type PageData struct {
 	RestartRequired            bool
 	TLSCertReady               bool
 	UpdateSigningKeyConfigured bool
+	UITheme                    string
 }
 
 // LANDropDeviceView summarizes a connected LAN/local device for /lan-drop.
@@ -1662,8 +1663,18 @@ func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func validUITheme(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "topo", "nightwatch":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return "almanac"
+	}
+}
+
 func (s *Server) render(w http.ResponseWriter, r *http.Request, pageTemplate string, data PageData) {
 	data.IsLocal = isLocalRequest(r)
+	data.UITheme = validUITheme(s.fetchSettings()["ui_theme"])
 	tmpl, ok := s.templates[pageTemplate]
 	if !ok {
 		log.Printf("Template not found: %s", pageTemplate)
