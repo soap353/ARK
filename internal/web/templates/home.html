@@ -27,6 +27,7 @@
   var activeReqId = 0;
 
   function clearResults() {
+    activeReqId++;
     if (corrEl) { corrEl.style.display = 'none'; corrEl.innerHTML = ''; }
     resEl.style.display = 'none';
     resEl.innerHTML = '';
@@ -76,13 +77,13 @@
     fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (reqId !== activeReqId) return;
+        if (reqId !== activeReqId || !input.value.trim()) return;
         renderResults(q, data);
       })
       .catch(function() {});
   }
 
-  input.addEventListener('input', function() {
+  function handleInputChange() {
     clearTimeout(debounceTimer);
     var v = input.value.trim();
     if (!v) {
@@ -90,7 +91,9 @@
       return;
     }
     debounceTimer = setTimeout(function() { runSearch(v, false); }, 140);
-  });
+  }
+  input.addEventListener('input', handleInputChange);
+  input.addEventListener('search', handleInputChange);
 
   form.addEventListener('submit', function(ev) {
     ev.preventDefault();
