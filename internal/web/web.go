@@ -185,6 +185,7 @@ type PageData struct {
 // DownloadedFileView represents a downloaded content file listed on /system.
 type DownloadedFileView struct {
 	Name    string
+	Type    string
 	RelPath string
 }
 

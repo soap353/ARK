@@ -187,10 +187,13 @@
     <h2 style="margin: 0;">Downloaded Content</h2>
   </div>
   {{ if .DownloadedFiles }}
-  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+  <div id="downloaded-files-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 270px; overflow-y: auto; padding-right: 0.25rem;">
     {{ range .DownloadedFiles }}
-    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); background: var(--color-bg);">
-      <span style="word-break: break-word;">{{ .Name }}</span>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); background: var(--color-bg); flex-shrink: 0;">
+      <div style="min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;">
+        <span style="word-break: break-word;">{{ .Name }}</span>
+        <span class="secondary-text" style="font-size: 13px; white-space: nowrap;">{{ .Type }}</span>
+      </div>
       <button type="button" class="btn btn-danger" style="min-height: 32px; padding: 0.2rem 0.75rem; font-size: 13px; flex-shrink: 0;" data-path="{{ .RelPath }}" data-name="{{ .Name }}" onclick="openDeleteDownloadModal(this)" {{ if not $.IsLocal }}disabled title="Deletes are only available on the host computer"{{ end }}>Delete</button>
     </div>
     {{ end }}

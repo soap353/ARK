@@ -3641,8 +3641,12 @@ func TestDownloadedListDeleteMapsAndCatalogCleanup(t *testing.T) {
 	if jobsIdx == -1 || dlIdx == -1 || ctIdx == -1 || !(jobsIdx < dlIdx && dlIdx < ctIdx) {
 		t.Fatalf("expected #downloaded-files-card between #recent-jobs-card and App Containers (%d < %d < %d)", jobsIdx, dlIdx, ctIdx)
 	}
-	if !strings.Contains(sysBody, `id="system-delete-dialog"`) || !strings.Contains(sysBody, "ireland.pmtiles") || !strings.Contains(sysBody, "field_notes.txt") || !strings.Contains(sysBody, "druglabels.db") {
-		t.Errorf("expected /system to list downloaded files and delete confirmation dialog")
+	if !strings.Contains(sysBody, `id="system-delete-dialog"`) || !strings.Contains(sysBody, `id="downloaded-files-list"`) || !strings.Contains(sysBody, "overflow-y: auto") || !strings.Contains(sysBody, "ireland.pmtiles") || !strings.Contains(sysBody, "field_notes.txt") || !strings.Contains(sysBody, "druglabels.db") {
+		t.Errorf("expected /system to render scrollable downloaded files list and delete confirmation dialog")
+	}
+	dlSection := sysBody[dlIdx:ctIdx]
+	if !strings.Contains(dlSection, ">Maps<") || !strings.Contains(dlSection, ">Docs<") || !strings.Contains(dlSection, ">Drug Labels<") || strings.Contains(dlSection, `class="badge"`) {
+		t.Errorf("expected plain-text media types (Maps, Docs, Drug Labels) without badge pills in #downloaded-files-card")
 	}
 	if strings.Contains(sysBody, "partial.pmtiles.part") || strings.Contains(sysBody, "library.xml") {
 		t.Errorf("expected internal/partial files excluded from Downloaded Content list")

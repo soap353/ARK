@@ -565,7 +565,7 @@ func (s *Server) listDownloadedFiles() []DownloadedFileView {
 	}
 	var out []DownloadedFileView
 	seen := make(map[string]bool)
-	addItem := func(name, rel string) {
+	addItem := func(name, mediaType, rel string) {
 		rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
 		low := strings.ToLower(rel)
 		if rel == "" || seen[low] || strings.Contains(low, "/.icons/") || filepath.Base(low) == "library.xml" {
@@ -575,28 +575,31 @@ func (s *Server) listDownloadedFiles() []DownloadedFileView {
 			return
 		}
 		seen[low] = true
-		out = append(out, DownloadedFileView{Name: name, RelPath: rel})
+		out = append(out, DownloadedFileView{Name: name, Type: mediaType, RelPath: rel})
 	}
 
-	for _, cat := range []string{
-		storage.CategoryZim,
-		storage.CategoryMaps,
-		storage.CategoryVideo,
-		storage.CategoryMusic,
-		storage.CategoryBooks,
-		storage.CategoryDocs,
+	for _, c := range []struct {
+		cat   string
+		label string
+	}{
+		{storage.CategoryZim, "ZIM"},
+		{storage.CategoryMaps, "Maps"},
+		{storage.CategoryVideo, "Video"},
+		{storage.CategoryMusic, "Music"},
+		{storage.CategoryBooks, "Books"},
+		{storage.CategoryDocs, "Docs"},
 	} {
-		files, err := storage.ListCategoryFiles(s.dataDir, cat)
+		files, err := storage.ListCategoryFiles(s.dataDir, c.cat)
 		if err != nil {
 			continue
 		}
 		for _, f := range files {
-			addItem(f.Name, f.Path)
+			addItem(f.Name, c.label, f.Path)
 		}
 	}
 
 	if fi, err := os.Stat(filepath.Join(s.dataDir, "druglabels", "druglabels.db")); err == nil && !fi.IsDir() {
-		addItem("druglabels.db", "druglabels/druglabels.db")
+		addItem("druglabels.db", "Drug Labels", "druglabels/druglabels.db")
 	}
 
 	sort.Slice(out, func(i, j int) bool {
