@@ -2485,10 +2485,13 @@ func TestFeaturesLANDropOPDSAndCalculators(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	toolsHTML := w.Body.String()
-	for _, want := range []string{"Graphing Calculator", `id="gc-canvas"`, `id="gc-settings-pop"`, `id="gc-keypad"`, "Weight-Based Dosage", "Solar &amp; Battery", "Radio Frequency", "Coordinates, UTM", "Unit Converter", "<strong>Inputs:</strong>", "<strong>Outputs:</strong>"} {
+	for _, want := range []string{`id="calc-select"`, `value="graph"`, `value="dosage"`, `value="solar"`, `value="radio"`, `value="coords"`, `value="units"`, `value="celestial"`, `id="gc-canvas"`, `id="gc-settings-pop"`, `id="gc-keypad"`, "<strong>Inputs:</strong>", "<strong>Outputs:</strong>"} {
 		if w.Code != http.StatusOK || !strings.Contains(toolsHTML, want) {
 			t.Errorf("expected /tools (status=%d) to contain %q", w.Code, want)
 		}
+	}
+	if strings.Contains(toolsHTML, `<span class="badge badge-success">Local</span>`) {
+		t.Errorf("/tools must omit Local badge")
 	}
 	if strings.Contains(toolsHTML, "cdn.jsdelivr.net") || strings.Contains(toolsHTML, "unpkg.com") {
 		t.Errorf("/tools must not reference external CDNs")

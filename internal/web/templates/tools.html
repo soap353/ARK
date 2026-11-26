@@ -5,17 +5,17 @@
       <h1 style="margin:0;">Field &amp; Reference Calculators</h1>
       <p class="secondary-text" style="margin:0.3rem 0 0;">Instant calculators for graphing, medical dosing, solar/battery sizing, RF antennas, coordinates, unit conversions, and real-time celestial tracking.</p>
     </div>
-    <span class="badge badge-success">Local</span>
-  </div>
-
-  <div id="calc-tabs" data-session-token="{{ .SessionToken }}" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1rem;">
-    <button type="button" class="btn btn-primary calc-tab-btn" data-tab="graph" onclick="showCalcTab('graph')">Graphing Calculator</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="dosage" onclick="showCalcTab('dosage')">Dosage</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="solar" onclick="showCalcTab('solar')">Solar &amp; Battery</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="radio" onclick="showCalcTab('radio')">Radio &amp; Antenna</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="coords" onclick="showCalcTab('coords')">Coordinates &amp; Bearing</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="units" onclick="showCalcTab('units')">Unit Converter</button>
-    <button type="button" class="btn calc-tab-btn" data-tab="celestial" onclick="showCalcTab('celestial')">Celestial &amp; Stars</button>
+    <div id="calc-tabs" data-session-token="{{ .SessionToken }}" style="min-width:240px;">
+      <select id="calc-select" class="form-control" aria-label="Select calculator" onchange="showCalcTab(this.value)">
+        <option value="graph" selected>Graphing Calculator</option>
+        <option value="dosage">Dosage</option>
+        <option value="solar">Solar &amp; Battery</option>
+        <option value="radio">Radio &amp; Antenna</option>
+        <option value="coords">Coordinates &amp; Bearing</option>
+        <option value="units">Unit Converter</option>
+        <option value="celestial">Celestial &amp; Stars</option>
+      </select>
+    </div>
   </div>
 </div>
 
@@ -25,7 +25,6 @@
   <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;padding:0.55rem 0.9rem;background:#1B2E26;color:#F5F2EB;border-bottom:1px solid #2A4338;">
     <div style="display:flex;align-items:center;gap:0.65rem;">
       <button type="button" id="gc-sidebar-toggle" class="btn" title="Show/Hide Expression List" style="min-height:30px;padding:0.2rem 0.6rem;font-size:13px;background:#2A4338;color:#F5F2EB;border-color:#436153;" onclick="gcToggleSidebar()">&laquo;</button>
-      <strong style="font-size:15px;">Graphing Calculator</strong>
     </div>
     <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;">
       <select id="gc-preset-sel" style="min-height:30px;padding:0.2rem 0.55rem;font-size:12px;width:auto;border-radius:6px;border:1px solid #436153;background:#2A4338;color:#F5F2EB;cursor:pointer;" onchange="if(this.value){gcLoadPreset(this.value);this.value='';}">
@@ -171,9 +170,7 @@
 
 <!-- 1. Dosage -->
 <div id="tab-dosage" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Weight-Based Dosage Calculator</h2>
-  <p class="secondary-text">Arithmetic helper only — always verify age limits, maximum daily doses, and contraindications in <a href="/a/druglabels/" target="_blank">Drug Labels</a> or <a href="/field-guide">Remedy</a>.</p>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
     <div class="form-group">
       <label class="form-label" for="dose-weight">Patient Weight</label>
       <div style="display:flex;gap:0.4rem;">
@@ -213,8 +210,7 @@
 
 <!-- 2. Solar & Battery -->
 <div id="tab-solar" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Solar &amp; Battery Runtime Sizing</h2>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-top:1rem;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
     <div class="form-group">
       <label class="form-label" for="sol-ah">Battery Capacity (Ah)</label>
       <input id="sol-ah" type="number" step="any" min="0" value="100" class="form-control tabular" oninput="calcSolar()">
@@ -256,7 +252,6 @@
 
 <!-- 3. Radio & Antenna -->
 <div id="tab-radio" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Radio Frequency, Wavelength &amp; Antenna Length</h2>
   <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-bottom:1rem;">
     <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(7.2)">40m NVIS (7.2 MHz)</button>
     <button type="button" class="btn" style="min-height:30px;padding:0.2rem 0.6rem;font-size:12px;" onclick="setFreqMHz(27.185)">CB Ch 19 (27.185 MHz)</button>
@@ -287,8 +282,7 @@
 
 <!-- 4. Coordinates & Bearing -->
 <div id="tab-coords" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Coordinates, UTM Converter &amp; Bearing</h2>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.25rem;margin-top:1rem;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.25rem;">
     <div>
       <h3>Format Converter (WGS84)</h3>
       <div class="form-group">
@@ -325,8 +319,7 @@
 
 <!-- 5. Unit Converter -->
 <div id="tab-units" class="card calc-panel" style="display:none;">
-  <h2 style="margin-top:0;">Unit Converter</h2>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1rem;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;">
     <div class="form-group">
       <label class="form-label" for="unit-cat">Category</label>
       <select id="unit-cat" class="form-control" onchange="populateUnits()">
@@ -356,11 +349,7 @@
 
 <!-- 6. Real-Time Celestial Body & Star Tracker -->
 <div id="tab-celestial" class="card calc-panel" style="display:none;">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.85rem;">
-    <div>
-      <h2 style="margin:0;">Real-Time Celestial &amp; Star Tracker</h2>
-      <p class="secondary-text" style="margin:0.2rem 0 0;font-size:13.5px;">Live all-sky dome, ingrained 360&deg; compass, Moon phase, Sun, naked-eye planets, and navigation stars for any latitude &amp; longitude.</p>
-    </div>
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.85rem;">
     <div style="display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center;">
       <select id="cel-pin-select" class="form-control" aria-label="Select a saved map pin" style="min-height:36px;padding:0.25rem 0.65rem;font-size:13px;width:auto;min-width:190px;" onchange="celSelectMapPin(this.value)">
         <option value="">Select Map Pin...</option>
@@ -432,10 +421,8 @@ function showCalcTab(name) {
   document.querySelectorAll('.calc-panel').forEach(function(el) {
     el.style.display = (el.id === 'tab-' + name) ? 'block' : 'none';
   });
-  document.querySelectorAll('.calc-tab-btn').forEach(function(b) {
-    if (b.dataset.tab === name) b.classList.add('btn-primary');
-    else b.classList.remove('btn-primary');
-  });
+  var sel = document.getElementById('calc-select');
+  if (sel && sel.value !== name) sel.value = name;
   if (name === 'graph' && window.gcDraw) {
     setTimeout(window.gcDraw, 10);
   }
@@ -2239,8 +2226,8 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   var CHECK_IDS = ['gc-opt-grid', 'gc-opt-minor', 'gc-opt-nums', 'gc-opt-arrows', 'gc-int-show', 'cel-opt-const', 'cel-opt-labels', 'cel-opt-planets', 'cel-opt-mw', 'cel-opt-ecliptic', 'cel-opt-dso'];
 
   function activeCalcTabName() {
-    var btn = document.querySelector('.calc-tab-btn.btn-primary');
-    return (btn && btn.dataset && btn.dataset.tab) ? btn.dataset.tab : 'graph';
+    var sel = document.getElementById('calc-select');
+    return (sel && sel.value) ? sel.value : 'graph';
   }
 
   function saveToolsState() {
