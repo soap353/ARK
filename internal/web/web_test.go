@@ -3006,7 +3006,7 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:12345"
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
-	if w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" || w.Header().Get("Referrer-Policy") != "no-referrer" {
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" || w.Header().Get("Referrer-Policy") != "same-origin" {
 		t.Errorf("missing expected security headers: %v", w.Header())
 	}
 	csrfReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Evil"))
@@ -3192,6 +3192,18 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 	handler.ServeHTTP(sfsW, sfsReq)
 	if sfsW.Code != http.StatusForbidden {
 		t.Errorf("expected Sec-Fetch-Site: cross-site local POST to return 403, got %d", sfsW.Code)
+	}
+
+	// Sec-Fetch-Site: same-origin with Origin: null (embedded webview form POST) must succeed
+	sameOrigNullReq := httptest.NewRequest(http.MethodPost, "/settings/general", strings.NewReader("device_name=Ark&port=8080&lan_enabled=on"))
+	sameOrigNullReq.RemoteAddr = "127.0.0.1:12345"
+	sameOrigNullReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	sameOrigNullReq.Header.Set("Origin", "null")
+	sameOrigNullReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	sameOrigNullW := httptest.NewRecorder()
+	handler.ServeHTTP(sameOrigNullW, sameOrigNullReq)
+	if sameOrigNullW.Code != http.StatusSeeOther {
+		t.Errorf("expected Sec-Fetch-Site: same-origin + Origin: null local POST to succeed (303), got %d", sameOrigNullW.Code)
 	}
 
 	// 5b. sanitizeLocalRedirect blocks backslash and control-char open redirects

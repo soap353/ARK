@@ -227,26 +227,30 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 		// 1. Standard browser security headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Referrer-Policy", "same-origin")
 
 		isLocal := isLocalRequest(r)
 
 		// 2. Local CSRF protection: reject cross-site Fetch metadata, non-loopback or opaque ("null") Origin,
 		// and when Origin is absent, reject non-loopback Referer on state-changing local requests.
+		// Trust Sec-Fetch-Site: same-origin even if an embedded webview sends Origin: null.
 		if isLocal && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete || r.Method == http.MethodPatch) {
-			if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+			sfs := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+			if sfs == "cross-site" {
 				http.Error(w, "Forbidden: cross-site state change rejected.", http.StatusForbidden)
 				return
 			}
-			if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
-				if origin == "null" || !isLoopbackOriginOrHost(origin) {
-					http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
-					return
-				}
-			} else if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
-				if !isLoopbackOriginOrHost(ref) {
-					http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
-					return
+			if sfs != "same-origin" {
+				if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+					if origin == "null" || !isLoopbackOriginOrHost(origin) {
+						http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
+						return
+					}
+				} else if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+					if !isLoopbackOriginOrHost(ref) {
+						http.Error(w, "Forbidden: cross-origin state change rejected.", http.StatusForbidden)
+						return
+					}
 				}
 			}
 		}
