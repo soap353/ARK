@@ -1,5 +1,6 @@
 //go:build windows
 
+// Detaches self-restarted Ark processes from the Windows console.
 package web
 
 import (

@@ -1,3 +1,4 @@
+// Built-in pure-Go ZIM archive reader, article viewer (/read/zim/...), and live ZIM keyword search.
 package web
 
 import (

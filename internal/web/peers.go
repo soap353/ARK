@@ -1,11 +1,10 @@
+// LAN peer discovery (UDP beacon + fallback subnet scan), catalog federation, and peer reverse proxy.
 package web
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,11 +41,18 @@ type peerBeacon struct {
 	HTTPS          bool   `json:"https,omitempty"`
 }
 
-func lanPeerTransport() *http.Transport {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	return tr
-}
+var (
+	// LAN peers use self-signed Ark TLS certs; skip strict CA chain verification on peer links.
+	sharedLANPeerTransport = func() *http.Transport {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		return tr
+	}()
+	sharedLANPeerClient = &http.Client{
+		Timeout:   2500 * time.Millisecond,
+		Transport: sharedLANPeerTransport,
+	}
+)
 
 type discoveredPeerRecord struct {
 	InstanceID     string
@@ -88,14 +94,6 @@ type PeerLibraryView struct {
 	BaseURL        string            `json:"base_url"`
 	AllowDownloads bool              `json:"allow_downloads"`
 	Items          []PeerCatalogItem `json:"items"`
-}
-
-func generateInstanceID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return "ark-" + hex.EncodeToString(b[:])
-	}
-	return fmt.Sprintf("ark-%d", time.Now().UnixNano())
 }
 
 func (s *Server) isPeerDiscoverable() bool {
@@ -441,8 +439,6 @@ func (s *Server) handleAPIPeersList(w http.ResponseWriter, r *http.Request) {
 		mu    sync.Mutex
 		peers []PeerLibraryView
 	)
-	client := &http.Client{Timeout: 2500 * time.Millisecond, Transport: lanPeerTransport()}
-
 	for baseURL := range candidates {
 		wg.Add(1)
 		go func(base string) {
@@ -451,7 +447,7 @@ func (s *Server) handleAPIPeersList(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
-			resp, err := client.Do(req)
+			resp, err := sharedLANPeerClient.Do(req)
 			if err != nil {
 				return
 			}
@@ -681,7 +677,7 @@ func (s *Server) handlePeerProxy(w http.ResponseWriter, r *http.Request) {
 	prefix := "/peer/" + url.PathEscape(peerID)
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = lanPeerTransport()
+	proxy.Transport = sharedLANPeerTransport
 	origDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		origDirector(req)

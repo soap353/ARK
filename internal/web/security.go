@@ -1,7 +1,7 @@
+// HTTP security middleware, CSRF origin verification, LAN passcode gating, and per-IP rate limiting.
 package web
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -100,16 +100,8 @@ func hashPasscode(pin, salt string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func newSalt() string {
-	var b [12]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return hex.EncodeToString(b[:])
-	}
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
 func (s *Server) setLANPasscode(pin string) error {
-	salt := newSalt()
+	salt := randomHex(12)
 	h := hashPasscode(pin, salt)
 	return s.saveSettings(map[string]string{
 		"lan_passcode_salt": salt,
@@ -255,9 +247,10 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 			}
 		}
 
-		// 3. Remote LAN checks
+		// 3. Remote LAN checks (single SQLite settings lookup per request)
 		if !isLocal {
-			if !s.isSettingEnabled("lan_enabled", true) {
+			cfg := s.fetchSettings()
+			if !isSettingMapEnabled(cfg, "lan_enabled", true) {
 				http.Error(w, "Forbidden: LAN browsing is disabled in Settings.", http.StatusForbidden)
 				return
 			}
@@ -267,7 +260,7 @@ func (s *Server) WrapWithSecurity(next http.Handler) http.Handler {
 			isExempt := strings.HasPrefix(p, "/static/") || p == "/healthz" || p == "/lan-auth" || p == "/tls/ark.crt" ||
 				p == "/api/peers/catalog" || p == "/api/peers/download"
 
-			if !isExempt && s.isLANPasscodeRequired() {
+			if !isExempt && isSettingMapEnabled(cfg, "lan_passcode_enabled", false) && cfg["lan_passcode_hash"] != "" {
 				ip := clientHostFromReq(r)
 				if !s.isIPAllowlisted(ip) {
 					if strings.HasPrefix(p, "/api/") {

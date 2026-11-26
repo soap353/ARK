@@ -442,9 +442,7 @@
     el._timer = setTimeout(function() { el.style.display = 'none'; }, 4500);
   }
 
-  function escapeHTML(str) {
-    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  var escapeHTML = window.arkEscapeHTML;
 
   function computeGlobalLimits() {
     var minZoom = 0;

@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,6 +18,10 @@ import (
 )
 
 const (
+	ctrlCloseEvent    = 2
+	ctrlLogoffEvent   = 5
+	ctrlShutdownEvent = 6
+
 	createNoWindow  = 0x08000000
 	detachedProcess = 0x00000008
 
@@ -48,6 +53,10 @@ const (
 )
 
 var (
+	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	procSetConsoleCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
+	procGetModuleHandleW      = kernel32.NewProc("GetModuleHandleW")
+
 	user32                  = syscall.NewLazyDLL("user32.dll")
 	shell32                 = syscall.NewLazyDLL("shell32.dll")
 	procRegisterClassExW    = user32.NewProc("RegisterClassExW")
@@ -67,7 +76,6 @@ var (
 	procGetCursorPos        = user32.NewProc("GetCursorPos")
 	procSetForegroundWindow = user32.NewProc("SetForegroundWindow")
 	procShellNotifyIconW    = shell32.NewProc("Shell_NotifyIconW")
-	procGetModuleHandleW    = kernel32.NewProc("GetModuleHandleW")
 )
 
 type wndClassExW struct {
@@ -115,6 +123,27 @@ type notifyIconDataW struct {
 	dwInfoFlags      uint32
 	guidItem         [16]byte
 	hBalloonIcon     uintptr
+}
+
+// registerConsoleCloseHandler intercepts Windows console close, logoff, and shutdown
+// events so Ark can stop Docker containers and record its shutdown timestamp before exit.
+func registerConsoleCloseHandler(trigger func(), done <-chan struct{}) {
+	var once sync.Once
+	cb := syscall.NewCallback(func(ctrlType uintptr) uintptr {
+		switch ctrlType {
+		case ctrlCloseEvent, ctrlLogoffEvent, ctrlShutdownEvent:
+			log.Printf("[Ark] Windows console close event (%d) received, shutting down service and containers...", ctrlType)
+			once.Do(trigger)
+			select {
+			case <-done:
+			case <-time.After(4500 * time.Millisecond):
+			}
+			return 1
+		default:
+			return 0
+		}
+	})
+	_, _, _ = procSetConsoleCtrlHandler.Call(cb, 1)
 }
 
 func isServiceHealthy(port string) bool {

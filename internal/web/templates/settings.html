@@ -568,9 +568,7 @@ function applyUSBProfile(includeDocker, includeConfig, ...cats) {
   });
 }
 
-function escapeSettingsHTML(s) {
-  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
-}
+const escapeSettingsHTML = window.arkEscapeHTML;
 
 function checkGitHubRelease() {
   const repo = (document.getElementById('github_repo') || {}).value || '';

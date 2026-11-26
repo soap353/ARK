@@ -124,11 +124,7 @@
   var textDec = new TextDecoder('utf-8', { fatal: false });
   var textEnc = new TextEncoder();
 
-  function esc(s) {
-    return String(s || '').replace(/[&<>"']/g, function(c) {
-      return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c];
-    });
-  }
+  var esc = window.arkEscapeHTML;
 
   function hexStr(u8) {
     var out = [];

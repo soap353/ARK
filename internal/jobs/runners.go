@@ -23,6 +23,17 @@ import (
 	"time"
 
 	"ark/internal/kiwix"
+	"ark/internal/usb"
+)
+
+var (
+	// LAN peers use self-signed Ark TLS certs, so peer-* downloads skip CA verification.
+	sharedPeerHTTPClient = func() *http.Client {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		return &http.Client{Transport: tr}
+	}()
+	sharedProtomapsClient = &http.Client{Timeout: 12 * time.Second}
 )
 
 // ProgressFunc reports live progress for a running job.
@@ -515,9 +526,7 @@ func (r *Aria2cRunner) runHTTPFallback(ctx context.Context, job *Job, meta JobMe
 
 	httpClient := r.HTTPClient
 	if strings.HasPrefix(job.ID, "peer-") && strings.HasPrefix(job.Target, "https://") {
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		httpClient = &http.Client{Transport: tr}
+		httpClient = sharedPeerHTTPClient
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -1162,4 +1171,151 @@ func (r *YtDlpRunner) Run(ctx context.Context, job *Job, progress ProgressFunc) 
 	}
 
 	return cmd.Wait()
+}
+
+// USBRunner executes background TypeUSB export jobs.
+type USBRunner struct {
+	dataDir    string
+	imageSaver usb.ImageSaver
+}
+
+// NewUSBRunner constructs a USBRunner targeting dataDir.
+func NewUSBRunner(dataDir string, imageSaver usb.ImageSaver) *USBRunner {
+	return &USBRunner{
+		dataDir:    dataDir,
+		imageSaver: imageSaver,
+	}
+}
+
+// Run executes the USB export described by job.Metadata / job.Target.
+func (r *USBRunner) Run(ctx context.Context, job *Job, progress ProgressFunc) error {
+	var cfg usb.ExportConfig
+	if job.Metadata != "" {
+		if err := json.Unmarshal([]byte(job.Metadata), &cfg); err != nil {
+			return fmt.Errorf("invalid usb export metadata: %w", err)
+		}
+	}
+	if cfg.TargetPath == "" {
+		cfg.TargetPath = job.Target
+	}
+
+	res, err := usb.ExportToUSB(ctx, r.dataDir, cfg, r.imageSaver, func(pct float64, msg string) {
+		if progress != nil {
+			progress(pct, msg, 0, 0, 0)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if progress != nil {
+		progress(100, fmt.Sprintf("Exported %d files (%d unchanged skipped)", res.FilesCopied, res.FilesSkipped), res.BytesCopied, res.BytesCopied, 0)
+	}
+	return nil
+}
+
+// MapExtractRunner extracts country or world PMTiles archives from Protomaps builds via go-pmtiles.
+type MapExtractRunner struct {
+	MetadataURL string
+}
+
+// NewMapExtractRunner creates a MapExtractRunner pointing at Protomaps public build metadata.
+func NewMapExtractRunner() *MapExtractRunner {
+	return &MapExtractRunner{
+		MetadataURL: "https://build-metadata.protomaps.dev/builds.json",
+	}
+}
+
+// Run resolves the latest Protomaps build key and extracts the requested country/world bbox into mapsDir.
+func (r *MapExtractRunner) Run(ctx context.Context, job *Job, progress ProgressFunc) error {
+	meta := ParseMetadata(job.Metadata)
+	outDir := meta.OutputDir
+	if outDir == "" {
+		outDir = filepath.Join(".", "data", "maps")
+	}
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return fmt.Errorf("create maps dir: %w", err)
+	}
+
+	opt := kiwix.FindCountryMapBySlug(job.Target)
+	if opt == nil {
+		return fmt.Errorf("unknown map extract slug: %s", job.Target)
+	}
+
+	if progress != nil {
+		progress(5, "Resolving latest Protomaps build...", 0, 0, 0)
+	}
+	buildKey, err := r.latestBuildKey(ctx)
+	if err != nil {
+		return err
+	}
+	remoteURL := "https://build.protomaps.com/" + strings.TrimPrefix(buildKey, "/")
+	outFile := opt.Slug + ".pmtiles"
+
+	if progress != nil {
+		progress(15, fmt.Sprintf("Extracting %s (%s) via go-pmtiles...", opt.Name, opt.SizeEstimate), 0, 0, 0)
+	}
+
+	absOutDir, _ := filepath.Abs(outDir)
+	args := []string{
+		"extract", remoteURL, outFile,
+		"--bbox=" + opt.BBox,
+		fmt.Sprintf("--maxzoom=%d", opt.MaxZoom),
+	}
+
+	var cmd *exec.Cmd
+	if bin, lookErr := exec.LookPath("go-pmtiles"); lookErr == nil {
+		args[1] = remoteURL
+		args[2] = filepath.Join(absOutDir, outFile)
+		cmd = exec.CommandContext(ctx, bin, args...)
+	} else {
+		dockerArgs := []string{
+			"run", "--rm",
+			"-v", absOutDir + ":/data",
+			"ghcr.io/protomaps/go-pmtiles:latest",
+			"extract", remoteURL, "/data/" + outFile,
+			"--bbox=" + opt.BBox,
+			fmt.Sprintf("--maxzoom=%d", opt.MaxZoom),
+		}
+		cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go-pmtiles extract failed: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+
+	if progress != nil {
+		progress(100, "Saved "+outFile, 0, 0, 0)
+	}
+	return nil
+}
+
+func (r *MapExtractRunner) latestBuildKey(ctx context.Context) (string, error) {
+	metaURL := r.MetadataURL
+	if metaURL == "" {
+		metaURL = "https://build-metadata.protomaps.dev/builds.json"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := sharedProtomapsClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch protomaps builds: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("protomaps metadata status %d", resp.StatusCode)
+	}
+
+	var builds []struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&builds); err != nil {
+		return "", err
+	}
+	if len(builds) == 0 {
+		return "", fmt.Errorf("no protomaps builds returned")
+	}
+	return builds[len(builds)-1].Key, nil
 }

@@ -169,11 +169,7 @@
       .catch(function() {});
   }
 
-  function escapeHTML(str) {
-    return String(str || '').replace(/[&<>"']/g, function(c) {
-      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
-    });
-  }
+  var escapeHTML = window.arkEscapeHTML;
 
   if (aiBtn) aiBtn.addEventListener('click', function() {
     if (!activeTile) return;
@@ -362,11 +358,7 @@ function checkZimUpdates() {
         body.textContent = 'No .zim files installed in data/zim/ yet.';
         return;
       }
-      var esc = function(s) {
-        return String(s || '').replace(/[&<>"']/g, function(c) {
-          return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
-        });
-      };
+      var esc = window.arkEscapeHTML;
       var html = '<div style="display:flex;flex-direction:column;gap:0.5rem;">';
       items.forEach(function(it) {
         if (it.has_update) {

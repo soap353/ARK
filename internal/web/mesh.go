@@ -1,3 +1,4 @@
+// Offline LoRa mesh radio page (/mesh), message persistence, and serial/USB device status APIs.
 package web
 
 import (

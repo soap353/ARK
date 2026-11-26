@@ -6,14 +6,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,42 +97,7 @@ func TestOpenAICompatibleClient(t *testing.T) {
 	}
 }
 
-func TestQdrantAndIndexerPipeline(t *testing.T) {
-	var upsertedCount int32
-	var deletedCalled int32
-	qdrantSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/collections":
-			_, _ = w.Write([]byte(`{"result":{"collections":[]}}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/collections/ark_knowledge":
-			http.NotFound(w, r)
-		case r.Method == http.MethodPut && r.URL.Path == "/collections/ark_knowledge":
-			_, _ = w.Write([]byte(`{"result":true}`))
-		case r.Method == http.MethodPut && r.URL.Path == "/collections/ark_knowledge/points":
-			var body struct {
-				Points []VectorPoint `json:"points"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			atomic.AddInt32(&upsertedCount, int32(len(body.Points)))
-			_, _ = w.Write([]byte(`{"result":{"status":"completed"}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/collections/ark_knowledge/points/delete":
-			atomic.AddInt32(&deletedCalled, 1)
-			_, _ = w.Write([]byte(`{"result":{"status":"completed"}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/collections/ark_knowledge/points/search":
-			_, _ = w.Write([]byte(`{"result":[{"id":"1","score":0.95,"payload":{"source_path":"guide.html","title":"Water Purification","text":"Boil water for 1 minute.","chunk_index":0}}]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer qdrantSrv.Close()
-
-	aiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.25,0.5,0.75]}]}`))
-	}))
-	defer aiSrv.Close()
-
+func TestSQLiteIndexerAndSearchPipeline(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -148,21 +111,19 @@ func TestQdrantAndIndexerPipeline(t *testing.T) {
 		t.Fatalf("write html: %v", err)
 	}
 
-	conn := Conn{BaseURL: aiSrv.URL, EmbedModel: "nomic-embed-text"}
-	qdrant := NewQdrantClient(qdrantSrv.URL)
 	ctx := context.Background()
 
-	// 1. Index file
-	n, err := IndexSource(ctx, db, conn, qdrant, DefaultCollection, "html", htmlPath, "", nil)
+	// 1. Index file natively into SQLite + FTS5
+	n, err := IndexSource(ctx, db, Conn{}, "html", htmlPath, "", nil)
 	if err != nil {
 		t.Fatalf("IndexSource failed: %v", err)
 	}
-	if n != 1 || atomic.LoadInt32(&upsertedCount) != 1 {
-		t.Fatalf("expected 1 indexed & upserted chunk, got n=%d upserted=%d", n, atomic.LoadInt32(&upsertedCount))
+	if n != 1 {
+		t.Fatalf("expected 1 indexed chunk, got n=%d", n)
 	}
 
 	// 2. Second run with same file content skips cleanly (incremental hashing)
-	n2, err := IndexSource(ctx, db, conn, qdrant, DefaultCollection, "html", htmlPath, "", nil)
+	n2, err := IndexSource(ctx, db, Conn{}, "html", htmlPath, "", nil)
 	if err != nil {
 		t.Fatalf("second IndexSource failed: %v", err)
 	}
@@ -170,8 +131,8 @@ func TestQdrantAndIndexerPipeline(t *testing.T) {
 		t.Errorf("expected 0 re-indexed chunks for unchanged file, got %d", n2)
 	}
 
-	// 3. Vector search hits Qdrant
-	hits, err := SearchKnowledge(ctx, db, conn, qdrant, DefaultCollection, "how to boil water", 3)
+	// 3. FTS5 search finds the indexed article
+	hits, err := SearchKnowledge(ctx, db, "disinfect water", 3)
 	if err != nil || len(hits) == 0 {
 		t.Fatalf("SearchKnowledge failed: err=%v hits=%v", err, hits)
 	}
@@ -179,22 +140,17 @@ func TestQdrantAndIndexerPipeline(t *testing.T) {
 		t.Errorf("unexpected hit title: %q", hits[0].Title)
 	}
 
-	// 4. Local SQLite keyword fallback works when Qdrant/AI are offline
-	hitsLocal, err := SearchKnowledge(ctx, db, Conn{}, nil, DefaultCollection, "disinfect water", 3)
-	if err != nil || len(hitsLocal) == 0 {
-		t.Fatalf("local fallback SearchKnowledge failed: err=%v hits=%v", err, hitsLocal)
-	}
-
-	// 5. Remove document cleans DB and Qdrant
+	// 4. Remove document cleans rag_documents, rag_chunks, and rag_fts
 	docs, err := ListDocuments(ctx, db)
 	if err != nil || len(docs) != 1 {
 		t.Fatalf("expected 1 indexed doc, got %d (err=%v)", len(docs), err)
 	}
-	if err := RemoveDocument(ctx, db, qdrant, docs[0].ID); err != nil {
+	if err := RemoveDocument(ctx, db, docs[0].ID); err != nil {
 		t.Fatalf("RemoveDocument failed: %v", err)
 	}
-	if atomic.LoadInt32(&deletedCalled) == 0 {
-		t.Errorf("expected Qdrant delete to be called")
+	docsAfter, err := ListDocuments(ctx, db)
+	if err != nil || len(docsAfter) != 0 {
+		t.Errorf("expected 0 docs after RemoveDocument, got %d (err=%v)", len(docsAfter), err)
 	}
 }
 
@@ -292,7 +248,7 @@ func TestNativeZIMAndEPUBExtractionAndFTSSearch(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	n, err := IndexSource(ctx, db, Conn{}, nil, DefaultCollection, "zim", zimPath, "", nil)
+	n, err := IndexSource(ctx, db, Conn{}, "zim", zimPath, "", nil)
 	if err != nil || n < 2 {
 		t.Fatalf("IndexSource zim failed: n=%d err=%v", n, err)
 	}
@@ -302,7 +258,7 @@ func TestNativeZIMAndEPUBExtractionAndFTSSearch(t *testing.T) {
 		t.Fatalf("expected 1 archive rag_documents row, got %+v (err=%v)", docs, err)
 	}
 
-	hits, err := SearchKnowledge(ctx, db, Conn{}, nil, DefaultCollection, "Alexander Fleming antibiotic", 3)
+	hits, err := SearchKnowledge(ctx, db, "Alexander Fleming antibiotic", 3)
 	if err != nil || len(hits) == 0 || !strings.Contains(hits[0].Title, "Penicillin") {
 		t.Fatalf("expected FTS5 hit on Penicillin, got err=%v hits=%+v", err, hits)
 	}
@@ -319,20 +275,20 @@ func TestNativeZIMAndEPUBExtractionAndFTSSearch(t *testing.T) {
 	_ = zw.Close()
 	_ = ef.Close()
 
-	n2, err := IndexSource(ctx, db, Conn{}, nil, DefaultCollection, "epub", epubPath, "", nil)
+	n2, err := IndexSource(ctx, db, Conn{}, "epub", epubPath, "", nil)
 	if err != nil || n2 < 1 {
 		t.Fatalf("IndexSource epub failed: n=%d err=%v", n2, err)
 	}
 
-	hits2, err := SearchKnowledge(ctx, db, Conn{}, nil, DefaultCollection, "semiconductor bandgap photovoltaic", 3)
+	hits2, err := SearchKnowledge(ctx, db, "semiconductor bandgap photovoltaic", 3)
 	if err != nil || len(hits2) == 0 || !strings.Contains(hits2[0].Title, "Solar Geometry") {
 		t.Fatalf("expected FTS5 hit on Solar Geometry, got err=%v hits=%+v", err, hits2)
 	}
 
-	if err := RemoveDocument(ctx, db, nil, docs[0].ID); err != nil {
+	if err := RemoveDocument(ctx, db, docs[0].ID); err != nil {
 		t.Fatalf("RemoveDocument failed: %v", err)
 	}
-	hitsAfter, _ := SearchKnowledge(ctx, db, Conn{}, nil, DefaultCollection, "Fleming penicillin", 3)
+	hitsAfter, _ := SearchKnowledge(ctx, db, "Fleming penicillin", 3)
 	if len(hitsAfter) != 0 {
 		t.Errorf("expected removed ZIM FTS entries to disappear, got %+v", hitsAfter)
 	}

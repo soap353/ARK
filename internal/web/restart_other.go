@@ -1,5 +1,6 @@
 //go:build !windows
 
+// Starts self-restarted Ark processes in a fresh POSIX session.
 package web
 
 import (

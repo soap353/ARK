@@ -1,9 +1,14 @@
+// Package web implements the Ark Command Center HTTP server, web templates,
+// API handlers, security middleware, LAN peer discovery, and offline viewers
+// (ZIM, PMTiles maps, OPDS, LAN Drop, Mesh, and Ask AI).
 package web
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -292,7 +297,7 @@ func NewServer(db *sql.DB, dataDir string) (*Server, error) {
 		templates:      tmplMap,
 		proxy:          apps.NewProxyManager(),
 		sessionStart:   time.Now().UTC().Truncate(time.Second),
-		instanceID:     generateInstanceID(),
+		instanceID:     "ark-" + randomHex(8),
 		lanRateLimiter: newIPRateLimiter(),
 		pinFailLimiter: newIPRateLimiter(),
 	}
@@ -1600,37 +1605,42 @@ func (s *Server) fetchRecentSessionJobs(maxCompleted int) []JobView {
 	return jobsList
 }
 
-func (s *Server) fetchLibraryItems() []LibraryItemView {
-	if s.db == nil {
-		return nil
+func randomHex(numBytes int) string {
+	b := make([]byte, numBytes)
+	if _, err := rand.Read(b); err == nil {
+		return hex.EncodeToString(b)
 	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
 
-	rows, err := s.db.Query(`
-		SELECT title, category, size_bytes, date
-		FROM catalog_items
-		WHERE is_downloaded = 1
-		ORDER BY title ASC
-	`)
-	if err != nil {
-		return nil
+// requireMethod ensures the request uses the expected HTTP method, writing 405 otherwise.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method != method {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return false
 	}
-	defer rows.Close()
+	return true
+}
 
-	var items []LibraryItemView
-	for rows.Next() {
-		var title, category, date string
-		var sizeBytes int64
-		if err := rows.Scan(&title, &category, &sizeBytes, &date); err == nil {
-			items = append(items, LibraryItemView{
-				Title:    title,
-				Category: category,
-				Size:     fmt.Sprintf("%.1f GB", float64(sizeBytes)/(1024*1024*1024)),
-				Date:     date,
-				OpenURL:  "#",
-			})
-		}
+// writeJSON serializes v as JSON with the given HTTP status code.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeJSONError writes a JSON object containing an "error" message with the given status code.
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// redirectWithQuery redirects the client with 303 See Other and an escaped query parameter.
+func redirectWithQuery(w http.ResponseWriter, r *http.Request, basePath, key, value string) {
+	sep := "?"
+	if strings.Contains(basePath, "?") {
+		sep = "&"
 	}
-	return items
+	http.Redirect(w, r, basePath+sep+key+"="+url.QueryEscape(value), http.StatusSeeOther)
 }
 
 func isLocalRequest(r *http.Request) bool {

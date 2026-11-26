@@ -1,3 +1,6 @@
+// Command ark launches the Ark Offline Command Center: initializing SQLite,
+// registering background job runners, starting the local HTTP/HTTPS web UI,
+// syncing catalog containers, and coordinating clean shutdowns.
 package main
 
 import (
@@ -351,7 +354,7 @@ func runServer(args []string) {
 	_ = jobStore.ResetStaleRunning(context.Background())
 	_ = jobStore.ClearCompleted(context.Background())
 	queueMgr := jobs.NewQueueManager(jobStore, jobs.DefaultQueueConfig())
-	queueMgr.RegisterRunner(jobs.TypeIndex, &ai.IndexJobRunner{DB: db, QdrantURL: "http://127.0.0.1:6333"})
+	queueMgr.RegisterRunner(jobs.TypeIndex, &ai.IndexJobRunner{DB: db})
 	queueMgr.RegisterRunner(jobs.TypeOllamaPull, &ai.OllamaPullRunner{})
 	queueMgr.RegisterRunner(jobs.TypeUSB, jobs.NewUSBRunner(dataDir, func(ctx context.Context, imageNames []string, out io.Writer) error {
 		if dockerCli == nil {

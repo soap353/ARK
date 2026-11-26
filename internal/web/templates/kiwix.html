@@ -94,11 +94,7 @@
 var kxOffset = 0;
 var kxLimit = 25;
 
-function escHTML(s) {
-  var d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
+var escHTML = window.arkEscapeHTML;
 
 function resetAndFetchKiwix() {
   kxOffset = 0;

@@ -259,6 +259,12 @@
         });
     }
 
+    window.arkEscapeHTML = function(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+      });
+    };
+
     document.addEventListener('submit', function(ev) {
       var form = ev.target;
       if (!form || form.tagName !== 'FORM') return;

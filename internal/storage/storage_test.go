@@ -4,11 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -119,22 +116,12 @@ func TestCascadeDelete(t *testing.T) {
 	// Seed rag_documents
 	_, _ = db.Exec(`
 		INSERT INTO rag_documents (id, source_type, source_path, title, qdrant_collection)
-		VALUES ('rag-1', 'zim', ?, 'WikiMed Articles', 'medical_coll')
+		VALUES ('rag-1', 'zim', ?, 'WikiMed Articles', '')
 	`, "zim/med.zim")
-
-	// Mock Qdrant server
-	var qdrantCalled int32
-	qdrantServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&qdrantCalled, 1)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"result":{"status":"acknowledged"}}`))
-	}))
-	defer qdrantServer.Close()
 
 	cfg := DeleteCascadeConfig{
 		DataDir:        dataDir,
 		LibraryXMLPath: libraryXMLPath,
-		QdrantURL:      qdrantServer.URL,
 		DB:             db,
 	}
 
@@ -157,12 +144,7 @@ func TestCascadeDelete(t *testing.T) {
 		t.Errorf("Expected zim file to be removed from disk")
 	}
 
-	// 2. Qdrant mock must have been called
-	if atomic.LoadInt32(&qdrantCalled) == 0 {
-		t.Errorf("Expected Qdrant points delete endpoint to be called")
-	}
-
-	// 3. USB profile must have removed med-123
+	// 2. USB profile must have removed med-123
 	var updatedConfig string
 	_ = db.QueryRow("SELECT config_json FROM usb_profiles WHERE id = 'usb-1'").Scan(&updatedConfig)
 	if fmt.Sprintf("%v", updatedConfig) == `{"items":["med-123","maps/offline.pmtiles"]}` {

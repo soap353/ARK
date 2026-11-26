@@ -165,9 +165,7 @@
     });
   }
 
-  function escHtml(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-  }
+  var escHtml = window.arkEscapeHTML;
 
   function badgeClass(cat) {
     if (cat === 'Alert') return 'badge-warning';

@@ -1,3 +1,5 @@
+// Package ai provides Ark's offline AI features: OpenAI/Ollama client calls,
+// native document text extraction, SQLite FTS5 knowledge indexing, and chat session storage.
 package ai
 
 import (
@@ -18,7 +20,17 @@ import (
 	"ark/internal/jobs"
 )
 
-// RAGDocument tracks an indexed source in SQLite.
+// ScoredPoint represents a matched text chunk returned from SQLite knowledge search.
+type ScoredPoint struct {
+	ID         string  `json:"id"`
+	Score      float32 `json:"score"`
+	SourcePath string  `json:"source_path"`
+	Title      string  `json:"title"`
+	Text       string  `json:"text"`
+	ChunkIndex int     `json:"chunk_index"`
+}
+
+// RAGDocument tracks an indexed source file or archive in SQLite.
 type RAGDocument struct {
 	ID               string `json:"id"`
 	SourceType       string `json:"source_type"`
@@ -31,7 +43,7 @@ type RAGDocument struct {
 	IndexedAt        string `json:"indexed_at"`
 }
 
-// EnsureSchema ensures RAG metadata and local keyword-fallback chunk tables exist.
+// EnsureSchema ensures the SQLite RAG metadata, chunk, and FTS5 tables exist.
 func EnsureSchema(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return nil
@@ -206,20 +218,16 @@ func hashText(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func deterministicUUID(seed string) string {
+func deterministicChunkID(seed string) string {
 	sum := sha256.Sum256([]byte(seed))
-	// Format first 16 bytes as UUIDv4-like hex for Qdrant compatibility
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
-// IndexSource extracts, chunks, optionally embeds into Qdrant, and records the document in SQLite.
-func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClient, collection, sourceType, sourcePath, titleOverride string, progress func(float64, string)) (int, error) {
+// IndexSource extracts text from sourcePath, splits it into chunks, and indexes them in SQLite + FTS5.
+func IndexSource(ctx context.Context, db *sql.DB, conn Conn, sourceType, sourcePath, titleOverride string, progress func(float64, string)) (int, error) {
 	if err := EnsureSchema(ctx, db); err != nil {
 		return 0, err
-	}
-	if collection == "" {
-		collection = DefaultCollection
 	}
 	if sourceType == "" {
 		sourceType = strings.TrimPrefix(strings.ToLower(filepath.Ext(sourcePath)), ".")
@@ -236,9 +244,9 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 		return 0, err
 	}
 
-	// Archive path for ZIM/EPUB containers so single-article archives still record archive-level source_path.
+	// Multi-page ZIM/EPUB archives record one archive-level row in rag_documents.
 	if len(docs) > 1 || strings.EqualFold(filepath.Ext(sourcePath), ".zim") || strings.EqualFold(filepath.Ext(sourcePath), ".epub") {
-		return indexArchiveDocs(ctx, db, conn, qdrant, collection, sourceType, sourcePath, titleOverride, docs, progress)
+		return indexArchiveDocs(ctx, db, sourceType, sourcePath, titleOverride, docs, progress)
 	}
 
 	totalChunks := 0
@@ -257,7 +265,7 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 		docID := "rag-" + hashText(doc.Path)[:16]
 		docHash := hashText(doc.Text)
 
-		// Incremental check: skip if identical content hash already indexed
+		// Skip re-indexing when the extracted content hash matches what is already in SQLite.
 		var existingHash string
 		err := db.QueryRowContext(ctx, `SELECT content_hash FROM rag_chunks WHERE doc_id = ? LIMIT 1`, docID).Scan(&existingHash)
 		if err == nil && existingHash == docHash {
@@ -269,33 +277,15 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 			continue
 		}
 
-		// Compute embeddings if embedding model and Qdrant are available
-		var embeddings [][]float32
-		if conn.BaseURL != "" && conn.EmbedModel != "" && qdrant != nil && qdrant.IsHealthy(ctx) {
-			if progress != nil {
-				progress(40.0, fmt.Sprintf("Embedding %d chunk(s)...", len(chunks)))
-			}
-			embs, embErr := conn.Embed(ctx, chunks)
-			if embErr == nil && len(embs) == len(chunks) && len(embs[0]) > 0 {
-				if err := qdrant.EnsureCollection(ctx, collection, len(embs[0])); err == nil {
-					embeddings = embs
-				}
-			}
-		}
-
 		tx, txErr := db.BeginTx(ctx, nil)
 		if txErr != nil {
 			return totalChunks, txErr
 		}
 		_, _ = tx.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
 		_, _ = tx.ExecContext(ctx, `DELETE FROM rag_fts WHERE doc_id = ?`, docID)
-		if qdrant != nil {
-			_ = qdrant.DeleteBySource(ctx, collection, doc.Path)
-		}
 
-		var points []VectorPoint
 		for ci, chunkText := range chunks {
-			chunkID := deterministicUUID(fmt.Sprintf("%s#%d", doc.Path, ci))
+			chunkID := deterministicChunkID(fmt.Sprintf("%s#%d", doc.Path, ci))
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO rag_chunks (id, doc_id, source_path, title, chunk_index, content, content_hash, embed_model)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -307,39 +297,17 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 				INSERT INTO rag_fts (chunk_id, doc_id, source_path, title, content)
 				VALUES (?, ?, ?, ?, ?)
 			`, chunkID, docID, doc.Path, docTitle, chunkText)
-
-			if len(embeddings) == len(chunks) {
-				points = append(points, VectorPoint{
-					ID:     chunkID,
-					Vector: embeddings[ci],
-					Payload: map[string]any{
-						"doc_id":      docID,
-						"source_path": doc.Path,
-						"title":       docTitle,
-						"chunk_index": ci,
-						"text":        chunkText,
-					},
-				})
-			}
 			totalChunks++
-		}
-
-		if len(points) > 0 && qdrant != nil {
-			if err := qdrant.Upsert(ctx, collection, points); err != nil {
-				_ = tx.Rollback()
-				return totalChunks, err
-			}
 		}
 
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO rag_documents (id, source_type, source_path, title, indexed_pages, qdrant_collection, indexed_at)
-			VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			VALUES (?, ?, ?, ?, ?, '', CURRENT_TIMESTAMP)
 			ON CONFLICT(id) DO UPDATE SET
 				title = excluded.title,
 				indexed_pages = excluded.indexed_pages,
-				qdrant_collection = excluded.qdrant_collection,
 				indexed_at = CURRENT_TIMESTAMP
-		`, docID, sourceType, doc.Path, docTitle, len(chunks), collection)
+		`, docID, sourceType, doc.Path, docTitle, len(chunks))
 		if err != nil {
 			_ = tx.Rollback()
 			return totalChunks, err
@@ -360,7 +328,7 @@ func IndexSource(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClien
 	return totalChunks, nil
 }
 
-func indexArchiveDocs(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClient, collection, sourceType, sourcePath, titleOverride string, docs []ExtractedDoc, progress func(float64, string)) (int, error) {
+func indexArchiveDocs(ctx context.Context, db *sql.DB, sourceType, sourcePath, titleOverride string, docs []ExtractedDoc, progress func(float64, string)) (int, error) {
 	docID := "rag-" + hashText(sourcePath)[:16]
 	archiveTitle := strings.TrimSpace(titleOverride)
 	if archiveTitle == "" {
@@ -429,7 +397,7 @@ func indexArchiveDocs(ctx context.Context, db *sql.DB, conn Conn, qdrant *Qdrant
 		displayTitle := itemTitle + " (" + archiveTitle + ")"
 		chunks := ChunkText(doc.Text, 3200, 300)
 		for ci, chunkText := range chunks {
-			chunkID := deterministicUUID(fmt.Sprintf("%s#%s#%d", sourcePath, doc.Path, ci))
+			chunkID := deterministicChunkID(fmt.Sprintf("%s#%s#%d", sourcePath, doc.Path, ci))
 			if _, err := stmtChunk.ExecContext(ctx, chunkID, docID, doc.Path, displayTitle, totalChunks, chunkText, archiveHash); err != nil {
 				_ = tx.Rollback()
 				return totalChunks, err
@@ -444,13 +412,12 @@ func indexArchiveDocs(ctx context.Context, db *sql.DB, conn Conn, qdrant *Qdrant
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO rag_documents (id, source_type, source_path, title, indexed_pages, qdrant_collection, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		VALUES (?, ?, ?, ?, ?, '', CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			indexed_pages = excluded.indexed_pages,
-			qdrant_collection = excluded.qdrant_collection,
 			indexed_at = CURRENT_TIMESTAMP
-	`, docID, sourceType, sourcePath, archiveTitle, totalChunks, collection)
+	`, docID, sourceType, sourcePath, archiveTitle, totalChunks)
 	if err != nil {
 		_ = tx.Rollback()
 		return totalChunks, err
@@ -464,28 +431,11 @@ func indexArchiveDocs(ctx context.Context, db *sql.DB, conn Conn, qdrant *Qdrant
 	return totalChunks, nil
 }
 
-// SearchKnowledge performs Qdrant vector search when available and falls back to
-// SQLite keyword scoring over rag_chunks when Qdrant or embeddings are offline.
-func SearchKnowledge(ctx context.Context, db *sql.DB, conn Conn, qdrant *QdrantClient, collection, query string, topK int) ([]ScoredPoint, error) {
+// SearchKnowledge runs fast SQLite FTS5 BM25 search (with a keyword scan fallback) over indexed chunks.
+func SearchKnowledge(ctx context.Context, db *sql.DB, query string, topK int) ([]ScoredPoint, error) {
 	if topK <= 0 {
 		topK = 5
 	}
-	if collection == "" {
-		collection = DefaultCollection
-	}
-
-	// 1. Try vector similarity search via Qdrant
-	if conn.BaseURL != "" && conn.EmbedModel != "" && qdrant != nil && qdrant.IsHealthy(ctx) {
-		vecs, err := conn.Embed(ctx, []string{query})
-		if err == nil && len(vecs) > 0 && len(vecs[0]) > 0 {
-			pts, err := qdrant.Search(ctx, collection, vecs[0], topK)
-			if err == nil && len(pts) > 0 {
-				return pts, nil
-			}
-		}
-	}
-
-	// 2. Local SQLite FTS5 search (handles tens of thousands of chunks in milliseconds)
 	if db == nil {
 		return nil, nil
 	}
@@ -618,15 +568,10 @@ func ListDocuments(ctx context.Context, db *sql.DB) ([]RAGDocument, error) {
 	return docs, nil
 }
 
-// RemoveDocument deletes an indexed document from SQLite and Qdrant.
-func RemoveDocument(ctx context.Context, db *sql.DB, qdrant *QdrantClient, docID string) error {
+// RemoveDocument deletes an indexed document and its chunks/FTS entries from SQLite.
+func RemoveDocument(ctx context.Context, db *sql.DB, docID string) error {
 	if db == nil {
 		return nil
-	}
-	var sourcePath, coll string
-	_ = db.QueryRowContext(ctx, `SELECT source_path, qdrant_collection FROM rag_documents WHERE id = ?`, docID).Scan(&sourcePath, &coll)
-	if qdrant != nil && sourcePath != "" {
-		_ = qdrant.DeleteBySource(ctx, coll, sourcePath)
 	}
 	_, _ = db.ExecContext(ctx, `DELETE FROM rag_fts WHERE doc_id = ?`, docID)
 	_, _ = db.ExecContext(ctx, `DELETE FROM rag_chunks WHERE doc_id = ?`, docID)
@@ -729,14 +674,12 @@ func LoadConnFromDB(ctx context.Context, db *sql.DB) Conn {
 
 // IndexJobRunner executes TypeIndex jobs queued through jobs.QueueManager.
 type IndexJobRunner struct {
-	DB        *sql.DB
-	QdrantURL string
+	DB *sql.DB
 }
 
 // Run implements jobs.Runner for TypeIndex background jobs.
 func (r *IndexJobRunner) Run(ctx context.Context, job *jobs.Job, progress jobs.ProgressFunc) error {
 	conn := LoadConnFromDB(ctx, r.DB)
-	qdrant := NewQdrantClient(r.QdrantURL)
 	meta := jobs.ParseMetadata(job.Metadata)
 	title := meta.FileName
 	sourceType := meta.Format
@@ -751,7 +694,7 @@ func (r *IndexJobRunner) Run(ctx context.Context, job *jobs.Job, progress jobs.P
 		}
 	}
 
-	_, err := IndexSource(ctx, r.DB, conn, qdrant, DefaultCollection, sourceType, job.Target, title, cb)
+	_, err := IndexSource(ctx, r.DB, conn, sourceType, job.Target, title, cb)
 	return err
 }
 

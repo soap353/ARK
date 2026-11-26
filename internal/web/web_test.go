@@ -1210,7 +1210,7 @@ func TestAskAttachmentsInlineLinksAndIndexedZIMToolbar(t *testing.T) {
 	_, _ = db.Exec(`INSERT INTO settings (key, value) VALUES ('ai_server_url', ?), ('ai_chat_model', 'test-vision')`, aiSrv.URL)
 
 	ctx := t.Context()
-	if _, err := ai.IndexSource(ctx, db, ai.Conn{}, nil, ai.DefaultCollection, "zim", zimPath, "", nil); err != nil {
+	if _, err := ai.IndexSource(ctx, db, ai.Conn{}, "zim", zimPath, "", nil); err != nil {
 		t.Fatalf("IndexSource zim: %v", err)
 	}
 

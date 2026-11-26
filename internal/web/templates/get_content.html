@@ -294,11 +294,7 @@ function selectCollectionTier(slug, btn) {
   if (typeof arkSyncDownloadButtons === 'function') arkSyncDownloadButtons();
 }
 
-function escapeHTML(str) {
-  var div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
+var escapeHTML = window.arkEscapeHTML;
 
 function searchKiwixCatalog() {
   var q = document.getElementById('kiwix-q').value.trim();

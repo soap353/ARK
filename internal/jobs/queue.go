@@ -1,3 +1,6 @@
+// Package jobs implements Ark's SQLite-backed background job queue,
+// worker concurrency semaphores, and runners for downloads, ZIM creation,
+// drug labels, USB export, map extraction, and Ollama pulls.
 package jobs
 
 import (
@@ -7,6 +10,47 @@ import (
 	"sync"
 	"time"
 )
+
+// Standard Job Types.
+const (
+	TypeDownload   = "download"
+	TypeEncode     = "encode"
+	TypeIndex      = "index"
+	TypeZim        = "zim"
+	TypePreset     = "preset"
+	TypeDrugLabels = "druglabels"
+	TypeUSB        = "usb"
+	TypeMapExtract = "map_extract"
+	TypeOllamaPull = "ollama_pull"
+)
+
+// Standard Job Statuses.
+const (
+	StatusPending   = "pending"
+	StatusRunning   = "running"
+	StatusDone      = "done"
+	StatusFailed    = "failed"
+	StatusPaused    = "paused"
+	StatusCancelled = "cancelled"
+)
+
+// Job represents a unit of background work tracked in SQLite.
+type Job struct {
+	ID              string     `json:"id"`
+	Type            string     `json:"type"`
+	Target          string     `json:"target"`
+	Status          string     `json:"status"`
+	Progress        float64    `json:"progress"` // 0.0 to 100.0
+	ProgressMsg     string     `json:"progress_msg"`
+	ErrorMsg        string     `json:"error_msg"`
+	BytesDownloaded int64      `json:"bytes_downloaded"`
+	TotalBytes      int64      `json:"total_bytes"`
+	ETASeconds      int        `json:"eta_seconds"`
+	Metadata        string     `json:"metadata"` // JSON payload
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
 
 // QueueConfig configures concurrency semaphores for job types.
 type QueueConfig struct {
