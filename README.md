@@ -8,59 +8,97 @@
   <strong>Self-hosted, offline-first knowledge hub for local networks and grid-down independence.</strong>
 </p>
 
-Ark runs as a single native Go binary (Windows & Linux) with zero external runtime dependencies. It packages offline encyclopedias, vector maps, medical references, local AI search, LAN file sharing, LoRa mesh messaging, and optional Docker apps behind a clean web interface.
+Ark runs natively as a single Go binary (Windows, Linux, and macOS) with SQLite WAL persistence and zero required external runtime dependencies. It brings together offline encyclopedias, vector maps, medical references, local AI search, field calculators, LAN file sharing, LoRa mesh messaging, and optional Docker/Podman apps behind a clean, responsive web interface.
 
 ---
 
-## Core Features
+## Key Features
 
-- **Offline Library & Native ZIM Reader**: Browse, search, and read Wikipedia, WikiMed, Project Gutenberg, iFixit, and other `.zim` archives natively with saved reader themes and Kiwix OPDS catalog downloads.
-- **Offline Vector Maps (`/maps`)**: Unified MapLibre + PMTiles v3 viewer with multi-region switching, country/state downloads, and persistent custom waypoints.
-- **Ask AI (`/ask`)**: Local OpenAI/Ollama-compatible RAG chat with live citations, direct ZIM/document/map links, and zero external APIs.
-- **Field Guide & Tools (`/field-guide`, `/tools`)**: Offline medical/remedy reference, unit/dosage/RF calculators, graphing calculator, and real-time celestial sky chart.
-- **LAN Drop, OPDS & Peer Sync (`/lan-drop`, `/opds`, `/library`)**: Local bulletin board and file drop, OPDS 1.2 feed for e-readers (KOReader, Calibre), and automatic UDP LAN discovery between Ark instances.
-- **LoRa Mesh Radio (`/mesh`)**: USB Serial and Web Bluetooth support for Meshtastic and MeshCore radios with live message feed and node telemetry.
-- **Optional Docker Apps (`/apps`)**: Isolated containers proxied under `/a/<id>/` (CyberChef, FlatNotes, ConvertX, FDA Drug Labels, Kolibri, LibreTranslate).
-- **LAN Security & Offline Updates**: Host-only admin controls, optional LAN passcode + IP allowlist, auto-generated self-signed HTTPS (`/tls/ark.crt`), sanitized USB export, and Ed25519-signed offline updates with automatic rollback.
+- **Global Home Search & Autocorrect (`/`)**: Live search (`/api/search`) across local Library titles, Calculators, installed & downloadable Vector Maps and waypoints, Field Guide remedies, LoRa Mesh nodes, LAN Drop bulletin posts, AI chat sessions, and FDA Drug Labels—complete with offline typo autocorrect and an exact-query toggle.
+- **Offline Library & Native ZIM Reader (`/library`, `/kiwix`, `/get-content`, `/read/zim/`)**: Pure-Go in-process ZIM reader (no Kiwix container needed) with live title suggestions, saved reader themes, Kiwix OPDS catalog & curated bundle downloads, and a topbar **Download** menu to export articles as **PDF** or standalone offline **HTML**.
+- **Offline Vector Maps (`/maps`)**: Native MapLibre GL + PMTiles v3 tile server supporting the world basemap (`z0-6`), regional/country extracts (`z0-12` to `z0-15`), all 50 US states at street & building detail (`z0-15`), a collapsible Download Maps picker, and persistent custom waypoints.
+- **Ask AI with SQLite RAG (`/ask`)**: Connects to any local OpenAI/Ollama-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) with pure-Go SQLite FTS5 indexing and retrieval (no Qdrant required), inline citations, direct ZIM/document/map links (`?ark_hl=`), vision model support, and pinnable chat sessions.
+- **Field Guide & Calculators / Celestial Tracker (`/field-guide`, `/tools`)**: Searchable offline home & natural remedy reference by symptom, condition, or ingredient, plus a unified calculator dropdown containing a Graphing Calculator, Dosage, Solar & Battery, Radio & Antenna, Coordinates & Bearing, Unit Converter, and real-time J2000 Celestial & Star Tracker.
+- **LAN Drop, OPDS & Peer Sync (`/lan-drop`, `/opds`, `/library`)**: Local bulletin board and file drop, an OPDS 1.2 XML feed for e-readers (KOReader, ReadEra, Calibre), and automatic UDP LAN peer discovery (plus manual peer hosts) to browse and pull archives between Ark instances.
+- **LoRa Mesh Radio (`/mesh`)**: Built-in USB Serial and Web Bluetooth LE support for Meshtastic (Protobuf) and MeshCore radios with a persistent SQLite message feed and node telemetry.
+- **Optional Containerized Apps (`/apps`)**: Isolated optional Docker/Podman apps proxied under `/a/<id>/` (ConvertX, Data Chef / CyberChef, Drug Labels, Flatnotes, Kolibri, LibreTranslate, plus optional `maps` tile container) with per-app RAM caps and an optional rootless Podman installer (`ark setup-runtime`) on Intel Linux.
+- **LAN Security, TLS & Offline Updates (`/settings`)**: Host-only admin routes, optional LAN passcode gating with an auto-managed trusted IP allowlist, CSRF origin checks, per-IP rate limiting, auto-generated self-signed HTTPS (`/tls/ark.crt`), sanitized USB archive export (`ark usb`), and Ed25519 + SHA-256 verified offline updates with automatic startup rollback (`ark update`, `ark rollback`).
+- **Selectable UI Color Palettes**: Switch themes anytime in Settings between **Field Almanac** (warm parchment & forest, default), **Expedition Topo Atlas** (crisp stone & signal orange), and **Nightwatch Console** (dark charcoal & amber).
 
 ---
 
 ## Quick Start
 
-### Release Binaries
-Prebuilt binaries are published on [GitHub Releases](https://github.com/soap353/ARK/releases) (`ark-windows-amd64.exe`, `ark-linux-amd64`, `ark-linux-arm64`, `ark-darwin-arm64`, plus `checksums.txt`).
+### Prebuilt Release Binaries
+
+Download prebuilt cross-platform binaries from [GitHub Releases](https://github.com/soap353/ARK/releases):
+
+- `ark-windows-amd64.exe`
+- `ark-linux-amd64`
+- `ark-linux-arm64`
+- `ark-darwin-arm64`
+- `checksums.txt` (SHA-256 verification)
 
 ### Build & Run from Source
-Requires [Go 1.27+](https://go.dev/) (and optionally Docker/Podman for containerized apps):
+
+Requires [Go 1.27+](https://go.dev/) (and optionally Docker or Podman only if you want to run containerized apps):
 
 ```bash
 git clone https://github.com/soap353/ARK.git
 cd ARK
 
+# Linux / macOS
+go build -o ark ./cmd/ark
+./ark run -data-dir ./data -port 8080
+
+# Windows (PowerShell)
 go build -o ark.exe ./cmd/ark
-./ark.exe run -data-dir ./data -port 8080
+.\ark.exe run -data-dir .\data -port 8080
 ```
 
 Open [http://localhost:8080](http://localhost:8080) in your browser.
+
+### CLI Commands & Flags
+
+```text
+ark [command] [options]
+```
+
+| Command | Purpose |
+|---|---|
+| `run` | Start the Ark Command Center natively on the host (default; no Docker required) |
+| `setup-runtime` | Download & configure rootless Podman on Intel Linux (optional, for containerized apps) |
+| `update` | Verify an Ed25519-signed offline bundle (`--from <path>`) and stage a binary/DB update |
+| `rollback` | Roll back to the previous Ark binary and SQLite database snapshot |
+| `usb` | Export selected content categories, sanitized config, and optional images (`--to <path>`) |
+| `move-data` | Relocate `ArkData` to a new path (`--to <path>`) with SHA-256 verification |
+| `uninstall` | Remove Ark containers, images, volumes, and optionally data (`--all`, `--keep-data`) |
+
+Common `run` flags: `-port` (default `8080`), `-data-dir` (auto-detects `./data` or `./ArkData`), `-no-browser`, `-foreground`, `-container`, `-no-container` (default).
 
 ---
 
 ## Architecture
 
+```text
+Browser / Phone / E-Reader / LoRa Radio (LAN)
+                     │
+                     ▼
+      Ark Command Center (:8080 / TLS)
+     Native Go 1.27 · SQLite WAL · FTS5
+                     │
+     ┌───────────────┼───────────────┐
+     ▼               ▼               ▼
+Native Engines   /a/<id>/        Job Queue
+(ZIM Reader,     App Proxy       (Downloads,
+ PMTiles Maps,   (Optional       AI Indexing,
+ Ask AI, Mesh)   Docker/Podman)  USB Export)
 ```
-Browser / Phone / E-Reader (LAN)
-               │
-               ▼
-   Ark Command Center (:8080)
- Native Go · SQLite WAL · TLS
-               │
-   ┌───────────┼───────────┐
-   ▼           ▼           ▼
-Native      /a/<id>/    Job Queue
-Readers     App Proxy   (Downloads,
-(ZIM, Maps, (Docker)    USB, Index)
- AI, Mesh)
-```
+
+For detailed documentation, see:
+
+- [Architecture & Per-File Reference](docs/ARCHITECTURE.md)
+- [System Requirements & Memory Profile](docs/SYSTEM_REQUIREMENTS.md)
 
 ---
 
