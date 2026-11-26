@@ -142,28 +142,28 @@
   <!-- Desmos-Style Bottom Collapsible Math Keypad -->
   <div id="gc-keypad" style="display:none;background:#EFEFEF;border-top:1px solid #D0D0D0;padding:0.6rem 0.75rem;">
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:0.35rem;max-width:860px;margin:0 auto;">
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('x')"><em>x</em></button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('y')"><em>y</em></button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^2')">a&sup2;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^')">a^b</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sqrt(')">&radic;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('abs(')">|a|</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('(')">(</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken(')')">)</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('<')">&lt;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('>')">&gt;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('=')">=</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sin(')">sin</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('cos(')">cos</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('tan(')">tan</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('ln(')">ln</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('log(')">log</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('pi')">&pi;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('e')">e</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('theta')">&theta;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('deriv(')">d/dx</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('integral(')">&int;</button>
-      <button type="button" class="btn" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('nCr(')">nCr</button>
+      <button type="button" class="btn" title="Variable x" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('x')"><em>x</em></button>
+      <button type="button" class="btn" title="Variable y" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('y')"><em>y</em></button>
+      <button type="button" class="btn" title="Square" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^2')">a&sup2;</button>
+      <button type="button" class="btn" title="Exponent" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('^')">a^b</button>
+      <button type="button" class="btn" title="Square Root" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sqrt(')">&radic;</button>
+      <button type="button" class="btn" title="Absolute Value" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('abs(')">|a|</button>
+      <button type="button" class="btn" title="Left Parenthesis" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('(')">(</button>
+      <button type="button" class="btn" title="Right Parenthesis" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken(')')">)</button>
+      <button type="button" class="btn" title="Less Than" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('<')">&lt;</button>
+      <button type="button" class="btn" title="Greater Than" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('>')">&gt;</button>
+      <button type="button" class="btn" title="Equals" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('=')">=</button>
+      <button type="button" class="btn" title="Sine" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('sin(')">sin</button>
+      <button type="button" class="btn" title="Cosine" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('cos(')">cos</button>
+      <button type="button" class="btn" title="Tangent" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('tan(')">tan</button>
+      <button type="button" class="btn" title="Natural Logarithm" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('ln(')">ln</button>
+      <button type="button" class="btn" title="Common Logarithm" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('log(')">log</button>
+      <button type="button" class="btn" title="Pi" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('pi')">&pi;</button>
+      <button type="button" class="btn" title="Euler's Number" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('e')">e</button>
+      <button type="button" class="btn" title="Theta" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('theta')">&theta;</button>
+      <button type="button" class="btn" title="Derivative" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('deriv(')">d/dx</button>
+      <button type="button" class="btn" title="Integral" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('integral(')">&int;</button>
+      <button type="button" class="btn" title="Combinations" style="min-height:34px;padding:0.2rem;background:#fff;font-size:13px;" onclick="gcInsertToken('nCr(')">nCr</button>
     </div>
   </div>
 </div>

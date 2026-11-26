@@ -3632,6 +3632,15 @@ func TestDownloadedListDeleteMapsAndCatalogCleanup(t *testing.T) {
 	if !strings.Contains(gridHTML, "<strong>United Kingdom</strong>") || !strings.Contains(gridHTML, "<strong>Alabama</strong>") || !strings.Contains(gridHTML, "Zoom 0&ndash;15") {
 		t.Errorf("expected #extract-grid to include area name and Zoom 0-15 range")
 	}
+	if !strings.Contains(mapsBody, "ark-popup-delete-btn") || !strings.Contains(mapsBody, `title="Delete pin"`) {
+		t.Errorf("expected /maps marker popup to include top-left minus delete button")
+	}
+	toolsBody := getPage("/tools")
+	for _, wantTip := range []string{`title="Square Root"`, `title="Absolute Value"`, `title="Derivative"`, `title="Integral"`, `title="Combinations"`, `title="Theta"`} {
+		if !strings.Contains(toolsBody, wantTip) {
+			t.Errorf("expected /tools graphing keypad to include tooltip %s", wantTip)
+		}
+	}
 
 	// 3. /system Downloaded Content list placed between Session Jobs and App Containers + confirmation dialog
 	sysBody := getPage("/system")

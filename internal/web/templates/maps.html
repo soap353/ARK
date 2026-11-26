@@ -170,8 +170,26 @@
     font-family: var(--font-base);
     color: var(--color-text-primary);
     border-radius: 8px;
-    padding: 0.75rem 0.9rem;
+    padding: 1.55rem 0.9rem 0.75rem;
     min-width: 195px;
+    position: relative;
+  }
+  .ark-popup-delete-btn {
+    position: absolute;
+    top: 4px;
+    left: 6px;
+    background: transparent;
+    border: none;
+    color: var(--color-error, #B91C1C);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .ark-popup-delete-btn:hover {
+    background: rgba(185, 28, 28, 0.1);
   }
 </style>
 
@@ -631,13 +649,13 @@
       el.title = pin.title;
 
       var popupHTML =
+        (window.ARK_IS_LOCAL ? '<button type="button" class="ark-popup-delete-btn" title="Delete pin" aria-label="Delete pin" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')">&minus;</button>' : '') +
         '<div style="font-weight:700;font-size:14px;margin-bottom:3px;">' + escapeHTML(pin.title) + '</div>' +
         '<div style="font-size:11px;color:#525B54;margin-bottom:5px;">' +
           escapeHTML(CATEGORY_LABELS[pin.category] || pin.category) + ' &bull; ' +
           pin.lat.toFixed(4) + ', ' + pin.lng.toFixed(4) +
         '</div>' +
-        (pin.note ? '<div style="font-size:12px;margin-bottom:6px;">' + escapeHTML(pin.note) + '</div>' : '') +
-        (window.ARK_IS_LOCAL ? '<button type="button" onclick="deletePinById(\'' + escapeHTML(pin.id) + '\')" style="background:#B91C1C;color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;">Remove</button>' : '');
+        (pin.note ? '<div style="font-size:12px;">' + escapeHTML(pin.note) + '</div>' : '');
 
       var popup = new maplibregl.Popup({ offset: 18, focusAfterOpen: false }).setHTML(popupHTML);
       var marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
