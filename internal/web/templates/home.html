@@ -6,11 +6,105 @@
 {{ end }}
 
 <section class="search-container" aria-label="Global offline search">
-  <form action="/library" method="GET" class="search-input-wrapper">
-    <input type="search" name="q" class="search-input" placeholder="Search offline library, Wikipedia, maps, medical labels..." autofocus aria-label="Global offline search query">
+  <form id="home-search-form" action="/" method="GET" class="search-input-wrapper">
+    <input type="search" id="home-search-input" name="q" class="search-input" placeholder="Search library titles, drug labels, AI chats, maps, mesh, calculators, bulletin, remedies..." autofocus aria-label="Global offline search query" autocomplete="off">
     <button type="submit" class="btn btn-primary search-submit-btn">Search</button>
   </form>
+  <div id="home-search-autocorrect" style="display:none;margin-top:0.65rem;font-size:14px;color:var(--color-text-secondary);"></div>
+  <div id="home-search-results" style="display:none;margin-top:0.85rem;display:none;flex-direction:column;gap:0.55rem;"></div>
 </section>
+
+<script>
+(function() {
+  var form = document.getElementById('home-search-form');
+  var input = document.getElementById('home-search-input');
+  var corrEl = document.getElementById('home-search-autocorrect');
+  var resEl = document.getElementById('home-search-results');
+  if (!form || !input || !resEl) return;
+
+  var esc = window.arkEscapeHTML;
+  var debounceTimer = null;
+  var activeReqId = 0;
+
+  function clearResults() {
+    if (corrEl) { corrEl.style.display = 'none'; corrEl.innerHTML = ''; }
+    resEl.style.display = 'none';
+    resEl.innerHTML = '';
+  }
+
+  function renderResults(q, data) {
+    var items = (data && data.results) || [];
+    if (corrEl) {
+      if (data && data.corrected_query) {
+        corrEl.style.display = 'block';
+        corrEl.innerHTML = 'Showing results for <strong>' + esc(data.corrected_query) + '</strong> &middot; <button type="button" id="home-search-exact-btn" style="background:none;border:none;padding:0;color:var(--color-accent);text-decoration:underline;cursor:pointer;font-size:inherit;">Search &ldquo;' + esc(q) + '&rdquo; instead</button>';
+        var exactBtn = document.getElementById('home-search-exact-btn');
+        if (exactBtn) {
+          exactBtn.addEventListener('click', function() { runSearch(q, true); });
+        }
+      } else {
+        corrEl.style.display = 'none';
+        corrEl.innerHTML = '';
+      }
+    }
+
+    resEl.style.display = 'flex';
+    if (items.length === 0) {
+      resEl.innerHTML = '<div class="card" style="margin-bottom:0;padding:1rem;color:var(--color-text-secondary);font-size:14px;">No matching items found for &ldquo;' + esc(q) + '&rdquo;.</div>';
+      return;
+    }
+
+    resEl.innerHTML = items.map(function(it) {
+      return '<a href="' + esc(it.url) + '" class="card" style="margin-bottom:0;padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;gap:0.75rem;text-decoration:none;color:inherit;">' +
+        '<div style="min-width:0;">' +
+          '<div style="font-weight:700;font-size:15px;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(it.title) + '</div>' +
+          (it.subtitle ? '<div class="secondary-text" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(it.subtitle) + '</div>' : '') +
+        '</div>' +
+        '<span class="badge" style="flex-shrink:0;font-size:11px;">' + esc(it.category) + '</span>' +
+      '</a>';
+    }).join('');
+  }
+
+  function runSearch(q, exact) {
+    q = (q || '').trim();
+    if (!q) {
+      clearResults();
+      return;
+    }
+    var reqId = ++activeReqId;
+    var url = '/api/search?q=' + encodeURIComponent(q) + (exact ? '&exact=1' : '');
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (reqId !== activeReqId) return;
+        renderResults(q, data);
+      })
+      .catch(function() {});
+  }
+
+  input.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    var v = input.value.trim();
+    if (!v) {
+      clearResults();
+      return;
+    }
+    debounceTimer = setTimeout(function() { runSearch(v, false); }, 140);
+  });
+
+  form.addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    clearTimeout(debounceTimer);
+    runSearch(input.value, false);
+  });
+
+  var initQ = new URLSearchParams(window.location.search).get('q');
+  if (initQ && initQ.trim()) {
+    input.value = initQ.trim();
+    runSearch(initQ.trim(), false);
+  }
+})();
+</script>
 
 <section aria-label="Installed applications">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">

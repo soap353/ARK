@@ -1,9 +1,10 @@
-﻿// Content & viewer handlers: Kiwix catalog, disk library scan & icons, Field Guide,
+// Content & viewer handlers: Kiwix catalog, disk library scan & icons, Field Guide,
 // Offline Maps viewer/extractor/pins, Tools, LAN Drop, and local OPDS feeds.
 package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -20,7 +21,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
+	"ark/internal/ai"
 	"ark/internal/fieldguide"
 	"ark/internal/jobs"
 	"ark/internal/kiwix"
@@ -1812,4 +1815,530 @@ func (s *Server) serveOPDSFile(w http.ResponseWriter, r *http.Request, relPath s
 		return
 	}
 	http.ServeFile(w, r, fullPath)
+}
+
+// ---------------------------------------------------------------------------
+// Global Home Search & Offline Autocorrect (/api/search)
+// ---------------------------------------------------------------------------
+
+// GlobalSearchResult represents one matched item across Ark's offline subsystems.
+type GlobalSearchResult struct {
+	Title    string `json:"title"`
+	Category string `json:"category"`
+	Subtitle string `json:"subtitle,omitempty"`
+	URL      string `json:"url"`
+	Score    int    `json:"score"`
+}
+
+type searchCandidate struct {
+	Category string
+	Title    string
+	Subtitle string
+	Extra    string // searchable metadata (keywords, filename, snippet)
+	URL      string
+	Bonus    int // tie-breaker preference (e.g. local/installed over downloadable)
+}
+
+var commonSearchVocabulary = []string{
+	"wikipedia", "wikibooks", "wikimed", "calculator", "calculators", "graphing",
+	"dosage", "solar", "battery", "radio", "antenna", "wavelength", "coordinates",
+	"bearing", "converter", "celestial", "constellation", "bulletin", "remedy",
+	"remedies", "medicine", "medical", "ibuprofen", "acetaminophen", "amoxicillin",
+	"aspirin", "bandage", "tourniquet", "dehydration", "hypothermia", "burn",
+	"fever", "shelter", "water", "mesh", "meshtastic", "lora", "waypoint", "maps",
+}
+
+func tokenizeSearchTerms(raw string) []string {
+	var out []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range strings.ToLower(raw) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+func levenshteinMax(a, b string, maxDist int) int {
+	ra, rb := []rune(a), []rune(b)
+	la, lb := len(ra), len(rb)
+	if la-lb > maxDist || lb-la > maxDist {
+		return maxDist + 1
+	}
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		rowMin := curr[0]
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			v := prev[j] + 1
+			if curr[j-1]+1 < v {
+				v = curr[j-1] + 1
+			}
+			if prev[j-1]+cost < v {
+				v = prev[j-1] + cost
+			}
+			curr[j] = v
+			if v < rowMin {
+				rowMin = v
+			}
+		}
+		if rowMin > maxDist {
+			return maxDist + 1
+		}
+		prev, curr = curr, prev
+	}
+	return prev[lb]
+}
+
+func (s *Server) collectGlobalSearchCandidates(ctx context.Context, rawQuery string) []searchCandidate {
+	var out []searchCandidate
+
+	// 1. Library item titles & metadata ONLY (never reads content inside files)
+	for _, it := range s.scanDiskLibraryItems("", "") {
+		out = append(out, searchCandidate{
+			Category: "Library",
+			Title:    it.Title,
+			Subtitle: strings.TrimSpace(it.Category + " · " + it.Size),
+			Extra:    it.FileName + " " + it.Category,
+			URL:      it.OpenURL,
+			Bonus:    10,
+		})
+	}
+
+	// 2. Calculators (/tools?calc=...)
+	for _, c := range []searchCandidate{
+		{Category: "Calculator", Title: "Graphing Calculator", Subtitle: "Plots equations, integrals, derivatives & tables", Extra: "graph math algebra sin cos tan derivative integral plot curve equation", URL: "/tools?calc=graph", Bonus: 12},
+		{Category: "Calculator", Title: "Dosage Calculator", Subtitle: "Weight-based mg/kg medication dosing helper", Extra: "dose medicine pill mg kg weight pediatric tablet liquid suspension", URL: "/tools?calc=dosage", Bonus: 12},
+		{Category: "Calculator", Title: "Solar & Battery Runtime", Subtitle: "Battery Wh, inverter efficiency & panel recharge estimator", Extra: "power watts amps volts lifepo4 lead acid runtime inverter backup", URL: "/tools?calc=solar", Bonus: 12},
+		{Category: "Calculator", Title: "Radio & Antenna Length", Subtitle: "Frequency, wavelength, half-wave dipole & whip length", Extra: "rf mhz ham gmrs frs cb murs vhf uhf dipole antenna wavelength", URL: "/tools?calc=radio", Bonus: 12},
+		{Category: "Calculator", Title: "Coordinates & Bearing", Subtitle: "Decimal degrees, DMS, UTM & great-circle bearing", Extra: "gps lat lng latitude longitude utm compass azimuth distance bearing navigation", URL: "/tools?calc=coords", Bonus: 12},
+		{Category: "Calculator", Title: "Unit Converter", Subtitle: "Temperature, weight, volume, distance, speed & pressure", Extra: "convert fahrenheit celsius miles kilometers pounds grams liters gallons psi bar", URL: "/tools?calc=units", Bonus: 12},
+		{Category: "Calculator", Title: "Celestial & Star Tracker", Subtitle: "Live sky dome, Sun, Moon phase, planets & compass", Extra: "sky stars constellations moon sun planets astronomy ephemeris night compass", URL: "/tools?calc=celestial", Bonus: 12},
+	} {
+		out = append(out, c)
+	}
+
+	// 3. Maps: installed archives + saved pins + downloadable countries & US states
+	installedStems := make(map[string]bool)
+	if entries, err := os.ReadDir(filepath.Join(s.dataDir, "maps")); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".pmtiles") {
+				continue
+			}
+			stem := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+			installedStems[strings.ToLower(stem)] = true
+			out = append(out, searchCandidate{
+				Category: "Map",
+				Title:    formatMapArchiveTitle(stem),
+				Subtitle: "Installed offline vector map",
+				Extra:    stem + " map tiles offline",
+				URL:      "/maps?place=" + url.QueryEscape(stem),
+				Bonus:    15,
+			})
+		}
+	}
+	for _, pin := range s.listMapPins() {
+		out = append(out, searchCandidate{
+			Category: "Map Pin",
+			Title:    pin.Title,
+			Subtitle: fmt.Sprintf("%s (%.4f, %.4f)", pin.Category, pin.Lat, pin.Lng),
+			Extra:    pin.Category + " " + pin.Note + " waypoint pin map",
+			URL:      fmt.Sprintf("/maps?lat=%f&lng=%f&zoom=14", pin.Lat, pin.Lng),
+			Bonus:    12,
+		})
+	}
+	for _, opt := range kiwix.GetCountryMapOptions() {
+		if installedStems[strings.ToLower(opt.Slug)] {
+			continue
+		}
+		out = append(out, searchCandidate{
+			Category: "Map Download",
+			Title:    opt.Name,
+			Subtitle: opt.Region + " · " + opt.SizeEstimate + " (available to download)",
+			Extra:    opt.Slug + " " + opt.Region + " map pmtiles",
+			URL:      "/maps#extract-maps",
+		})
+	}
+	for _, st := range kiwix.GetAllUSStateMaps() {
+		if installedStems[strings.ToLower(st.ID)] || installedStems[strings.ToLower(st.ID)+"_2025-12"] {
+			continue
+		}
+		out = append(out, searchCandidate{
+			Category: "Map Download",
+			Title:    st.Title + " Map (z0-15)",
+			Subtitle: fmt.Sprintf("US State · ~%d MB (available to download)", st.SizeMB),
+			Extra:    st.ID + " state us map pmtiles",
+			URL:      "/maps#extract-maps",
+		})
+	}
+
+	// 4. Remedies (/field-guide)
+	if guide, err := fieldguide.LoadGuide(); err == nil && guide != nil {
+		for _, r := range guide.Remedies {
+			conds := strings.Join(r.Conditions, " ")
+			names := strings.Join(r.CommonNames, ", ")
+			sub := r.Kind
+			if names != "" {
+				sub = names + " · " + r.Kind
+			}
+			out = append(out, searchCandidate{
+				Category: "Remedy",
+				Title:    r.Name,
+				Subtitle: sub,
+				Extra:    names + " " + conds + " " + r.Uses,
+				URL:      "/field-guide?q=" + url.QueryEscape(r.Name),
+				Bonus:    8,
+			})
+		}
+	}
+
+	// 5. Mesh Nodes (/mesh)
+	for _, n := range s.listMeshNodes() {
+		title := n.LongName
+		if title == "" {
+			title = n.ShortName
+		}
+		if title == "" {
+			title = n.NodeID
+		}
+		out = append(out, searchCandidate{
+			Category: "Mesh Node",
+			Title:    title,
+			Subtitle: strings.TrimSpace(n.ShortName + " · " + n.Protocol + " · " + n.NodeID),
+			Extra:    n.NodeID + " " + n.ShortName + " " + n.Hardware + " " + n.Protocol + " lora mesh",
+			URL:      "/mesh",
+			Bonus:    10,
+		})
+	}
+
+	// 6. Bulletin Entries (/lan-drop)
+	if s.isSettingEnabled("lan_drop_enabled", true) {
+		for _, p := range s.fetchLANDropPosts(120) {
+			title := strings.TrimSpace(p.Message)
+			if title == "" {
+				title = p.FileName
+			}
+			if len([]rune(title)) > 72 {
+				title = string([]rune(title)[:72]) + "..."
+			}
+			if title == "" {
+				continue
+			}
+			out = append(out, searchCandidate{
+				Category: "Bulletin",
+				Title:    title,
+				Subtitle: p.Category + " by " + p.Author + " · " + p.CreatedAt,
+				Extra:    p.Author + " " + p.Category + " " + p.Message + " " + p.FileName + " bulletin lan drop",
+				URL:      "/lan-drop",
+				Bonus:    8,
+			})
+		}
+	}
+
+	// 7. AI Chat Sessions (/ask?session=...)
+	if s.db != nil {
+		if err := ai.EnsureChatSchema(ctx, s.db); err == nil {
+			rows, qErr := s.db.QueryContext(ctx, `
+				SELECT s.id, s.title, COALESCE((SELECT m.content FROM ai_chat_messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.id ASC LIMIT 1), '')
+				FROM ai_chat_sessions s
+				ORDER BY s.pinned DESC, s.updated_at DESC
+				LIMIT 80
+			`)
+			if qErr == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var id, title, firstPrompt string
+					if rows.Scan(&id, &title, &firstPrompt) == nil {
+						if len([]rune(firstPrompt)) > 90 {
+							firstPrompt = string([]rune(firstPrompt)[:90]) + "..."
+						}
+						out = append(out, searchCandidate{
+							Category: "AI Chat",
+							Title:    title,
+							Subtitle: firstPrompt,
+							Extra:    firstPrompt + " ai chat ask",
+							URL:      "/ask?session=" + url.QueryEscape(id),
+							Bonus:    9,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// 8. Drug Labels (data/druglabels/druglabels.db)
+	dlPath := filepath.Join(s.dataDir, "druglabels", "druglabels.db")
+	if _, err := os.Stat(dlPath); err == nil {
+		dlRunning := false
+		if s.db != nil {
+			var st string
+			if s.db.QueryRow(`SELECT status FROM app_states WHERE id = 'druglabels'`).Scan(&st) == nil && st == "running" {
+				dlRunning = true
+			}
+		}
+		if dlDB, oErr := sql.Open("sqlite", dlPath+"?mode=ro&_busy_timeout=500"); oErr == nil {
+			defer dlDB.Close()
+			rows, dErr := dlDB.QueryContext(ctx, `
+				SELECT COALESCE(brand_name,''), COALESCE(generic_name,''), COALESCE(imprint,'')
+				FROM labels
+				WHERE brand_name != '' OR generic_name != ''
+				LIMIT 2500
+			`)
+			// shortcut: scans up to 2500 label headers for fuzzy vocabulary + fast in-process filtering; switch to FTS prefix if druglabels.db grows past 100k rows.
+			if dErr == nil {
+				defer rows.Close()
+				seenDrug := make(map[string]bool)
+				for rows.Next() {
+					var brand, generic, imprint string
+					if rows.Scan(&brand, &generic, &imprint) != nil {
+						continue
+					}
+					title := strings.TrimSpace(brand)
+					if title == "" {
+						title = strings.TrimSpace(generic)
+					}
+					if title == "" {
+						continue
+					}
+					key := strings.ToLower(title + "|" + generic)
+					if seenDrug[key] {
+						continue
+					}
+					seenDrug[key] = true
+					sub := "FDA Drug Label"
+					if generic != "" && !strings.EqualFold(title, generic) {
+						sub = "Generic: " + generic
+					}
+					if imprint != "" {
+						sub += " · Imprint: " + imprint
+					}
+					link := "/ask?q=" + url.QueryEscape(title+" dosage and warnings")
+					if dlRunning {
+						link = "/a/druglabels/?q=" + url.QueryEscape(title)
+					}
+					out = append(out, searchCandidate{
+						Category: "Drug Label",
+						Title:    title,
+						Subtitle: sub,
+						Extra:    brand + " " + generic + " " + imprint,
+						URL:      link,
+						Bonus:    9,
+					})
+				}
+			}
+		}
+		_ = rawQuery
+	}
+
+	return out
+}
+
+func scoreCandidateMatch(rawQuery string, qTokens []string, c searchCandidate) int {
+	if len(qTokens) == 0 {
+		return 0
+	}
+	qLower := strings.ToLower(strings.TrimSpace(rawQuery))
+	titleLow := strings.ToLower(c.Title)
+	extraLow := strings.ToLower(c.Subtitle + " " + c.Extra)
+	titleWords := tokenizeSearchTerms(c.Title)
+	allWords := append(titleWords, tokenizeSearchTerms(extraLow)...)
+
+	score := 0
+	if titleLow == qLower {
+		score += 140
+	} else if strings.HasPrefix(titleLow, qLower) {
+		score += 95
+	} else if strings.Contains(titleLow, qLower) {
+		score += 70
+	}
+
+	matchedTokens := 0
+	for _, qt := range qTokens {
+		if strings.Contains(titleLow, qt) {
+			matchedTokens++
+			score += 35
+			continue
+		}
+		if strings.Contains(extraLow, qt) {
+			matchedTokens++
+			score += 26
+			continue
+		}
+		// Require tight single-word similarity when substring isn't present.
+		if len([]rune(qt)) >= 4 {
+			maxD := 1
+			if len([]rune(qt)) >= 6 {
+				maxD = 2
+			}
+			bestDist := maxD + 1
+			for _, w := range allWords {
+				if d := levenshteinMax(qt, w, maxD); d < bestDist {
+					bestDist = d
+				}
+			}
+			if bestDist <= maxD {
+				matchedTokens++
+				score += 22 - bestDist*6
+			}
+		}
+	}
+
+	// Only return items where every meaningful query token matches (or strongly matches similar terms).
+	if matchedTokens < len(qTokens) {
+		return 0
+	}
+	return score + c.Bonus
+}
+
+func runCandidateSearch(rawQuery string, candidates []searchCandidate) []GlobalSearchResult {
+	tokens := tokenizeSearchTerms(rawQuery)
+	if len(tokens) == 0 {
+		return nil
+	}
+	var scored []GlobalSearchResult
+	for _, c := range candidates {
+		if sc := scoreCandidateMatch(rawQuery, tokens, c); sc > 0 {
+			scored = append(scored, GlobalSearchResult{
+				Title:    c.Title,
+				Category: c.Category,
+				Subtitle: c.Subtitle,
+				URL:      c.URL,
+				Score:    sc,
+			})
+		}
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].Score != scored[j].Score {
+			return scored[i].Score > scored[j].Score
+		}
+		return strings.ToLower(scored[i].Title) < strings.ToLower(scored[j].Title)
+	})
+
+	catCounts := make(map[string]int)
+	var final []GlobalSearchResult
+	for _, r := range scored {
+		if catCounts[r.Category] >= 4 {
+			continue
+		}
+		catCounts[r.Category]++
+		final = append(final, r)
+		if len(final) >= 25 {
+			break
+		}
+	}
+	return final
+}
+
+func autocorrectSearchQuery(rawQuery string, candidates []searchCandidate) string {
+	tokens := tokenizeSearchTerms(rawQuery)
+	if len(tokens) == 0 {
+		return ""
+	}
+	vocab := make(map[string]bool, 512)
+	for _, w := range commonSearchVocabulary {
+		vocab[w] = true
+	}
+	for _, c := range candidates {
+		for _, w := range tokenizeSearchTerms(c.Title + " " + c.Extra) {
+			if len([]rune(w)) >= 3 {
+				vocab[w] = true
+			}
+		}
+	}
+
+	corrected := make([]string, len(tokens))
+	changed := false
+	for i, qt := range tokens {
+		corrected[i] = qt
+		if vocab[qt] || len([]rune(qt)) < 4 {
+			continue
+		}
+		// Skip autocorrect if token is already a prefix of an indexed word.
+		hasPrefix := false
+		for w := range vocab {
+			if strings.HasPrefix(w, qt) {
+				hasPrefix = true
+				break
+			}
+		}
+		if hasPrefix {
+			continue
+		}
+		maxD := 1
+		if len([]rune(qt)) >= 6 {
+			maxD = 2
+		}
+		bestWord := ""
+		bestDist := maxD + 1
+		for w := range vocab {
+			d := levenshteinMax(qt, w, maxD)
+			if d <= maxD && (d < bestDist || (d == bestDist && len(w) > 0 && w[0] == qt[0])) {
+				bestDist = d
+				bestWord = w
+			}
+		}
+		if bestWord != "" && bestWord != qt {
+			corrected[i] = bestWord
+			changed = true
+		}
+	}
+	if !changed {
+		return ""
+	}
+	return strings.Join(corrected, " ")
+}
+
+func (s *Server) handleAPISearch(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	exact := r.URL.Query().Get("exact") == "1"
+	if q == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"query":   "",
+			"results": []GlobalSearchResult{},
+		})
+		return
+	}
+
+	candidates := s.collectGlobalSearchCandidates(r.Context(), q)
+	results := runCandidateSearch(q, candidates)
+	correctedQuery := ""
+
+	if !exact {
+		if cand := autocorrectSearchQuery(q, candidates); cand != "" {
+			corrResults := runCandidateSearch(cand, candidates)
+			if len(corrResults) > 0 && (len(results) == 0 || len(corrResults) > len(results) || corrResults[0].Score > results[0].Score) {
+				correctedQuery = cand
+				results = corrResults
+			}
+		}
+	}
+	if results == nil {
+		results = []GlobalSearchResult{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query":           q,
+		"corrected_query": correctedQuery,
+		"results":         results,
+	})
 }

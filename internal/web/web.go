@@ -422,6 +422,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("/api/jobs/delete", s.localOnly(s.handleAPIJobDelete))
 	mux.HandleFunc("/api/jobs/status", s.handleAPIJobStatus)
 	mux.HandleFunc("/api/kiwix/catalog", s.handleAPIKiwixCatalog)
+	mux.HandleFunc("/api/search", s.handleAPISearch)
 	mux.HandleFunc("/api/library/delete", s.localOnly(s.handleAPILibraryDelete))
 	mux.HandleFunc("/api/library/updates", s.localOnly(s.handleAPILibraryUpdates))
 	mux.HandleFunc("/api/library/icon", s.handleAPILibraryIcon)

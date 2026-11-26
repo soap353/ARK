@@ -729,7 +729,13 @@ function deleteCurrentSession() {
 
 document.addEventListener('DOMContentLoaded', function() {
   applyAIStatus(initialAIStatus);
-  loadAskSessions('');
+  var urlSid = new URLSearchParams(location.search).get('session') || '';
+  if (urlSid) {
+    loadAskSessions(urlSid);
+    switchAskSession(urlSid);
+  } else {
+    loadAskSessions('');
+  }
   updateSessionButtons();
   updateContextGauge(0, defaultContextMax);
   renderPreloadZIMChip();

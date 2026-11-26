@@ -3378,3 +3378,173 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalHomeSearchAndAutocorrect(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ark-search-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "ark.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+		CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+		CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT DEFAULT '', error_msg TEXT DEFAULT '', bytes_downloaded INTEGER DEFAULT 0, total_bytes INTEGER DEFAULT 0, eta_seconds INTEGER DEFAULT 0, metadata TEXT DEFAULT '{}', created_at DATETIME, updated_at DATETIME, completed_at DATETIME);
+		CREATE TABLE catalog_items (id TEXT PRIMARY KEY, title TEXT, category TEXT, language TEXT, size_bytes INTEGER, date TEXT, flavour TEXT, url TEXT, is_downloaded BOOLEAN, file_path TEXT, created_at DATETIME);
+		CREATE TABLE app_states (id TEXT PRIMARY KEY, name TEXT, category TEXT, image TEXT, container_id TEXT, status TEXT, port INTEGER, proxy_mode TEXT, auto_start BOOLEAN, created_at DATETIME, updated_at DATETIME);
+	`); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	// 1. Seed Library file with unique content that must NEVER be searched inside.
+	docsDir := filepath.Join(tmpDir, "media", "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "Emergency_First_Aid_Manual.txt"), []byte("ZEBRA_UNIQUE_BODY_CONTENT_9911\n"), 0644); err != nil {
+		t.Fatalf("write lib file: %v", err)
+	}
+
+	// 2. Seed installed Map (.pmtiles) and Map Pin
+	mapsDir := filepath.Join(tmpDir, "maps")
+	if err := os.MkdirAll(mapsDir, 0755); err != nil {
+		t.Fatalf("mkdir maps: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mapsDir, "north_cascades.pmtiles"), []byte("PMTiles"), 0644); err != nil {
+		t.Fatalf("write pmtiles: %v", err)
+	}
+	srv.ensureMapMarkersTable()
+	if _, err := srv.db.Exec(`INSERT INTO map_markers (id, title, lat, lng, category, note) VALUES ('pin-1', 'Base Camp Spring', 48.5, -121.2, 'water', 'clean mountain spring')`); err != nil {
+		t.Fatalf("insert map pin: %v", err)
+	}
+
+	// 3. Seed Mesh Node
+	srv.ensureMeshTables()
+	if _, err := srv.db.Exec(`INSERT INTO mesh_nodes (node_id, short_name, long_name, hardware, protocol) VALUES ('!aabbccdd', 'ALPH', 'AlphaRelay Mountain', 'T-Beam', 'Meshtastic')`); err != nil {
+		t.Fatalf("insert mesh node: %v", err)
+	}
+
+	// 4. Seed Bulletin entry
+	srv.ensureLANDropTable()
+	if _, err := srv.db.Exec(`INSERT INTO lan_posts (id, author, category, message) VALUES ('post-1', 'Alex', 'Resource', 'Generator spare parts available at shed')`); err != nil {
+		t.Fatalf("insert bulletin post: %v", err)
+	}
+
+	// 5. Seed AI Chat session + first prompt
+	if err := ai.EnsureChatSchema(t.Context(), srv.db); err != nil {
+		t.Fatalf("EnsureChatSchema: %v", err)
+	}
+	if _, err := srv.db.Exec(`INSERT INTO ai_chat_sessions (id, title) VALUES ('sess-water', 'Water Filtration Methods')`); err != nil {
+		t.Fatalf("insert chat session: %v", err)
+	}
+	if _, err := srv.db.Exec(`INSERT INTO ai_chat_messages (session_id, role, content) VALUES ('sess-water', 'user', 'How to purify creek water safely?')`); err != nil {
+		t.Fatalf("insert chat message: %v", err)
+	}
+
+	// 6. Seed Drug Labels SQLite
+	dlDir := filepath.Join(tmpDir, "druglabels")
+	if err := os.MkdirAll(dlDir, 0755); err != nil {
+		t.Fatalf("mkdir druglabels: %v", err)
+	}
+	dlDB, err := sql.Open("sqlite", filepath.Join(dlDir, "druglabels.db"))
+	if err != nil {
+		t.Fatalf("open druglabels db: %v", err)
+	}
+	if _, err := dlDB.Exec(`CREATE TABLE labels (id INTEGER PRIMARY KEY, brand_name TEXT, generic_name TEXT, imprint TEXT); INSERT INTO labels (brand_name, generic_name, imprint) VALUES ('Advil', 'Ibuprofen', 'ADVIL 200');`); err != nil {
+		dlDB.Close()
+		t.Fatalf("seed druglabels db: %v", err)
+	}
+	dlDB.Close()
+
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes failed: %v", err)
+	}
+
+	querySearch := func(rawQ string, exact bool) (string, []GlobalSearchResult) {
+		u := "/api/search?q=" + url.QueryEscape(rawQ)
+		if exact {
+			u += "&exact=1"
+		}
+		req := httptest.NewRequest(http.MethodGet, u, nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", u, w.Code, w.Body.String())
+		}
+		var payload struct {
+			Query          string               `json:"query"`
+			CorrectedQuery string               `json:"corrected_query"`
+			Results        []GlobalSearchResult `json:"results"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode %s JSON: %v", u, err)
+		}
+		return payload.CorrectedQuery, payload.Results
+	}
+
+	hasCat := func(res []GlobalSearchResult, cat, wantURLSub string) bool {
+		for _, r := range res {
+			if r.Category == cat && (wantURLSub == "" || strings.Contains(r.URL, wantURLSub)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Home page embeds live search input and /api/search hook
+	homeReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	homeW := httptest.NewRecorder()
+	mux.ServeHTTP(homeW, homeReq)
+	if homeW.Code != http.StatusOK || !strings.Contains(homeW.Body.String(), "home-search-input") || !strings.Contains(homeW.Body.String(), "/api/search") {
+		t.Fatalf("expected home page to render live search UI (status=%d)", homeW.Code)
+	}
+
+	// Verify content inside library files is NEVER matched
+	_, bodyHits := querySearch("ZEBRA_UNIQUE_BODY_CONTENT_9911", true)
+	if len(bodyHits) != 0 {
+		t.Errorf("expected library file body content to be excluded from search, got %+v", bodyHits)
+	}
+
+	// Verify all 8 subsystems match relevant queries and return valid local URLs
+	cases := []struct {
+		query   string
+		cat     string
+		urlSub  string
+	}{
+		{"First Aid", "Library", "/media/docs/Emergency_First_Aid_Manual.txt"},
+		{"dosage", "Calculator", "/tools?calc=dosage"},
+		{"cascades", "Map", "/maps?place=north_cascades"},
+		{"Base Camp", "Map Pin", "/maps?lat="},
+		{"aloe", "Remedy", "/field-guide?q="},
+		{"AlphaRelay", "Mesh Node", "/mesh"},
+		{"Generator", "Bulletin", "/lan-drop"},
+		{"Filtration", "AI Chat", "/ask?session=sess-water"},
+		{"Ibuprofen", "Drug Label", "/ask?q=Advil"},
+	}
+	for _, tc := range cases {
+		_, hits := querySearch(tc.query, false)
+		if !hasCat(hits, tc.cat, tc.urlSub) {
+			t.Errorf("query %q expected category %q containing %q, got %+v", tc.query, tc.cat, tc.urlSub, hits)
+		}
+	}
+
+	// Verify offline autocorrect fixes typos and &exact=1 disables it
+	corr, corrHits := querySearch("ibuprofn", false)
+	if corr != "ibuprofen" || !hasCat(corrHits, "Drug Label", "") {
+		t.Errorf("expected typo 'ibuprofn' to autocorrect to 'ibuprofen' with Drug Label hit, got corrected=%q hits=%+v", corr, corrHits)
+	}
+	exactCorr, _ := querySearch("ibuprofn", true)
+	if exactCorr != "" {
+		t.Errorf("expected exact=1 to suppress autocorrect, got %q", exactCorr)
+	}
+}

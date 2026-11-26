@@ -2331,6 +2331,8 @@ fetch('/api/maps/pins').then(function(r) { return r.json(); }).then(function(d) 
   };
 
   restoreToolsState();
+  var urlCalc = new URLSearchParams(location.search).get('calc');
+  if (urlCalc) showCalcTab(urlCalc);
   renderExprRows();
   setTimeout(function() { gcDraw(); syncExprNotes(); gcRenderTable(); }, 30);
 })();
