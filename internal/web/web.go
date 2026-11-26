@@ -117,6 +117,7 @@ type PageData struct {
 	StorageOtherPercent uint64
 	ArkDataUsedText     string
 	Jobs                []JobView
+	DownloadedFiles     []DownloadedFileView
 	Items               []LibraryItemView
 	InstalledApps       []AppView
 	AvailableApps       []AppView
@@ -179,6 +180,12 @@ type PageData struct {
 	TLSCertReady               bool
 	UpdateSigningKeyConfigured bool
 	UITheme                    string
+}
+
+// DownloadedFileView represents a downloaded content file listed on /system.
+type DownloadedFileView struct {
+	Name    string
+	RelPath string
 }
 
 // LANDropDeviceView summarizes a connected LAN/local device for /lan-drop.

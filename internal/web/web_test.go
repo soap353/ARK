@@ -69,8 +69,8 @@ func TestNewServerAndRoutes(t *testing.T) {
 		{"/healthz", http.StatusOK, `"status":"ok"`},
 		{"/", http.StatusOK, "ConvertX"},
 		{"/library", http.StatusOK, "Check ZIM Updates"},
-		{"/kiwix", http.StatusOK, "Open Local ZIM Reader"},
-		{"/get-content", http.StatusOK, "Open Local ZIM Reader"},
+		{"/kiwix", http.StatusOK, "Search Kiwix Catalog"},
+		{"/get-content", http.StatusOK, "Download Prepper Starter Pack"},
 		{"/field-guide", http.StatusOK, "Search Remedy"},
 		{"/apps", http.StatusOK, "<th>Module</th>"},
 		{"/ask", http.StatusOK, "Knowledge Index"},
@@ -3546,5 +3546,133 @@ func TestGlobalHomeSearchAndAutocorrect(t *testing.T) {
 	exactCorr, _ := querySearch("ibuprofn", true)
 	if exactCorr != "" {
 		t.Errorf("expected exact=1 to suppress autocorrect, got %q", exactCorr)
+	}
+}
+
+func TestDownloadedListDeleteMapsAndCatalogCleanup(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ark-sys-del-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	db, err := sql.Open("sqlite", filepath.Join(tmpDir, "ark.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+		CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+		CREATE TABLE jobs (id TEXT PRIMARY KEY, type TEXT, target TEXT, status TEXT, progress REAL, progress_msg TEXT DEFAULT '', error_msg TEXT DEFAULT '', bytes_downloaded INTEGER DEFAULT 0, total_bytes INTEGER DEFAULT 0, eta_seconds INTEGER DEFAULT 0, metadata TEXT DEFAULT '{}', created_at DATETIME, updated_at DATETIME, completed_at DATETIME);
+		CREATE TABLE catalog_items (id TEXT PRIMARY KEY, title TEXT, category TEXT, language TEXT, size_bytes INTEGER, date TEXT, flavour TEXT, url TEXT, is_downloaded BOOLEAN, file_path TEXT, created_at DATETIME);
+		CREATE TABLE app_states (id TEXT PRIMARY KEY, name TEXT, category TEXT, image TEXT, container_id TEXT, status TEXT, port INTEGER, proxy_mode TEXT, auto_start BOOLEAN, created_at DATETIME, updated_at DATETIME);
+		CREATE TABLE usb_profiles (id TEXT PRIMARY KEY, name TEXT, description TEXT, config_json TEXT, created_at DATETIME);
+		CREATE TABLE rag_documents (id TEXT PRIMARY KEY, source_type TEXT, source_path TEXT, title TEXT, indexed_pages INTEGER, qdrant_collection TEXT, indexed_at DATETIME);
+		CREATE TABLE rag_chunks (doc_id TEXT, chunk_index INTEGER, text TEXT);
+	`); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	// Seed downloaded files + partial/metadata files that should be excluded from Downloaded Content.
+	for _, sub := range []string{"zim", "zim/.icons", "maps", "media/docs", "druglabels"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, filepath.FromSlash(sub)), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(tmpDir, "zim", "library.xml"), []byte("<library/>"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "zim", ".icons", "test.png"), []byte("png"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "maps", "partial.pmtiles.part"), []byte("partial"), 0644)
+	mapFile := filepath.Join(tmpDir, "maps", "ireland.pmtiles")
+	docFile := filepath.Join(tmpDir, "media", "docs", "field_notes.txt")
+	dlFile := filepath.Join(tmpDir, "druglabels", "druglabels.db")
+	for _, f := range []string{mapFile, docFile, dlFile} {
+		if err := os.WriteFile(f, []byte("test-data"), 0644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	srv, err := NewServer(db, tmpDir)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	mux := http.NewServeMux()
+	if err := srv.RegisterRoutes(mux); err != nil {
+		t.Fatalf("RegisterRoutes: %v", err)
+	}
+
+	getPage := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", path, w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+
+	// 1. /get-content & /kiwix top action buttons removed
+	gcBody := getPage("/get-content")
+	if strings.Contains(gcBody, "Open Local ZIM Reader") {
+		t.Errorf("expected Open Local ZIM Reader button removed from /get-content")
+	}
+	kxBody := getPage("/kiwix")
+	if strings.Contains(kxBody, "Installed Library") || strings.Contains(kxBody, "Open Local ZIM Reader") {
+		t.Errorf("expected Installed Library / Open Local ZIM Reader buttons removed from /kiwix")
+	}
+
+	// 2. /maps download cards omit street-level labels and country/region pills
+	mapsBody := getPage("/maps")
+	startGrid := strings.Index(mapsBody, `id="extract-grid"`)
+	endGrid := strings.Index(mapsBody[startGrid:], `<script`)
+	gridHTML := mapsBody[startGrid : startGrid+endGrid]
+	if strings.Contains(gridHTML, "Street &amp; Building") || strings.Contains(gridHTML, "Street Detail") || strings.Contains(gridHTML, `class="badge"`) {
+		t.Errorf("expected #extract-grid to exclude street-level labels and country/region badge pills")
+	}
+	if !strings.Contains(gridHTML, "<strong>United Kingdom</strong>") || !strings.Contains(gridHTML, "<strong>Alabama</strong>") || !strings.Contains(gridHTML, "Zoom 0&ndash;15") {
+		t.Errorf("expected #extract-grid to include area name and Zoom 0-15 range")
+	}
+
+	// 3. /system Downloaded Content list placed between Session Jobs and App Containers + confirmation dialog
+	sysBody := getPage("/system")
+	jobsIdx := strings.Index(sysBody, `id="recent-jobs-card"`)
+	dlIdx := strings.Index(sysBody, `id="downloaded-files-card"`)
+	ctIdx := strings.Index(sysBody, `<h2>App Containers</h2>`)
+	if jobsIdx == -1 || dlIdx == -1 || ctIdx == -1 || !(jobsIdx < dlIdx && dlIdx < ctIdx) {
+		t.Fatalf("expected #downloaded-files-card between #recent-jobs-card and App Containers (%d < %d < %d)", jobsIdx, dlIdx, ctIdx)
+	}
+	if !strings.Contains(sysBody, `id="system-delete-dialog"`) || !strings.Contains(sysBody, "ireland.pmtiles") || !strings.Contains(sysBody, "field_notes.txt") || !strings.Contains(sysBody, "druglabels.db") {
+		t.Errorf("expected /system to list downloaded files and delete confirmation dialog")
+	}
+	if strings.Contains(sysBody, "partial.pmtiles.part") || strings.Contains(sysBody, "library.xml") {
+		t.Errorf("expected internal/partial files excluded from Downloaded Content list")
+	}
+
+	// Reject deleting non-content files (e.g. ark.db)
+	badForm := url.Values{"rel_path": {"ark.db"}, "redirect": {"/system"}}
+	badReq := httptest.NewRequest(http.MethodPost, "/api/library/delete", strings.NewReader(badForm.Encode()))
+	badReq.RemoteAddr = "127.0.0.1:12345"
+	badReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	badW := httptest.NewRecorder()
+	mux.ServeHTTP(badW, badReq)
+	if !strings.Contains(badW.Header().Get("Location"), "/system?err=") {
+		t.Errorf("expected non-content deletion rejected cleanly, got Location=%q", badW.Header().Get("Location"))
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "ark.db")); err != nil {
+		t.Errorf("expected ark.db to remain intact after rejected delete")
+	}
+
+	// Confirm deleting ireland.pmtiles succeeds and removes it from disk
+	delForm := url.Values{"rel_path": {"maps/ireland.pmtiles"}, "redirect": {"/system"}}
+	delReq := httptest.NewRequest(http.MethodPost, "/api/library/delete", strings.NewReader(delForm.Encode()))
+	delReq.RemoteAddr = "127.0.0.1:12345"
+	delReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	delW := httptest.NewRecorder()
+	mux.ServeHTTP(delW, delReq)
+	if delW.Code != http.StatusSeeOther || !strings.Contains(delW.Header().Get("Location"), "/system?msg=") {
+		t.Fatalf("expected 303 redirect to /system?msg=..., got %d (%q)", delW.Code, delW.Header().Get("Location"))
+	}
+	if _, err := os.Stat(mapFile); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be deleted from disk, stat err=%v", mapFile, err)
 	}
 }

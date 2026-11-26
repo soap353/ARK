@@ -27,6 +27,7 @@ import (
 	"ark/internal/fieldguide"
 	"ark/internal/jobs"
 	"ark/internal/kiwix"
+	"ark/internal/storage"
 )
 // MapArchiveView represents a .pmtiles archive on disk in ArkData/maps.
 type MapArchiveView struct {
@@ -146,33 +147,65 @@ func (s *Server) handleKiwixCatalogPage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAPILibraryDelete(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	rel := strings.TrimSpace(r.FormValue("rel_path"))
-	if rel == "" || s.dataDir == "" {
-		http.Redirect(w, r, "/library?err="+url.QueryEscape("Invalid file path"), http.StatusSeeOther)
+	redirectBase := "/library"
+	if strings.TrimSpace(r.FormValue("redirect")) == "/system" {
+		redirectBase = "/system"
+	}
+
+	rawRel := strings.TrimSpace(r.FormValue("rel_path"))
+	if rawRel == "" || s.dataDir == "" {
+		redirectWithQuery(w, r, redirectBase, "err", "Invalid file path")
+		return
+	}
+
+	cleanSlash := filepath.ToSlash(filepath.Clean(filepath.FromSlash(rawRel)))
+	low := strings.ToLower(cleanSlash)
+	allowedPrefix := strings.HasPrefix(low, "zim/") ||
+		strings.HasPrefix(low, "maps/") ||
+		strings.HasPrefix(low, "media/") ||
+		low == "druglabels/druglabels.db"
+	if !allowedPrefix || strings.Contains(low, "/.icons/") || low == "zim/library.xml" {
+		redirectWithQuery(w, r, redirectBase, "err", "Only downloaded content files can be deleted here")
 		return
 	}
 
 	absData, _ := filepath.Abs(s.dataDir)
-	targetPath := filepath.Clean(filepath.Join(absData, rel))
+	targetPath := filepath.Clean(filepath.Join(absData, filepath.FromSlash(cleanSlash)))
 	if !strings.HasPrefix(targetPath, absData+string(filepath.Separator)) {
-		http.Redirect(w, r, "/library?err="+url.QueryEscape("Path outside ArkData denied"), http.StatusSeeOther)
+		redirectWithQuery(w, r, redirectBase, "err", "Path outside ArkData denied")
 		return
 	}
 
-	_ = os.Remove(targetPath)
-	if strings.HasSuffix(strings.ToLower(targetPath), ".zim") {
-		lm := kiwix.NewLibraryManager(filepath.Join(s.dataDir, "zim", "library.xml"), "")
-		_ = lm.RemoveZIM(r.Context(), targetPath)
-		_ = lm.RemoveZIM(r.Context(), filepath.Base(targetPath))
+	// Evict open-metadata caches and cached ZIM icon tiles before removing file.
+	if strings.HasSuffix(low, ".zim") {
+		zimCacheMu.Lock()
+		if existing, ok := zimCache[targetPath]; ok && existing != nil {
+			existing.close()
+			delete(zimCache, targetPath)
+		}
+		zimCacheMu.Unlock()
+		stem := strings.TrimSuffix(filepath.Base(targetPath), filepath.Ext(targetPath))
+		iconBase := filepath.Join(s.dataDir, "zim", ".icons", stem)
+		_ = os.Remove(iconBase + ".png")
+		_ = os.Remove(iconBase + ".miss")
+	} else if strings.HasSuffix(low, ".pmtiles") {
+		pmIndexCacheMu.Lock()
+		delete(pmIndexCache, targetPath)
+		pmIndexCacheMu.Unlock()
 	}
-	if s.db != nil {
-		_, _ = s.db.Exec(`DELETE FROM catalog_items WHERE file_path = ? OR file_path = ?`, targetPath, filepath.Base(targetPath))
-	}
-	http.Redirect(w, r, "/library?msg="+url.QueryEscape("Removed "+filepath.Base(targetPath)), http.StatusSeeOther)
+
+	_, _ = storage.CascadeDelete(r.Context(), storage.DeleteCascadeConfig{
+		DataDir:        s.dataDir,
+		LibraryXMLPath: filepath.Join(s.dataDir, "zim", "library.xml"),
+		DB:             s.db,
+	}, storage.DeleteTarget{
+		FilePath: cleanSlash,
+	})
+
+	redirectWithQuery(w, r, redirectBase, "msg", "Deleted "+filepath.Base(targetPath))
 }
 
 func (s *Server) handleAPILibraryUpdates(w http.ResponseWriter, r *http.Request) {

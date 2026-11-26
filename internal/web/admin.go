@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -558,6 +559,56 @@ func (s *Server) handleSettingsShutdown(w http.ResponseWriter, r *http.Request) 
 // System Telemetry Page, Runtime Setup, Time & Storage Space Checks
 // ---------------------------------------------------------------------------
 
+func (s *Server) listDownloadedFiles() []DownloadedFileView {
+	if s.dataDir == "" {
+		return nil
+	}
+	var out []DownloadedFileView
+	seen := make(map[string]bool)
+	addItem := func(name, rel string) {
+		rel = filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel)))
+		low := strings.ToLower(rel)
+		if rel == "" || seen[low] || strings.Contains(low, "/.icons/") || filepath.Base(low) == "library.xml" {
+			return
+		}
+		if strings.HasSuffix(low, ".part") || strings.HasSuffix(low, ".aria2") || strings.HasSuffix(low, ".miss") {
+			return
+		}
+		seen[low] = true
+		out = append(out, DownloadedFileView{Name: name, RelPath: rel})
+	}
+
+	for _, cat := range []string{
+		storage.CategoryZim,
+		storage.CategoryMaps,
+		storage.CategoryVideo,
+		storage.CategoryMusic,
+		storage.CategoryBooks,
+		storage.CategoryDocs,
+	} {
+		files, err := storage.ListCategoryFiles(s.dataDir, cat)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			addItem(f.Name, f.Path)
+		}
+	}
+
+	if fi, err := os.Stat(filepath.Join(s.dataDir, "druglabels", "druglabels.db")); err == nil && !fi.IsDir() {
+		addItem("druglabels.db", "druglabels/druglabels.db")
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		li, lj := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if li != lj {
+			return li < lj
+		}
+		return out[i].RelPath < out[j].RelPath
+	})
+	return out
+}
+
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	var sv *SystemView
@@ -617,6 +668,8 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
 		Title:               "System",
 		ActiveNav:           "system",
+		FlashMsg:            strings.TrimSpace(r.URL.Query().Get("msg")),
+		FlashErr:            strings.TrimSpace(r.URL.Query().Get("err")),
 		SystemMetrics:       sv,
 		Containers:          containers,
 		DockerOnline:        rtOnline,
@@ -631,6 +684,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		StorageOtherPercent: otherPct,
 		ArkDataUsedText:     arkUsedText,
 		Jobs:                jobsList,
+		DownloadedFiles:     s.listDownloadedFiles(),
 		HasActiveJobs:       hasActive(jobsList),
 	}
 	s.render(w, r, "system.html", data)

@@ -12,6 +12,17 @@
   </form>
 </div>
 
+{{ if .FlashErr }}
+<div class="card" style="border-color: var(--color-error); padding: 0.85rem 1.25rem;">
+  <strong>Error:</strong> {{ .FlashErr }}
+</div>
+{{ end }}
+{{ if .FlashMsg }}
+<div class="card" style="border-color: var(--color-accent); padding: 0.85rem 1.25rem;">
+  <strong>{{ .FlashMsg }}</strong>
+</div>
+{{ end }}
+
 <div class="card" aria-label="System resource usage">
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
     <div style="padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg);">
@@ -170,6 +181,38 @@
   {{ end }}
 </section>
 
+<!-- Downloaded Content on Disk -->
+<section id="downloaded-files-card" class="card" aria-label="Downloaded Content">
+  <div class="card-header" style="margin-bottom: 0.75rem;">
+    <h2 style="margin: 0;">Downloaded Content</h2>
+  </div>
+  {{ if .DownloadedFiles }}
+  <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+    {{ range .DownloadedFiles }}
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--border-radius); background: var(--color-bg);">
+      <span style="word-break: break-word;">{{ .Name }}</span>
+      <button type="button" class="btn btn-danger" style="min-height: 32px; padding: 0.2rem 0.75rem; font-size: 13px; flex-shrink: 0;" data-path="{{ .RelPath }}" data-name="{{ .Name }}" onclick="openDeleteDownloadModal(this)" {{ if not $.IsLocal }}disabled title="Deletes are only available on the host computer"{{ end }}>Delete</button>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="secondary-text" style="margin: 0;">No downloaded files on disk yet.</p>
+  {{ end }}
+</section>
+
+<dialog id="system-delete-dialog" class="app-modal" aria-labelledby="sys-del-title">
+  <div style="padding: 1.25rem 1.35rem;">
+    <h3 id="sys-del-title" style="margin: 0 0 0.5rem; font-size: 19px;">Delete Downloaded File?</h3>
+    <p id="sys-del-msg" class="secondary-text" style="margin: 0 0 1.1rem; font-size: 14px;"></p>
+    <form action="/api/library/delete" method="POST" style="display: flex; justify-content: flex-end; gap: 0.5rem; margin: 0;">
+      <input type="hidden" id="sys-del-path" name="rel_path" value="">
+      <input type="hidden" name="redirect" value="/system">
+      <button type="button" class="btn" onclick="closeDeleteDownloadModal()">Cancel</button>
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+</dialog>
+
 <div class="card">
   <h2>App Containers</h2>
   {{ if .Containers }}
@@ -301,6 +344,31 @@ function refreshSystemRuntime() {
 refreshSystemRuntime();
 setInterval(refreshSystemRuntime, 3000);
 window.addEventListener('focus', refreshSystemRuntime);
+
+function openDeleteDownloadModal(btn) {
+  var dlg = document.getElementById('system-delete-dialog');
+  var msg = document.getElementById('sys-del-msg');
+  var pathInput = document.getElementById('sys-del-path');
+  if (!dlg || !msg || !pathInput) return;
+  var name = btn.getAttribute('data-name') || 'this file';
+  pathInput.value = btn.getAttribute('data-path') || '';
+  msg.textContent = 'Are you sure you want to permanently delete "' + name + '" from disk?';
+  if (dlg.showModal) {
+    dlg.showModal();
+  }
+}
+
+function closeDeleteDownloadModal() {
+  var dlg = document.getElementById('system-delete-dialog');
+  if (dlg && dlg.open && dlg.close) dlg.close();
+}
+
+var sysDelDlg = document.getElementById('system-delete-dialog');
+if (sysDelDlg) {
+  sysDelDlg.addEventListener('click', function(ev) {
+    if (ev.target === sysDelDlg) closeDeleteDownloadModal();
+  });
+}
 
 function loadLogs(appId) {
   const card = document.getElementById('logs-card');

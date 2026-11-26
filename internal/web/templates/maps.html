@@ -299,7 +299,7 @@
     <summary>
       <div>
         <h2 style="margin: 0;">Download Maps</h2>
-        <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 13.5px;">High-zoom street &amp; building <code>.pmtiles</code> maps (US states z0&ndash;15, countries z14&ndash;15, and world basemaps) saved to <code>data/maps/</code>.</p>
+        <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 13.5px;">Offline <code>.pmtiles</code> maps saved to <code>data/maps/</code>.</p>
       </div>
       <span class="extract-chevron" aria-hidden="true">&#9662;</span>
     </summary>
@@ -308,7 +308,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.65rem; margin-bottom: 0.8rem;">
         <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="extract-region-filters">
           <button type="button" class="btn btn-primary" data-region-filter="all" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">All</button>
-          <button type="button" class="btn" data-region-filter="US States (z15)" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">US States (z15)</button>
+          <button type="button" class="btn" data-region-filter="US States (z15)" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">US States</button>
           <button type="button" class="btn" data-region-filter="Global" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">World</button>
           <button type="button" class="btn" data-region-filter="North America" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">North America</button>
           <button type="button" class="btn" data-region-filter="Europe" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Europe</button>
@@ -322,11 +322,8 @@
         {{ range .CountryMaps }}
         <div class="extract-card" data-name="{{ .Name }}" data-region="{{ .Region }}" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
           <div>
-            <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
-              <strong>{{ .Name }}</strong>
-              <span class="badge" style="font-size: 11px;">{{ .Region }}</span>
-            </div>
-            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; {{ .MaxZoom }} &bull; {{ .SizeEstimate }}</div>
+            <strong>{{ .Name }}</strong>
+            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom 0&ndash;{{ .MaxZoom }} &bull; {{ .SizeEstimate }}</div>
           </div>
           <form action="/api/maps/extract" method="POST" style="margin: 0;">
             <input type="hidden" name="slug" value="{{ .Slug }}">
@@ -337,11 +334,8 @@
         {{ range .USStateMaps }}
         <div class="extract-card" data-name="{{ .Title }} US State" data-region="US States (z15)" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
           <div>
-            <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
-              <strong>{{ .Title }} (Street &amp; Building, z0&ndash;15)</strong>
-              <span class="badge" style="font-size: 11px;">US States (z15)</span>
-            </div>
-            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; 15 &bull; ~{{ .SizeMB }} MB</div>
+            <strong>{{ .Title }}</strong>
+            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom 0&ndash;15 &bull; ~{{ .SizeMB }} MB</div>
           </div>
           <form action="/api/jobs" method="POST" data-dl-label="{{ .Title }} Map" style="margin: 0;">
             <input type="hidden" name="type" value="map_pmtiles">
