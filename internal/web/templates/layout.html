@@ -8,6 +8,13 @@
   <link rel="icon" type="image/png" href="/static/ark-logo.png">
   <link rel="stylesheet" href="/static/ark.css">
   <script src="/static/htmx.min.js"></script>
+  <script>
+    window.arkEscapeHTML = function(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+      });
+    };
+  </script>
 </head>
 <body>
   <div class="mobile-bar">
@@ -258,12 +265,6 @@
           }
         });
     }
-
-    window.arkEscapeHTML = function(s) {
-      return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch) {
-        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
-      });
-    };
 
     document.addEventListener('submit', function(ev) {
       var form = ev.target;

@@ -3365,5 +3365,8 @@ func TestSecurityHeadersCSRFPINAllowlistAndPeerHardening(t *testing.T) {
 		if libW.Code != http.StatusOK || !strings.Contains(libW.Body.String(), `data-theme="`+tc.want+`"`) {
 			t.Errorf("expected /library to render data-theme=%q for submitted %q, got %d", tc.want, tc.submitted, libW.Code)
 		}
+		if defIdx, useIdx := strings.Index(libW.Body.String(), "window.arkEscapeHTML = function"), strings.Index(libW.Body.String(), "</head>"); defIdx == -1 || useIdx == -1 || defIdx > useIdx {
+			t.Errorf("expected window.arkEscapeHTML to be defined inside <head> before page scripts run")
+		}
 	}
 }

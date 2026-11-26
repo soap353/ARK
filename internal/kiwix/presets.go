@@ -31,7 +31,7 @@ type PresetBundle struct {
 var (
 	TierWikipediaTop100 = PresetTier{
 		ID:            "wikipedia-en-top100",
-		Name:          "Wikipedia (EN) — Top 100",
+		Name:          "Wikipedia (EN) â€” Top 100",
 		Description:   "Essential 100 articles with full media for ultra-compact storage.",
 		EstimatedSize: 300 * 1024 * 1024, // ~300 MB
 		KiwixQuery:    "wikipedia_en_top",
@@ -43,7 +43,7 @@ var (
 
 	TierWikipediaMini = PresetTier{
 		ID:            "wikipedia-en-mini",
-		Name:          "Wikipedia (EN) — Mini",
+		Name:          "Wikipedia (EN) â€” Mini",
 		Description:   "Curated lead summaries and essential articles (~12 GB).",
 		EstimatedSize: 12 * 1024 * 1024 * 1024,
 		KiwixQuery:    "wikipedia_en_all_mini",
@@ -55,7 +55,7 @@ var (
 
 	TierWikipediaNoPics = PresetTier{
 		ID:            "wikipedia-en-nopic",
-		Name:          "Wikipedia (EN) — No Pictures",
+		Name:          "Wikipedia (EN) â€” No Pictures",
 		Description:   "All English Wikipedia articles without images (~55 GB).",
 		EstimatedSize: 55 * 1024 * 1024 * 1024,
 		KiwixQuery:    "wikipedia_en_all_nopic",
@@ -67,7 +67,7 @@ var (
 
 	TierWikipediaFull = PresetTier{
 		ID:            "wikipedia-en-full",
-		Name:          "Wikipedia (EN) — Full (Maxi)",
+		Name:          "Wikipedia (EN) â€” Full (Maxi)",
 		Description:   "Complete English Wikipedia with all images and media (~110 GB).",
 		EstimatedSize: 110 * 1024 * 1024 * 1024,
 		KiwixQuery:    "wikipedia_en_all_maxi",
@@ -357,7 +357,7 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "6.8 GB",
 					IncludesTier: "medicine-standard",
 					Resources: []ContentResource{
-						zimRes("wikipedia_en_medicine_maxi", "Wikipedia Medicine", "Curated medical articles from Wikipedia with images", "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-01.zim", 2000),
+						zimRes("wikipedia_en_medicine_maxi", "Wikipedia Medicine", "Curated medical articles from Wikipedia with images", "https://download.kiwix.org/zim/wikipedia/wikipedia_en_medicine_maxi_2026-10.zim", 2000),
 						zimRes("libretexts.org_en_med", "LibreTexts Medicine", "Medical textbooks and clinical references", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_med_2025-01.zim", 1100),
 						zimRes("librepathology_en_all_maxi", "LibrePathology", "Open-access pathology reference with histology", "https://download.kiwix.org/zim/other/librepathology_en_all_maxi_2026-09.zim", 95),
 					},
@@ -392,8 +392,8 @@ func GetArkCollections() []ArkCollection {
 					IncludesTier: "survival-essential",
 					Resources: []ContentResource{
 						zimRes("www.ready.gov_en", "Ready.gov", "Official disaster preparedness plans and emergency checklists", "https://download.kiwix.org/zim/zimit/www.ready.gov_en_2024-12.zim", 2429),
-						zimRes("outdoors.stackexchange.com_en_all", "The Great Outdoors Q&A", "Wilderness navigation, shelter, and backcountry survival Q&A", "https://download.kiwix.org/zim/stack_exchange/outdoors.stackexchange.com_en_all_2026-02.zim", 142),
-						zimRes("ham.stackexchange.com_en_all", "Amateur Radio Q&A", "Emergency radio communications and antennas Q&A", "https://download.kiwix.org/zim/stack_exchange/ham.stackexchange.com_en_all_2026-02.zim", 75),
+						zimRes("outdoors.stackexchange.com_en_all", "The Great Outdoors Q&A", "Wilderness navigation, shelter, and backcountry survival Q&A", "https://download.kiwix.org/zim/stack_exchange/outdoors.stackexchange.com_en_all_2026-10.zim", 142),
+						zimRes("ham.stackexchange.com_en_all", "Amateur Radio Q&A", "Emergency radio communications and antennas Q&A", "https://download.kiwix.org/zim/stack_exchange/ham.stackexchange.com_en_all_2026-10.zim", 75),
 						zimRes("canadian-prepper_en_bugoutconcepts", "Canadian Prepper: Bug Out Concepts", "Evacuation planning and shelter videos", "https://download.kiwix.org/zim/videos/canadian-prepper_en_bugoutconcepts_2026-08.zim", 2886),
 						zimRes("urban-prepper_en_all", "Urban Prepper", "Urban disaster readiness and EDC planning videos", "https://download.kiwix.org/zim/videos/urban-prepper_en_all_2026-08.zim", 2245),
 					},
@@ -407,7 +407,7 @@ func GetArkCollections() []ArkCollection {
 					Resources: []ContentResource{
 						zimRes("canadian-prepper_en_preppingfood", "Canadian Prepper: Prepping Food", "Long-term food storage and preservation videos", "https://download.kiwix.org/zim/videos/canadian-prepper_en_preppingfood_2026-07.zim", 2160),
 						zimRes("zimgit-post-disaster_en", "Post Disaster Resource Library", "Field sanitation, shelter building, and recovery", "https://download.kiwix.org/zim/other/zimgit-post-disaster_en_2024-05.zim", 644),
-						zimRes("100r.co_en_all", "Hundred Rabbits", "Off-grid sailing, solar computing, and resilient tooling", "https://download.kiwix.org/zim/zimit/100r.co_en_all_2026-06.zim", 172),
+						zimRes("100r.co_en_all", "Hundred Rabbits", "Off-grid sailing, solar computing, and resilient tooling", "https://download.kiwix.org/zim/zimit/100r.co_en_all_2026-11.zim", 172),
 						zimRes("gutenberg_en_lcc-u", "Project Gutenberg: Military Science", "Classic strategy and logistics texts", "https://download.kiwix.org/zim/gutenberg/gutenberg_en_lcc-u_2026-03.zim", 1200),
 						zimRes("cd3wdproject.org_en_all", "CD3WD: Appropriate Technology Library", "Low-tech engineering, water, and self-reliance manuals", "https://download.kiwix.org/zim/zimit/cd3wdproject.org_en_all_2025-11.zim", 581),
 					},
@@ -438,7 +438,7 @@ func GetArkCollections() []ArkCollection {
 					IncludesTier: "education-essential",
 					Resources: []ContentResource{
 						zimRes("ted_mul_ted-ed", "TED-Ed", "Educational animations and structured lessons", "https://download.kiwix.org/zim/ted/ted_mul_ted-ed_2026-09.zim", 6381),
-						zimRes("wikiversity_en_all_maxi", "Wikiversity", "Open learning courses and workshops", "https://download.kiwix.org/zim/wikiversity/wikiversity_en_all_maxi_2026-02.zim", 2370),
+						zimRes("wikiversity_en_all_maxi", "Wikiversity", "Open learning courses and workshops", "https://download.kiwix.org/zim/wikiversity/wikiversity_en_all_maxi_2026-11.zim", 2370),
 						zimRes("libretexts.org_en_math", "LibreTexts Mathematics", "Open college mathematics textbooks", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_math_2026-01.zim", 792),
 						zimRes("libretexts.org_en_phys", "LibreTexts Physics", "Open physics textbooks and problem sets", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_phys_2026-01.zim", 534),
 						zimRes("libretexts.org_en_chem", "LibreTexts Chemistry", "Open chemistry textbooks and references", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_chem_2025-01.zim", 2180),
@@ -452,7 +452,7 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "46.4 GB",
 					IncludesTier: "education-standard",
 					Resources: []ContentResource{
-						zimRes("wikibooks_en_all_maxi", "Wikibooks (With Images)", "Illustrated open textbooks", "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-01.zim", 5400),
+						zimRes("wikibooks_en_all_maxi", "Wikibooks (With Images)", "Illustrated open textbooks", "https://download.kiwix.org/zim/wikibooks/wikibooks_en_all_maxi_2026-10.zim", 5400),
 						zimRes("ted_mul_ted-conference", "TED Conference", "Full library of TED conference talks", "https://download.kiwix.org/zim/ted/ted_mul_ted-conference_2026-09.zim", 18136),
 						zimRes("libretexts.org_en_human", "LibreTexts Humanities", "History, literature, and humanities textbooks", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_human_2025-01.zim", 3730),
 						zimRes("libretexts.org_en_geo", "LibreTexts Geosciences", "Earth science, geology, and climate texts", "https://download.kiwix.org/zim/libretexts/libretexts.org_en_geo_2026-01.zim", 1127),
@@ -475,8 +475,8 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:   "420 MB",
 					Recommended: true,
 					Resources: []ContentResource{
-						zimRes("woodworking.stackexchange.com_en_all", "Woodworking Q&A", "Joinery, tool tuning, and carpentry Q&A", "https://download.kiwix.org/zim/stack_exchange/woodworking.stackexchange.com_en_all_2026-02.zim", 99),
-						zimRes("mechanics.stackexchange.com_en_all", "Motor Vehicle Maintenance Q&A", "Auto and small-engine diagnostics and repair", "https://download.kiwix.org/zim/stack_exchange/mechanics.stackexchange.com_en_all_2026-02.zim", 321),
+						zimRes("woodworking.stackexchange.com_en_all", "Woodworking Q&A", "Joinery, tool tuning, and carpentry Q&A", "https://download.kiwix.org/zim/stack_exchange/woodworking.stackexchange.com_en_all_2026-10.zim", 99),
+						zimRes("mechanics.stackexchange.com_en_all", "Motor Vehicle Maintenance Q&A", "Auto and small-engine diagnostics and repair", "https://download.kiwix.org/zim/stack_exchange/mechanics.stackexchange.com_en_all_2026-10.zim", 321),
 					},
 				},
 				{
@@ -486,7 +486,7 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "2.3 GB",
 					IncludesTier: "diy-essential",
 					Resources: []ContentResource{
-						zimRes("diy.stackexchange.com_en_all", "DIY & Home Improvement Q&A", "Plumbing, electrical, framing, and household repair Q&A", "https://download.kiwix.org/zim/stack_exchange/diy.stackexchange.com_en_all_2026-02.zim", 1900),
+						zimRes("diy.stackexchange.com_en_all", "DIY & Home Improvement Q&A", "Plumbing, electrical, framing, and household repair Q&A", "https://download.kiwix.org/zim/stack_exchange/diy.stackexchange.com_en_all_2026-10.zim", 1900),
 					},
 				},
 				{
@@ -514,7 +514,7 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:   "40 MB",
 					Recommended: true,
 					Resources: []ContentResource{
-						zimRes("foss.cooking_en_all", "FOSS Cooking", "Open-source recipes and pantry meals", "https://download.kiwix.org/zim/zimit/foss.cooking_en_all_2026-02.zim", 24),
+						zimRes("foss.cooking_en_all", "FOSS Cooking", "Open-source recipes and pantry meals", "https://download.kiwix.org/zim/zimit/foss.cooking_en_all_2026-11.zim", 24),
 						zimRes("based.cooking_en_all", "Based.Cooking", "Minimalist scratch recipes without ads", "https://download.kiwix.org/zim/zimit/based.cooking_en_all_2026-08.zim", 16),
 					},
 				},
@@ -525,8 +525,8 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "1.3 GB",
 					IncludesTier: "agriculture-essential",
 					Resources: []ContentResource{
-						zimRes("gardening.stackexchange.com_en_all", "Gardening Q&A", "Soil, crop rotation, seed saving, and pest control Q&A", "https://download.kiwix.org/zim/stack_exchange/gardening.stackexchange.com_en_all_2026-02.zim", 923),
-						zimRes("cooking.stackexchange.com_en_all", "Cooking Q&A", "Culinary techniques and food safety Q&A", "https://download.kiwix.org/zim/stack_exchange/cooking.stackexchange.com_en_all_2026-02.zim", 236),
+						zimRes("gardening.stackexchange.com_en_all", "Gardening Q&A", "Soil, crop rotation, seed saving, and pest control Q&A", "https://download.kiwix.org/zim/stack_exchange/gardening.stackexchange.com_en_all_2026-10.zim", 923),
+						zimRes("cooking.stackexchange.com_en_all", "Cooking Q&A", "Culinary techniques and food safety Q&A", "https://download.kiwix.org/zim/stack_exchange/cooking.stackexchange.com_en_all_2026-10.zim", 236),
 						zimRes("zimgit-food-preparation_en", "Food for Preppers", "Canning, drying, and staple preservation manuals", "https://download.kiwix.org/zim/other/zimgit-food-preparation_en_2025-04.zim", 98),
 					},
 				},
@@ -570,10 +570,10 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "560 MB",
 					IncludesTier: "computing-essential",
 					Resources: []ContentResource{
-						zimRes("arduino.stackexchange.com_en_all", "Arduino Q&A", "Microcontroller wiring, sensors, and firmware Q&A", "https://download.kiwix.org/zim/stack_exchange/arduino.stackexchange.com_en_all_2026-02.zim", 247),
-						zimRes("raspberrypi.stackexchange.com_en_all", "Raspberry Pi Q&A", "SBC hardware, GPIO, and Linux setup Q&A", "https://download.kiwix.org/zim/stack_exchange/raspberrypi.stackexchange.com_en_all_2026-02.zim", 285),
+						zimRes("arduino.stackexchange.com_en_all", "Arduino Q&A", "Microcontroller wiring, sensors, and firmware Q&A", "https://download.kiwix.org/zim/stack_exchange/arduino.stackexchange.com_en_all_2026-10.zim", 247),
+						zimRes("raspberrypi.stackexchange.com_en_all", "Raspberry Pi Q&A", "SBC hardware, GPIO, and Linux setup Q&A", "https://download.kiwix.org/zim/stack_exchange/raspberrypi.stackexchange.com_en_all_2026-10.zim", 285),
 						zimRes("devdocs_en_node", "Node.js Documentation", "Node.js runtime reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_node_2026-08.zim", 1),
-						zimRes("devdocs_en_react", "React Documentation", "React components and hooks reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_react_2026-02.zim", 3),
+						zimRes("devdocs_en_react", "React Documentation", "React components and hooks reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_react_2026-11.zim", 3),
 						zimRes("devdocs_en_git", "Git Documentation", "Git CLI and workflow manual", "https://download.kiwix.org/zim/devdocs/devdocs_en_git_2026-07.zim", 2),
 					},
 				},
@@ -584,10 +584,10 @@ func GetArkCollections() []ArkCollection {
 					SizeLabel:    "4.5 GB",
 					IncludesTier: "computing-standard",
 					Resources: []ContentResource{
-						zimRes("electronics.stackexchange.com_en_all", "Electronics Q&A", "Circuit design, schematics, power, and RF engineering Q&A", "https://download.kiwix.org/zim/stack_exchange/electronics.stackexchange.com_en_all_2026-02.zim", 3800),
-						zimRes("robotics.stackexchange.com_en_all", "Robotics Q&A", "Actuators, control loops, and autonomous robotics Q&A", "https://download.kiwix.org/zim/stack_exchange/robotics.stackexchange.com_en_all_2026-02.zim", 233),
+						zimRes("electronics.stackexchange.com_en_all", "Electronics Q&A", "Circuit design, schematics, power, and RF engineering Q&A", "https://download.kiwix.org/zim/stack_exchange/electronics.stackexchange.com_en_all_2026-10.zim", 3800),
+						zimRes("robotics.stackexchange.com_en_all", "Robotics Q&A", "Actuators, control loops, and autonomous robotics Q&A", "https://download.kiwix.org/zim/stack_exchange/robotics.stackexchange.com_en_all_2026-10.zim", 233),
 						zimRes("devdocs_en_docker", "Docker Documentation", "Container and Compose reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_docker_2026-07.zim", 2),
-						zimRes("devdocs_en_bash", "Linux Documentation", "Bash shell and GNU utilities reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_bash_2026-01.zim", 1),
+						zimRes("devdocs_en_bash", "Linux Documentation", "Bash shell and GNU utilities reference", "https://download.kiwix.org/zim/devdocs/devdocs_en_bash_2026-10.zim", 1),
 					},
 				},
 			},
