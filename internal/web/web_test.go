@@ -1047,7 +1047,7 @@ func TestBuiltInNativeZIMReaderWithoutKiwixContainer(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	pageOut := w.Body.String()
-	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-download-html"`, `id="ark-page-pager"`, `id="ark-prev-page"`, `id="ark-next-page"`, `id="ark-current-page-label"`, `/read/zim/mini_wiki/C/Solar_Cell`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
+	for _, want := range []string{"Beta-lactam antibiotic.", `id="ark-proxy-nav"`, `id="ark-download-btn"`, `id="ark-download-pdf"`, `id="ark-download-html"`, `id="ark-page-pager"`, `id="ark-prev-page"`, `id="ark-next-page"`, `id="ark-current-page-label"`, `/read/zim/mini_wiki/C/Solar_Cell`, `id="ark-theme-sel"`, `highlightAIQuote`, `+ Add to AI`} {
 		if w.Code != http.StatusOK || !strings.Contains(pageOut, want) {
 			if want == `id="ark-prev-page"` {
 				continue // Main_Page may be first in sequence

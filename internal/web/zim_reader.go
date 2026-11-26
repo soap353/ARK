@@ -2458,6 +2458,55 @@ func arkThemeScriptTag(initialTheme string) string {
     } catch (e) {}
     applyOpenState(savedOpen, false);
   })();
+
+  (function setupDownloadMenu() {
+    var btn = document.getElementById('ark-download-btn');
+    var menu = document.getElementById('ark-download-menu');
+    var pdfBtn = document.getElementById('ark-download-pdf');
+    var htmlLink = document.getElementById('ark-download-html');
+    if (!btn || !menu) return;
+
+    function closeMenu() {
+      menu.style.display = 'none';
+      btn.setAttribute('aria-expanded', 'false');
+    }
+    function openMenu() {
+      var r = btn.getBoundingClientRect();
+      menu.style.display = 'flex';
+      menu.style.top = Math.round(r.bottom + 4) + 'px';
+      menu.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.left))) + 'px';
+      btn.setAttribute('aria-expanded', 'true');
+    }
+
+    btn.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      if (menu.style.display === 'flex') closeMenu();
+      else openMenu();
+    });
+    if (pdfBtn) {
+      pdfBtn.addEventListener('click', function() {
+        closeMenu();
+        window.print();
+      });
+    }
+    if (htmlLink) {
+      htmlLink.addEventListener('click', function() {
+        var u = new URL(location.href);
+        u.searchParams.set('download', '1');
+        htmlLink.href = u.toString();
+        closeMenu();
+      });
+    }
+    document.addEventListener('click', function(ev) {
+      if (menu.style.display === 'flex' && !menu.contains(ev.target) && ev.target !== btn) {
+        closeMenu();
+      }
+    });
+    document.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Escape') closeMenu();
+    });
+    window.addEventListener('resize', closeMenu);
+  })();
 })();
 </script>`
 }
@@ -2481,9 +2530,14 @@ func buildReaderNavHTML(stem string, hideAddToAI bool) string {
 		`<input type="search" name="q" list="ark-zim-suggest-list" placeholder="Search ` + safeStemAttr + `..." oninput="clearTimeout(window._azt);window._azt=setTimeout(()=>{var v=this.value.trim();if(v.length<2)return;(window.__arkFetch||window.fetch).call(window,'/api/zim/suggest?stem=` + escStem + `&q='+encodeURIComponent(v)).then(r=>r.json()).then(d=>{var dl=document.getElementById('ark-zim-suggest-list');if(!dl)return;dl.innerHTML='';(d.hits||[]).forEach(h=>{var o=document.createElement('option');o.value=h.title;dl.appendChild(o);});}).catch(()=>{});},180)" style="padding:4px 10px;border-radius:6px;border:1px solid #436153;background:#12201A;color:#F5F2EB;font-size:13px;min-width:170px;" required><datalist id="ark-zim-suggest-list"></datalist>` +
 		`<button type="submit" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;cursor:pointer;">Search</button>` +
 		`</form>` +
-		`<a id="ark-download-html" href="?download=1" onclick="var u=new URL(location.href);u.searchParams.set('download','1');this.href=u.toString();" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;">&#8595; Download HTML</a>` +
+		`<button id="ark-download-btn" type="button" aria-haspopup="true" aria-expanded="false" style="background:#2A4338;color:#F5F2EB;border:1px solid #436153;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">&#8595; Download &#9662;</button>` +
 		addBtn +
 		`</nav>` +
+		`<style>@media print{#ark-proxy-nav,#ark-toc-panel,#ark-page-pager,#ark-download-menu{display:none!important;}body{padding-top:0!important;padding-bottom:0!important;}}#ark-download-menu button:hover,#ark-download-menu a:hover{background:#2A4338!important;}</style>` +
+		`<div id="ark-download-menu" role="menu" style="position:fixed;top:48px;right:16px;min-width:172px;display:none;flex-direction:column;background:#16261F;color:#F5F2EB;border:1px solid #436153;border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.32);z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">` +
+		`<button id="ark-download-pdf" type="button" role="menuitem" style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;color:#F5F2EB;border:none;border-radius:6px;padding:7px 10px;font-size:13px;font-weight:500;cursor:pointer;">Download as PDF</button>` +
+		`<a id="ark-download-html" href="?download=1" role="menuitem" style="display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;text-align:left;background:transparent;color:#F5F2EB;border-radius:6px;padding:7px 10px;font-size:13px;font-weight:500;text-decoration:none;">Download as HTML</a>` +
+		`</div>` +
 		`<aside id="ark-toc-panel" data-stem="` + safeStemAttr + `" style="position:fixed;top:46px;left:0;bottom:0;width:290px;max-width:85vw;box-sizing:border-box;z-index:2147483646;background:#16261F;color:#F5F2EB;border-right:1px solid #2A4338;box-shadow:4px 0 18px rgba(0,0,0,.28);display:flex;flex-direction:column;transform:translateX(-100%);visibility:hidden;pointer-events:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">` +
 		`<div id="ark-toc-head" style="flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #2A4338;">` +
 		`<div style="min-width:0;"><div id="ark-toc-title" style="font-size:13px;font-weight:700;color:#F5F2EB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Table of Contents</div><div id="ark-toc-count" style="font-size:11px;color:#9BB5A8;">Collapsed</div></div>` +
