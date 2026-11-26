@@ -153,6 +153,7 @@ type PageData struct {
 	MapRegions                 []MapRegionView
 	CreatorVideoPacks   []kiwix.VideoCreatorPack
 	CountryMaps         []kiwix.CountryMapOption
+	USStateMaps         []kiwix.ContentResource
 	MapPins             []MapPinView
 	MapPinsJSON         template.JS
 	CustomOPDS          string

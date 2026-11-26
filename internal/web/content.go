@@ -109,6 +109,7 @@ func (s *Server) handleMapsViewer(w http.ResponseWriter, r *http.Request) {
 		SelectedMap:     selectedMap,
 		MapsRunning:     mapsRunning,
 		CountryMaps:     kiwix.GetCountryMapOptions(),
+		USStateMaps:     kiwix.GetAllUSStateMaps(),
 		MapPins:         pins,
 		MapPinsJSON:     template.JS(pinsJSON),
 		FlashMsg:        strings.TrimSpace(r.URL.Query().Get("msg")),

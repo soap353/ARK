@@ -1497,9 +1497,14 @@ func TestOfflineMapsViewerAndPMTiles(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body := w.Body.String()
-	for _, want := range []string{"maplibre-gl.js", "basemaps.js", "/maps/tiles/{z}/{x}/{y}.mvt", "test_nj.pmtiles", "Go Here"} {
+	for _, want := range []string{"maplibre-gl.js", "basemaps.js", "/maps/tiles/{z}/{x}/{y}.mvt", "test_nj.pmtiles", `id="extract-maps-details"`, "Download Maps"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected /maps HTML to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Installed Map Regions", `id="map-places-bar"`} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("expected /maps HTML not to contain %q", unwanted)
 		}
 	}
 

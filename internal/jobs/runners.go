@@ -1,7 +1,10 @@
 package jobs
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -15,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1256,38 +1260,216 @@ func (r *MapExtractRunner) Run(ctx context.Context, job *Job, progress ProgressF
 	}
 
 	absOutDir, _ := filepath.Abs(outDir)
-	args := []string{
-		"extract", remoteURL, outFile,
-		"--bbox=" + opt.BBox,
-		fmt.Sprintf("--maxzoom=%d", opt.MaxZoom),
-	}
+	tmpFile := outFile + ".tmp"
+	tmpAbs := filepath.Join(absOutDir, tmpFile)
+	finalAbs := filepath.Join(absOutDir, outFile)
+	_ = os.Remove(tmpAbs)
 
 	var cmd *exec.Cmd
-	if bin, lookErr := exec.LookPath("go-pmtiles"); lookErr == nil {
-		args[1] = remoteURL
-		args[2] = filepath.Join(absOutDir, outFile)
-		cmd = exec.CommandContext(ctx, bin, args...)
-	} else {
+	if bin := r.resolvePMTilesBin(ctx, absOutDir, progress); bin != "" {
+		cmd = exec.CommandContext(ctx, bin, "extract", remoteURL, tmpAbs, "--bbox="+opt.BBox, fmt.Sprintf("--maxzoom=%d", opt.MaxZoom))
+	} else if _, dkErr := exec.LookPath("docker"); dkErr == nil {
 		dockerArgs := []string{
 			"run", "--rm",
 			"-v", absOutDir + ":/data",
 			"ghcr.io/protomaps/go-pmtiles:latest",
-			"extract", remoteURL, "/data/" + outFile,
+			"extract", remoteURL, "/data/" + tmpFile,
 			"--bbox=" + opt.BBox,
 			fmt.Sprintf("--maxzoom=%d", opt.MaxZoom),
 		}
 		cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
+	} else {
+		return fmt.Errorf("go-pmtiles binary unavailable and docker not found")
 	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		_ = os.Remove(tmpAbs)
 		return fmt.Errorf("go-pmtiles extract failed: %v (%s)", err, strings.TrimSpace(string(output)))
+	}
+	if err := os.Rename(tmpAbs, finalAbs); err != nil {
+		_ = os.Remove(tmpAbs)
+		return fmt.Errorf("finalize %s: %w", outFile, err)
 	}
 
 	if progress != nil {
 		progress(100, "Saved "+outFile, 0, 0, 0)
 	}
 	return nil
+}
+
+func (r *MapExtractRunner) resolvePMTilesBin(ctx context.Context, absMapsDir string, progress ProgressFunc) string {
+	for _, name := range []string{"go-pmtiles", "pmtiles"} {
+		if bin, err := exec.LookPath(name); err == nil {
+			return bin
+		}
+	}
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	binDir := filepath.Join(filepath.Dir(absMapsDir), "bin")
+	localBin := filepath.Join(binDir, "pmtiles"+ext)
+	if fi, err := os.Stat(localBin); err == nil && !fi.IsDir() && fi.Size() > 1024 {
+		return localBin
+	}
+	if progress != nil {
+		progress(10, "Downloading official go-pmtiles extractor...", 0, 0, 0)
+	}
+	if err := downloadOfficialPMTilesCLI(ctx, binDir, localBin); err == nil {
+		return localBin
+	}
+	return ""
+}
+
+func downloadOfficialPMTilesCLI(ctx context.Context, binDir, destBin string) error {
+	osToken := "Linux"
+	switch runtime.GOOS {
+	case "windows":
+		osToken = "Windows"
+	case "darwin":
+		osToken = "Darwin"
+	}
+	archToken := "x86_64"
+	if runtime.GOARCH == "arm64" {
+		archToken = "arm64"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/protomaps/go-pmtiles/releases/latest", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+	resp, err := sharedProtomapsClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("release lookup HTTP %d", resp.StatusCode)
+	}
+	var rel struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return err
+	}
+	var assetURL, assetName string
+	for _, a := range rel.Assets {
+		if strings.Contains(a.Name, osToken) && strings.Contains(a.Name, archToken) {
+			assetURL = a.BrowserDownloadURL
+			assetName = a.Name
+			break
+		}
+	}
+	if assetURL == "" {
+		return fmt.Errorf("no go-pmtiles binary for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	dlClient := &http.Client{Timeout: 3 * time.Minute}
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	if err != nil {
+		return err
+	}
+	dlReq.Header.Set("User-Agent", "Ark-CommandCenter/1.0")
+	dlResp, err := dlClient.Do(dlReq)
+	if err != nil {
+		return err
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download archive HTTP %d", dlResp.StatusCode)
+	}
+
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return err
+	}
+	tmpArc, err := os.CreateTemp(binDir, "pmtiles-*")
+	if err != nil {
+		return err
+	}
+	tmpArcPath := tmpArc.Name()
+	defer os.Remove(tmpArcPath)
+	if _, err := io.Copy(tmpArc, dlResp.Body); err != nil {
+		tmpArc.Close()
+		return err
+	}
+	tmpArc.Close()
+
+	wantBase := filepath.Base(destBin)
+	tmpDest := destBin + ".tmp"
+	_ = os.Remove(tmpDest)
+
+	var extracted bool
+	if strings.HasSuffix(assetName, ".zip") {
+		zr, err := zip.OpenReader(tmpArcPath)
+		if err != nil {
+			return err
+		}
+		defer zr.Close()
+		for _, f := range zr.File {
+			base := filepath.Base(f.Name)
+			if base == wantBase || base == "go-pmtiles" || base == "go-pmtiles.exe" || base == "pmtiles" || base == "pmtiles.exe" {
+				rc, err := f.Open()
+				if err != nil {
+					return err
+				}
+				out, err := os.OpenFile(tmpDest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+				if err == nil {
+					_, err = io.Copy(out, rc)
+					out.Close()
+				}
+				rc.Close()
+				if err != nil {
+					return err
+				}
+				extracted = true
+				break
+			}
+		}
+	} else if strings.HasSuffix(assetName, ".tar.gz") {
+		f, err := os.Open(tmpArcPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return err
+		}
+		defer gz.Close()
+		tr := tar.NewReader(gz)
+		for {
+			hdr, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			base := filepath.Base(hdr.Name)
+			if hdr.Typeflag == tar.TypeReg && (base == wantBase || base == "go-pmtiles" || base == "pmtiles") {
+				out, err := os.OpenFile(tmpDest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+				if err != nil {
+					return err
+				}
+				_, cpyErr := io.Copy(out, tr)
+				out.Close()
+				if cpyErr != nil {
+					return cpyErr
+				}
+				extracted = true
+				break
+			}
+		}
+	}
+	if !extracted {
+		return fmt.Errorf("pmtiles executable not found inside %s", assetName)
+	}
+	return os.Rename(tmpDest, destBin)
 }
 
 func (r *MapExtractRunner) latestBuildKey(ctx context.Context) (string, error) {

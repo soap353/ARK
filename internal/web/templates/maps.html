@@ -27,20 +27,30 @@
     border-bottom: 1px solid var(--color-border);
     background: var(--color-surface);
   }
-  .map-places-bar {
+  .extract-details > summary {
+    list-style: none;
+    cursor: pointer;
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
     align-items: center;
-    padding: 0.55rem 1rem;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-bg);
+    justify-content: space-between;
+    gap: 0.75rem;
+    user-select: none;
   }
-  .place-pill {
-    min-height: 30px;
-    padding: 0.2rem 0.75rem;
+  .extract-details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .extract-chevron {
+    transition: transform 0.16s ease;
     font-size: 13px;
-    border-radius: 999px;
+    color: var(--color-text-secondary);
+  }
+  .extract-details[open] .extract-chevron {
+    transform: rotate(180deg);
+  }
+  .extract-body {
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--color-border);
   }
   .map-toolbar-group {
     display: flex;
@@ -142,26 +152,6 @@
     display: inline-block;
     flex-shrink: 0;
   }
-  .archive-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 0.85rem;
-  }
-  .archive-card {
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    padding: 0.9rem;
-    background: var(--color-bg);
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    gap: 0.65rem;
-  }
-  .archive-card.active-archive {
-    border-color: var(--color-accent);
-    background: var(--color-surface);
-    box-shadow: 0 0 0 1px var(--color-accent);
-  }
   .extract-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -230,15 +220,6 @@
       </div>
     </div>
 
-    {{ if .MapArchives }}
-    <div class="map-places-bar" id="map-places-bar">
-      <span class="secondary-text" style="font-size: 12px; font-weight: 600; margin-right: 0.25rem;">Installed Places ({{ len .MapArchives }} loaded):</span>
-      {{ range .MapArchives }}
-      <button type="button" class="btn place-pill {{ if eq $.SelectedMap .Name }}btn-primary{{ end }}" data-place-pill="{{ .Name }}" onclick="flyToPlace('{{ .Name }}')">{{ .Title }}</button>
-      {{ end }}
-    </div>
-    {{ end }}
-
     <div id="map-canvas-wrap" class="map-canvas-wrap">
       <div id="ark-map"></div>
       <div id="map-drop-banner" class="map-drop-banner">
@@ -251,22 +232,14 @@
       <div class="map-empty-overlay">
         <h2 style="margin-bottom: 0.5rem;">No Map Files Found</h2>
         <p class="secondary-text" style="max-width: 460px; margin-bottom: 1rem;">
-          Download a country or US state <code>.pmtiles</code> map file below (or from Get Content) to explore all your maps seamlessly offline.
+          Download a high-zoom US state, country, or world <code>.pmtiles</code> map file below (or from Get Content) to explore offline.
         </p>
         <div style="display: flex; gap: 0.65rem; flex-wrap: wrap; justify-content: center;">
-          <a href="#extract-maps" class="btn btn-primary">Download Country Map</a>
-          <a href="/get-content" class="btn">Browse US State Packs</a>
+          <button type="button" class="btn btn-primary" onclick="openDownloadMaps()">Download Maps</button>
+          <a href="/get-content" class="btn">Browse Regional Packs</a>
         </div>
       </div>
       {{ end }}
-    </div>
-
-    <div id="tilejson-panel" style="display:none; padding: 1rem; border-top: 1px solid var(--color-border); background: var(--color-surface);">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-        <h3 style="margin:0; font-size: 15px;">Archive Metadata / TileJSON</h3>
-        <button type="button" class="btn" style="min-height:30px; padding:0.15rem 0.65rem; font-size:12px;" onclick="document.getElementById('tilejson-panel').style.display='none'">Close</button>
-      </div>
-      <pre id="tilejson-output" style="background:var(--color-bg); padding:0.85rem; border-radius:6px; border:1px solid var(--color-border); overflow-x:auto; max-height:240px; font-size:12px; margin:0;"></pre>
     </div>
   </div>
 
@@ -320,75 +293,66 @@
   </aside>
 </div>
 
-<!-- Installed Map Regions -->
-<section class="card" aria-label="Installed Map Files">
-  <div class="card-header" style="margin-bottom: 0.85rem;">
-    <div>
-      <h2 style="margin: 0;">Installed Map Regions (All Active on Map)</h2>
-      <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 14px;">Every <code>.pmtiles</code> region below is loaded together seamlessly &mdash; click <strong>Go Here</strong> to jump right to a place.</p>
-    </div>
-    <a href="/get-content" class="btn">US Regional Packs &rarr;</a>
-  </div>
-
-  {{ if .MapArchives }}
-  <div class="archive-grid" id="archive-cards-grid">
-    {{ range .MapArchives }}
-    <div class="archive-card {{ if eq $.SelectedMap .Name }}active-archive{{ end }}" data-archive-card="{{ .Name }}">
+<!-- Collapsible Offline Map Downloader -->
+<section id="extract-maps" class="card" aria-label="Download Maps">
+  <details id="extract-maps-details" class="extract-details">
+    <summary>
       <div>
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem;">
-          <strong style="font-size: 15px;">{{ .Title }}</strong>
-          <span class="badge tabular" style="font-size: 11px;">z{{ .MinZoom }}&ndash;{{ .MaxZoom }}</span>
+        <h2 style="margin: 0;">Download Maps</h2>
+        <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 13.5px;">High-zoom street &amp; building <code>.pmtiles</code> maps (US states z0&ndash;15, countries z14&ndash;15, and world basemaps) saved to <code>data/maps/</code>.</p>
+      </div>
+      <span class="extract-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
+
+    <div class="extract-body">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.65rem; margin-bottom: 0.8rem;">
+        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="extract-region-filters">
+          <button type="button" class="btn btn-primary" data-region-filter="all" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">All</button>
+          <button type="button" class="btn" data-region-filter="US States (z15)" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">US States (z15)</button>
+          <button type="button" class="btn" data-region-filter="Global" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">World</button>
+          <button type="button" class="btn" data-region-filter="North America" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">North America</button>
+          <button type="button" class="btn" data-region-filter="Europe" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Europe</button>
+          <button type="button" class="btn" data-region-filter="Asia" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Asia &amp; Pacific</button>
+          <button type="button" class="btn" data-region-filter="Other" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Other Regions</button>
         </div>
-        <div class="secondary-text tabular" style="font-size: 12px; margin-top: 0.25rem; word-break: break-all;">{{ .FileName }} &bull; {{ .SizeText }}</div>
+        <input type="search" id="extract-search" class="form-control" style="max-width: 240px; min-height: 36px; padding: 0.3rem 0.7rem; font-size: 14px;" placeholder="Search states, countries...">
       </div>
-      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-        <button type="button" class="btn btn-primary" style="flex:1; min-height: 36px; padding: 0.2rem 0.75rem; font-size: 13px;" onclick="flyToPlace('{{ .Name }}', true)">Go Here</button>
-        <button type="button" class="btn" style="min-height: 36px; padding: 0.2rem 0.7rem; font-size: 13px;" onclick="inspectTileJSON('{{ .Name }}')">Details</button>
-      </div>
-    </div>
-    {{ end }}
-  </div>
-  {{ else }}
-  <p class="secondary-text" style="margin: 0;">No <code>.pmtiles</code> files installed yet. Download a country or world map below.</p>
-  {{ end }}
-</section>
 
-<!-- World & Country Map Downloader -->
-<section id="extract-maps" class="card" aria-label="Extract World or Country Map">
-  <div class="card-header" style="margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.65rem;">
-    <div>
-      <h2 style="margin: 0;">Download Country &amp; World Maps</h2>
-      <p class="secondary-text" style="margin: 0.2rem 0 0; font-size: 14px;">Extracts offline <code>.pmtiles</code> basemaps into <code>data/maps/</code> (added automatically to the live map).</p>
-    </div>
-    <input type="search" id="extract-search" class="form-control" style="max-width: 240px; min-height: 36px; padding: 0.3rem 0.7rem; font-size: 14px;" placeholder="Search countries or regions...">
-  </div>
-
-  <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem;" id="extract-region-filters">
-    <button type="button" class="btn btn-primary" data-region-filter="all" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">All</button>
-    <button type="button" class="btn" data-region-filter="Global" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">World</button>
-    <button type="button" class="btn" data-region-filter="North America" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">North America</button>
-    <button type="button" class="btn" data-region-filter="Europe" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Europe</button>
-    <button type="button" class="btn" data-region-filter="Asia" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Asia &amp; Pacific</button>
-    <button type="button" class="btn" data-region-filter="Other" style="min-height: 32px; padding: 0.15rem 0.75rem; font-size: 13px;">Other Regions</button>
-  </div>
-
-  <div class="extract-grid" id="extract-grid">
-    {{ range .CountryMaps }}
-    <div class="extract-card" data-name="{{ .Name }}" data-region="{{ .Region }}" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
-      <div>
-        <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
-          <strong>{{ .Name }}</strong>
-          <span class="badge" style="font-size: 11px;">{{ .Region }}</span>
+      <div class="extract-grid" id="extract-grid">
+        {{ range .CountryMaps }}
+        <div class="extract-card" data-name="{{ .Name }}" data-region="{{ .Region }}" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
+          <div>
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
+              <strong>{{ .Name }}</strong>
+              <span class="badge" style="font-size: 11px;">{{ .Region }}</span>
+            </div>
+            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; {{ .MaxZoom }} &bull; {{ .SizeEstimate }}</div>
+          </div>
+          <form action="/api/maps/extract" method="POST" style="margin: 0;">
+            <input type="hidden" name="slug" value="{{ .Slug }}">
+            <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 13px;">Download .pmtiles</button>
+          </form>
         </div>
-        <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; {{ .MaxZoom }} &bull; {{ .SizeEstimate }}</div>
+        {{ end }}
+        {{ range .USStateMaps }}
+        <div class="extract-card" data-name="{{ .Title }} US State" data-region="US States (z15)" style="border: 1px solid var(--color-border); border-radius: var(--border-radius); padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.6rem; background: var(--color-bg);">
+          <div>
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem; align-items: baseline;">
+              <strong>{{ .Title }} (Street &amp; Building, z0&ndash;15)</strong>
+              <span class="badge" style="font-size: 11px;">US States (z15)</span>
+            </div>
+            <div class="secondary-text tabular" style="font-size: 13px; margin-top: 0.25rem;">Zoom &le; 15 &bull; ~{{ .SizeMB }} MB</div>
+          </div>
+          <form action="/api/jobs" method="POST" data-dl-label="{{ .Title }} Map" style="margin: 0;">
+            <input type="hidden" name="type" value="map_pmtiles">
+            <input type="hidden" name="target" value="{{ .FallbackURL }}">
+            <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 13px;">Download .pmtiles</button>
+          </form>
+        </div>
+        {{ end }}
       </div>
-      <form action="/api/maps/extract" method="POST" style="margin: 0;">
-        <input type="hidden" name="slug" value="{{ .Slug }}">
-        <button type="submit" class="btn btn-primary" style="width: 100%; min-height: 36px; font-size: 13px;">Download .pmtiles</button>
-      </form>
     </div>
-    {{ end }}
-  </div>
+  </details>
 </section>
 
 <script src="/static/vendor/maps/maplibre-gl.js"></script>
@@ -561,6 +525,8 @@
       style: style,
       center: initCenter,
       zoom: 6,
+      minZoom: 0,
+      maxZoom: 20, // Smoothly overzooms vector tiles past archive native maxzoom down to building/block scale
       maxTileCacheSize: 40, // keep client decoded-tile RAM bounded on low-memory devices
       attributionControl: true
     });
@@ -622,20 +588,13 @@
     if (btn) btn.textContent = dropPinMode ? 'Cancel Pin' : '+ Drop Pin';
   };
 
-  window.flyToPlace = function(name, scrollToMap) {
+  window.flyToPlace = function(name) {
     var next = ARCHIVES.find(function(a) { return a.name === name; });
     if (!next) return;
     activeArchive = next;
 
     var sel = document.getElementById('map-place-select');
     if (sel) sel.value = next.name;
-
-    document.querySelectorAll('[data-place-pill]').forEach(function(pill) {
-      pill.classList.toggle('btn-primary', pill.getAttribute('data-place-pill') === next.name);
-    });
-    document.querySelectorAll('[data-archive-card]').forEach(function(card) {
-      card.classList.toggle('active-archive', card.getAttribute('data-archive-card') === next.name);
-    });
 
     try {
       var u = new URL(window.location.href);
@@ -645,15 +604,20 @@
     } catch (e) {}
 
     fitToBounds(next, false);
-    if (scrollToMap) {
-      document.getElementById('map-canvas-wrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  window.openDownloadMaps = function() {
+    var det = document.getElementById('extract-maps-details');
+    if (det) {
+      det.open = true;
+      det.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
   window.flyToPin = function(id) {
     var pin = PINS.find(function(p) { return p.id === id; });
     if (!pin || !map || isNaN(pin.lat) || isNaN(pin.lng)) return;
-    map.flyTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 11), speed: 1.4 });
+    map.flyTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 14), speed: 1.4 });
     var found = markerInstances.find(function(m) { return m._pinId === id; });
     if (found && found.getPopup && !found.getPopup().isOpen()) {
       found.togglePopup();
@@ -755,29 +719,9 @@
     .catch(function(err) { showToast(err.message, true); });
   };
 
-  window.inspectTileJSON = function(name) {
-    var target = name || (activeArchive && activeArchive.name);
-    if (!target) return;
-    var panel = document.getElementById('tilejson-panel');
-    var out = document.getElementById('tilejson-output');
-    panel.style.display = 'block';
-    out.textContent = 'Reading PMTiles metadata for ' + target + '...';
-    fetch('/api/maps/tilejson?name=' + encodeURIComponent(target))
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function(data) {
-        out.textContent = JSON.stringify(data, null, 2);
-      })
-      .catch(function(err) {
-        out.textContent = 'Could not read metadata: ' + err.message;
-      });
-  };
-
   var placeSelect = document.getElementById('map-place-select');
   if (placeSelect) {
-    placeSelect.addEventListener('change', function() { flyToPlace(this.value, false); });
+    placeSelect.addEventListener('change', function() { flyToPlace(this.value); });
   }
   var themeSelect = document.getElementById('map-theme-select');
   if (themeSelect) {
@@ -838,7 +782,7 @@
       var region = card.getAttribute('data-region') || '';
       var regionMatch = activeRegionFilter === 'all' ||
         (activeRegionFilter === 'Asia' && (region.indexOf('Asia') !== -1 || region.indexOf('Oceania') !== -1 || region.indexOf('Pacific') !== -1)) ||
-        (activeRegionFilter === 'Other' && ['Global', 'North America', 'Europe'].indexOf(region) === -1 && region.indexOf('Asia') === -1 && region.indexOf('Oceania') === -1) ||
+        (activeRegionFilter === 'Other' && ['Global', 'North America', 'Europe', 'US States (z15)'].indexOf(region) === -1 && region.indexOf('Asia') === -1 && region.indexOf('Oceania') === -1) ||
         region === activeRegionFilter;
       var qMatch = !q || name.indexOf(q) !== -1 || region.toLowerCase().indexOf(q) !== -1;
       card.style.display = (regionMatch && qMatch) ? 'flex' : 'none';
